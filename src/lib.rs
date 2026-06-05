@@ -1,0 +1,132 @@
+use nih_plug::prelude::*;
+use std::sync::Arc;
+
+pub mod dsp;
+pub mod meters;
+pub mod params;
+pub mod presets;
+pub mod ui;
+
+use dsp::Processor;
+use meters::Meters;
+use params::Cc22Params;
+
+pub struct Cc22 {
+    params: Arc<Cc22Params>,
+    meters: Arc<Meters>,
+    processor: Processor,
+}
+
+impl Default for Cc22 {
+    fn default() -> Self {
+        Self {
+            params: Arc::new(Cc22Params::default()),
+            meters: Arc::new(Meters::default()),
+            processor: Processor::default(),
+        }
+    }
+}
+
+impl Cc22 {
+    /// Prepare the DSP layer for a new host sample rate.
+    pub fn prepare(&mut self, sample_rate: f32) {
+        self.processor.prepare(sample_rate);
+    }
+
+    /// Clear runtime DSP state without allocating.
+    pub fn reset_dsp(&mut self) {
+        self.params.reset_smoothers();
+        self.processor.reset(self.params.global_bypass.value());
+    }
+
+    /// Process a host-provided block in place.
+    pub fn process_block(&mut self, buffer: &mut Buffer) {
+        self.processor
+            .process_block(buffer, &self.params, &self.meters);
+    }
+}
+
+impl Plugin for Cc22 {
+    const NAME: &'static str = "CC-22";
+    const VENDOR: &'static str = "Rafa Audio";
+    const URL: &'static str = "https://example.com/cc-22";
+    const EMAIL: &'static str = "info@example.com";
+    const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            aux_input_ports: &[],
+            aux_output_ports: &[],
+            names: PortNames::const_default(),
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(1),
+            ..AudioIOLayout::const_default()
+        },
+    ];
+
+    const MIDI_INPUT: MidiConfig = MidiConfig::None;
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
+    const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+
+    type SysExMessage = ();
+    type BackgroundTask = ();
+
+    fn params(&self) -> Arc<dyn Params> {
+        self.params.clone()
+    }
+
+    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        ui::create_editor(self.params.clone(), self.meters.clone(), async_executor)
+    }
+
+    fn initialize(
+        &mut self,
+        _audio_io_layout: &AudioIOLayout,
+        buffer_config: &BufferConfig,
+        _context: &mut impl InitContext<Self>,
+    ) -> bool {
+        self.prepare(buffer_config.sample_rate);
+        true
+    }
+
+    fn reset(&mut self) {
+        self.reset_dsp();
+    }
+
+    fn process(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        _context: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
+        self.process_block(buffer);
+        ProcessStatus::Normal
+    }
+}
+
+impl ClapPlugin for Cc22 {
+    const CLAP_ID: &'static str = "com.rafaaudio.cc22";
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("A modular boutique-style multi-FX base with smoothed global controls.");
+    const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
+    const CLAP_SUPPORT_URL: Option<&'static str> = None;
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Mono,
+        ClapFeature::Stereo,
+        ClapFeature::Utility,
+    ];
+}
+
+impl Vst3Plugin for Cc22 {
+    const VST3_CLASS_ID: [u8; 16] = *b"CC22RafaAudio001";
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Tools];
+}
+
+nih_export_clap!(Cc22);
+nih_export_vst3!(Cc22);
