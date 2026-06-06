@@ -33,7 +33,7 @@ pub(crate) fn top_bar(
                         brand_mark(ui, colors, theme);
                         ui.label(
                             RichText::new("CC-22")
-                                .font(FontId::proportional(31.0))
+                                .font(FontId::proportional(29.0))
                                 .strong()
                                 .color(theme.text_dark),
                         );
@@ -62,6 +62,12 @@ pub(crate) fn top_bar(
                 {
                     randomize_controls(setter, state, params);
                 }
+                if compact_button(ui, "SET", theme, colors.eq)
+                    .on_hover_text("Open settings")
+                    .clicked()
+                {
+                    state.settings_open = !state.settings_open;
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     global_bypass_button(ui, setter, &params.global_bypass, theme);
@@ -72,7 +78,7 @@ pub(crate) fn top_bar(
                         "DRY/WET",
                         colors.master,
                         theme,
-                        58.0,
+                        52.0,
                     );
                 });
             });

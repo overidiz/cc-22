@@ -1,16 +1,20 @@
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{
-    self, Align, Color32, CornerRadius, FontId, Pos2, Rect, RichText, Sense, Stroke, UiBuilder,
-    Vec2,
+    self, Align, Color32, CornerRadius, FontId, LayerId, Order, Pos2, Rect, RichText, Sense,
+    Stroke, StrokeKind, UiBuilder, Vec2,
 };
 
-use crate::{meters::Meters, params::Cc22Params};
+use crate::{dsp::chain::ChainModule, meters::Meters, params::Cc22Params};
 
 use super::{
     eq_view::eq_workbench,
     master_strip::master_strip,
     meters::UiState,
-    theme::{Look, Theme, CARD_HEIGHT, CARD_WIDTH, KNOB_SIZE},
+    signal_flow::{
+        card_shadow, drag_handle, paint_drop_indicator, paint_floating_card, position_badge,
+        signal_flow_arrow, signal_flow_label,
+    },
+    theme::{Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, KNOB_SIZE},
     widgets::{
         character_active, character_mode_label, character_mode_selector, colored_knob,
         diffusion_active, diffusion_mode_label, diffusion_mode_selector, draw_curve_icon,
@@ -20,12 +24,17 @@ use super::{
     },
 };
 
+const LIFT_AMOUNT: f32 = 3.0;
+
 struct ModuleCardSpec<'a> {
     title: &'static str,
     accent: Color32,
     active: bool,
     bypass: &'a BoolParam,
+    module: ChainModule,
 }
+
+// ── public entry point ──────────────────────────────────────────────────
 
 pub(crate) fn center_modules(
     ui: &mut egui::Ui,
@@ -39,301 +48,530 @@ pub(crate) fn center_modules(
     let colors = look.colors;
     let theme = look.theme;
     let meter_reading = state.next_meter_reading(meters, now);
+    let chain_order = params.chain_order();
+    let module_row_width = (CARD_WIDTH * 4.0) + (ui.spacing().item_spacing.x * 3.0);
+    let card_specs: [ModuleCardSpec<'_>; 4] = chain_order.map(|m| module_spec(m, params, colors));
 
+    // ── detect pointer & drag state ────────────────────────────────────
+    let pointer = ui.ctx().input(|i| i.pointer.latest_pos());
+    let pointer_x = pointer.map(|p| p.x);
+    let mut drag_finished = None;
+
+    if let Some(source) = state.drag_source {
+        if ui.ctx().input(|i| i.pointer.primary_released()) {
+            if let Some(target) = state.drag_hover_target {
+                drag_finished = Some((source, target));
+            }
+            state.drag_source = None;
+            state.drag_hover_target = None;
+        } else if let Some(px) = pointer_x {
+            let row_start_x = ui.cursor().min.x;
+            let gaps = ui.spacing().item_spacing.x;
+            let mut positions = [0.0_f32; 5];
+            positions[0] = row_start_x;
+            for i in 1..=4 {
+                positions[i] = positions[i - 1] + CARD_WIDTH + gaps;
+            }
+            let mut visual_midpoints = [0.0_f32; 4];
+            let mut slot_idx = 0;
+            for i in 0..4 {
+                if i == source {
+                    continue;
+                }
+                visual_midpoints[slot_idx] = (positions[slot_idx] + positions[slot_idx + 1]) * 0.5;
+                slot_idx += 1;
+            }
+            visual_midpoints[3] = positions[4];
+            let mut target = 4;
+            for i in 0..4 {
+                if px < visual_midpoints[i] {
+                    target = i;
+                    break;
+                }
+            }
+            let adjusted = if source < target {
+                target.saturating_sub(1)
+            } else {
+                target
+            };
+            state.drag_hover_target = Some(adjusted.min(3));
+        }
+    }
+
+    let just_finished = drag_finished.is_some();
+
+    // ── compute hover states for each card ─────────────────────────────
+    let mut card_hovered = [false; 4];
+    let mut card_rects: [Rect; 4] = [Rect::NOTHING; 4];
+    let row_start = ui.cursor().min.x;
+    let gaps = ui.spacing().item_spacing.x;
+    for pos in 0..4 {
+        let x = row_start + pos as f32 * (CARD_WIDTH + gaps);
+        let r = Rect::from_min_size(
+            Pos2::new(x, ui.cursor().min.y),
+            Vec2::new(CARD_WIDTH, CARD_HEIGHT),
+        );
+        card_rects[pos] = r;
+        card_hovered[pos] = pointer.map_or(false, |p| r.contains(p)) && state.drag_source.is_none();
+    }
+
+    // ── section header ─────────────────────────────────────────────────
+    let label_text = if state.drag_source.is_some() {
+        "SIGNAL FLOW \u{2014} DROP TO REORDER"
+    } else {
+        "SIGNAL FLOW \u{2014} DRAG TO REORDER"
+    };
+    signal_flow_label(
+        ui,
+        ui.cursor().min.y - 2.0,
+        module_row_width,
+        label_text,
+        theme.muted,
+    );
+
+    // ── render cards ───────────────────────────────────────────────────
     ui.horizontal_top(|ui| {
-        module_card(
-            ui,
-            setter,
-            theme,
-            now,
-            ModuleCardSpec {
-                title: "CHARACTER",
-                accent: colors.character,
-                active: character_active(params),
-                bypass: &params.character.bypass,
-            },
-            |ui| {
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.character.drive,
-                    "DRIVE",
-                    colors.character,
-                    theme,
-                    KNOB_SIZE,
-                );
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.character.tone,
-                    "TONE",
-                    colors.character,
-                    theme,
-                    KNOB_SIZE,
-                );
-                module_mode_summary(
-                    ui,
-                    character_mode_label(params.character.mode.value()),
-                    &["Clean", "Saturation", "Cassette"],
-                    colors.character,
-                    theme,
-                );
-                character_mode_selector(
-                    ui,
-                    setter,
-                    &params.character.mode,
-                    colors.character,
-                    theme,
-                );
-            },
-        );
+        center_fixed_width_row(ui, module_row_width);
+        for pos in 0..4 {
+            let is_dragged = state.drag_source == Some(pos);
+            let spec = &card_specs[pos];
+            let hovered = card_hovered[pos];
 
-        module_card(
-            ui,
-            setter,
-            theme,
-            now,
-            ModuleCardSpec {
-                title: "MOVEMENT",
-                accent: colors.movement,
-                active: movement_active(params),
-                bypass: &params.movement.bypass,
-            },
-            |ui| {
-                colored_knob(
+            let rect = if is_dragged {
+                let (r, _) =
+                    ui.allocate_exact_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT), Sense::hover());
+                let ghost_color = Color32::from_rgba_premultiplied(
+                    spec.accent.r(),
+                    spec.accent.g(),
+                    spec.accent.b(),
+                    28,
+                );
+                ui.painter()
+                    .rect_filled(r, CornerRadius::same(14), ghost_color);
+                ui.painter().rect_stroke(
+                    r,
+                    CornerRadius::same(14),
+                    Stroke::new(1.0, spec.accent.gamma_multiply(0.25)),
+                    StrokeKind::Inside,
+                );
+                ui.painter().text(
+                    r.center(),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{}", pos + 1),
+                    FontId::monospace(20.0),
+                    Color32::from_rgba_premultiplied(
+                        spec.accent.r(),
+                        spec.accent.g(),
+                        spec.accent.b(),
+                        60,
+                    ),
+                );
+                r
+            } else {
+                render_module_card(
                     ui,
                     setter,
-                    &params.movement.rate,
-                    "RATE",
-                    colors.movement,
                     theme,
-                    KNOB_SIZE,
-                );
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.movement.depth,
-                    "DEPTH",
-                    colors.movement,
-                    theme,
-                    KNOB_SIZE,
-                );
-                module_mode_summary(
-                    ui,
-                    movement_mode_label(params.movement.mode.value()),
-                    &["Off", "Chorus", "Vibrato", "Tremolo"],
-                    colors.movement,
-                    theme,
-                );
-                movement_mode_selector(ui, setter, &params.movement.mode, colors.movement, theme);
-            },
-        );
-
-        module_card(
-            ui,
-            setter,
-            theme,
-            now,
-            ModuleCardSpec {
-                title: "DIFFUSION",
-                accent: colors.diffusion,
-                active: diffusion_active(params),
-                bypass: &params.diffusion.bypass,
-            },
-            |ui| {
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.diffusion.time,
-                    "TIME",
-                    colors.diffusion,
-                    theme,
-                    KNOB_SIZE,
-                );
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.diffusion.feedback,
-                    "FEEDBACK",
-                    colors.diffusion,
-                    theme,
-                    KNOB_SIZE,
-                );
-                module_mode_summary(
-                    ui,
-                    diffusion_mode_label(params.diffusion.mode.value()),
-                    &["Off", "Delay", "Slap", "Reverb"],
-                    colors.diffusion,
-                    theme,
-                );
-                diffusion_mode_selector(
-                    ui,
-                    setter,
-                    &params.diffusion.mode,
-                    colors.diffusion,
-                    theme,
-                );
-            },
-        );
-
-        module_card(
-            ui,
-            setter,
-            theme,
-            now,
-            ModuleCardSpec {
-                title: "TEXTURE",
-                accent: colors.texture,
-                active: texture_active(params),
-                bypass: &params.texture.bypass,
-            },
-            |ui| {
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.texture.wow_depth,
-                    "WOW",
-                    colors.texture,
-                    theme,
-                    KNOB_SIZE,
-                );
-                colored_knob(
-                    ui,
-                    setter,
-                    &params.texture.flutter_depth,
-                    "FLUTTER",
-                    colors.texture,
-                    theme,
-                    KNOB_SIZE,
-                );
-                module_mode_summary(
-                    ui,
-                    texture_mode_label(params.texture.mode.value()),
-                    &["Off", "WowFlutter", "Noise", "Tape"],
-                    colors.texture,
-                    theme,
-                );
-                texture_mode_selector(ui, setter, &params.texture.mode, colors.texture, theme);
-            },
-        );
+                    now,
+                    spec,
+                    pos + 1,
+                    hovered,
+                    !just_finished,
+                    state,
+                    params,
+                )
+            };
+            card_rects[pos] = rect;
+        }
     });
 
-    ui.add_space(8.0);
+    // ── draw signal flow arrows ────────────────────────────────────────
+    let painter = ui.painter().clone();
+    for i in 0..3 {
+        let from = card_rects[i];
+        let to = card_rects[i + 1];
+        if from.is_positive() && to.is_positive() {
+            let from_right = Pos2::new(from.right(), from.center().y);
+            let to_left = Pos2::new(to.left(), to.center().y);
+            let near_drop = state.drag_source.is_some()
+                && state
+                    .drag_hover_target
+                    .map_or(false, |t| t == i || t == i + 1);
+            signal_flow_arrow(
+                &painter,
+                from_right,
+                to_left,
+                module_color(chain_order[i], colors),
+                near_drop,
+            );
+        }
+    }
+
+    // ── drop indicator + floating card ─────────────────────────────────
+    if let Some(source) = state.drag_source {
+        if let Some(mut target) = state.drag_hover_target {
+            if target > source {
+                target = (target + 1).min(4);
+            }
+            let row_start_x = card_rects
+                .first()
+                .map(|r| r.left())
+                .unwrap_or(ui.cursor().min.x);
+            let gaps = ui.spacing().item_spacing.x;
+            let indicator_x = if target == 0 {
+                row_start_x - gaps * 0.5
+            } else if target >= 4 {
+                card_rects[3].right() + gaps * 0.5
+            } else {
+                let left = card_rects
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != source)
+                    .nth(target - 1)
+                    .map(|(_, r)| r.right())
+                    .unwrap_or(row_start_x);
+                let right = card_rects
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != source)
+                    .nth(target)
+                    .map(|(_, r)| r.left())
+                    .unwrap_or(card_rects[3].right());
+                (left + right) * 0.5
+            };
+            if card_rects[0].is_positive() {
+                let overlay = ui.ctx().layer_painter(LayerId::new(
+                    Order::Foreground,
+                    egui::Id::new("drop-indicator"),
+                ));
+                paint_drop_indicator(
+                    &overlay,
+                    indicator_x,
+                    card_rects[0].top() - 2.0,
+                    CARD_HEIGHT + 4.0,
+                    module_color(chain_order[source], colors),
+                );
+            }
+        }
+        if let Some(ptr) = pointer {
+            let fp = ui.ctx().layer_painter(LayerId::new(
+                Order::Foreground,
+                egui::Id::new("floating-card"),
+            ));
+            let fw = CARD_WIDTH * 1.02;
+            let fh = CARD_HEIGHT * 1.02;
+            let float_rect =
+                Rect::from_center_size(ptr - Vec2::new(0.0, CARD_HEIGHT * 0.25), Vec2::new(fw, fh));
+            let spec = &card_specs[source];
+            paint_floating_card(&fp, float_rect, spec.accent, spec.title, source + 1);
+        }
+    }
+
+    // ── process drag completion ────────────────────────────────────────
+    if let Some((source, target)) = drag_finished {
+        if source != target {
+            let new_order = crate::dsp::chain::reorder_module(chain_order, source, target);
+            set_chain_params(setter, params, &new_order);
+        }
+    }
+
+    // ── EQ → OUT label ─────────────────────────────────────────────────
+    ui.add_space(4.0);
+    if card_rects[3].is_positive() {
+        let label_rect = egui::Rect::from_center_size(
+            Pos2::new(
+                card_rects[3].right() + 30.0,
+                card_rects[0].center().y + 24.0,
+            ),
+            Vec2::new(60.0, 14.0),
+        );
+        ui.painter().text(
+            label_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "\u{2192} EQ \u{2192} OUT",
+            FontId::monospace(7.5),
+            theme.muted,
+        );
+    }
+
+    // ── bottom row: EQ + Master ────────────────────────────────────────
+    ui.add_space(2.0);
+    let bottom_row_width = 690.0 + ui.spacing().item_spacing.x + 220.0;
     ui.horizontal_top(|ui| {
+        center_fixed_width_row(ui, bottom_row_width);
         eq_workbench(ui, setter, params, colors, theme);
         master_strip(ui, setter, params, meter_reading, colors.master, theme);
     });
 }
 
-fn module_mode_summary(
-    ui: &mut egui::Ui,
-    active_label: &'static str,
-    modes: &[&'static str],
-    accent: Color32,
-    theme: Theme,
-) {
-    ui.add_space(2.0);
-    let (bar_rect, _) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.0), Sense::hover());
-    ui.painter().rect_filled(
-        bar_rect,
-        CornerRadius::same(4),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 62),
-    );
-    ui.painter().text(
-        bar_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        active_label,
-        FontId::monospace(9.0),
-        theme.text_dark,
-    );
+// ── helpers ─────────────────────────────────────────────────────────────
 
-    ui.add_space(4.0);
-    for mode in modes.iter().take(5) {
-        ui.horizontal(|ui| {
-            let selected = *mode == active_label;
-            let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-            ui.painter().circle_filled(
-                dot_rect.center(),
-                if selected { 2.6 } else { 1.8 },
-                if selected { accent } else { theme.muted },
-            );
-            ui.label(
-                RichText::new(*mode)
-                    .font(FontId::monospace(8.0))
-                    .strong()
-                    .color(if selected {
-                        theme.text_dark
-                    } else {
-                        theme.muted
-                    }),
-            );
-        });
+fn set_chain_params(setter: &ParamSetter<'_>, params: &Cc22Params, order: &[ChainModule; 4]) {
+    for (i, &module) in order.iter().enumerate() {
+        let param = match i {
+            0 => &params.chain_slot_0,
+            1 => &params.chain_slot_1,
+            2 => &params.chain_slot_2,
+            _ => &params.chain_slot_3,
+        };
+        set_param(setter, param, module as i32);
     }
 }
 
-fn module_card<R>(
+fn module_color(module: ChainModule, colors: ModuleColors) -> Color32 {
+    match module {
+        ChainModule::Character => colors.character,
+        ChainModule::Movement => colors.movement,
+        ChainModule::Diffusion => colors.diffusion,
+        ChainModule::Texture => colors.texture,
+    }
+}
+
+fn module_spec<'a>(
+    module: ChainModule,
+    params: &'a Cc22Params,
+    colors: ModuleColors,
+) -> ModuleCardSpec<'a> {
+    match module {
+        ChainModule::Character => ModuleCardSpec {
+            title: "CHARACTER",
+            accent: colors.character,
+            active: character_active(params),
+            bypass: &params.character.bypass,
+            module,
+        },
+        ChainModule::Movement => ModuleCardSpec {
+            title: "MOVEMENT",
+            accent: colors.movement,
+            active: movement_active(params),
+            bypass: &params.movement.bypass,
+            module,
+        },
+        ChainModule::Diffusion => ModuleCardSpec {
+            title: "DIFFUSION",
+            accent: colors.diffusion,
+            active: diffusion_active(params),
+            bypass: &params.diffusion.bypass,
+            module,
+        },
+        ChainModule::Texture => ModuleCardSpec {
+            title: "TEXTURE",
+            accent: colors.texture,
+            active: texture_active(params),
+            bypass: &params.texture.bypass,
+            module,
+        },
+    }
+}
+
+fn center_fixed_width_row(ui: &mut egui::Ui, target_width: f32) {
+    let extra = ui.available_width() - target_width;
+    if extra > 0.0 {
+        ui.add_space(extra * 0.5);
+    }
+}
+
+// ── reorder arrow buttons ───────────────────────────────────────────────
+
+fn reorder_arrows(
+    ui: &mut egui::Ui,
+    card_rect: Rect,
+    position_num: usize,
+    accent: Color32,
+    theme: Theme,
+    setter: &ParamSetter<'_>,
+    params: &Cc22Params,
+) -> bool {
+    let btn_w = 18.0;
+    let btn_h = 14.0;
+    let y = card_rect.min.y + 10.0;
+    let gap = 4.0;
+
+    let left_center = Pos2::new(card_rect.min.x + 36.0, y + btn_h * 0.5);
+    let right_center = Pos2::new(card_rect.min.x + 36.0 + btn_w + gap, y + btn_h * 0.5);
+
+    let left_rect = Rect::from_center_size(left_center, Vec2::new(btn_w, btn_h));
+    let right_rect = Rect::from_center_size(right_center, Vec2::new(btn_w, btn_h));
+
+    let can_left = position_num > 1;
+    let can_right = position_num < 4;
+
+    let left_color = if can_left { accent } else { theme.muted };
+    let right_color = if can_right { accent } else { theme.muted };
+
+    // left arrow
+    ui.painter().rect_filled(
+        left_rect,
+        CornerRadius::same(4),
+        Color32::from_rgba_premultiplied(
+            left_color.r(),
+            left_color.g(),
+            left_color.b(),
+            if can_left { 50 } else { 20 },
+        ),
+    );
+    ui.painter().text(
+        left_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "\u{25C0}",
+        FontId::monospace(8.0),
+        left_color,
+    );
+
+    // right arrow
+    ui.painter().rect_filled(
+        right_rect,
+        CornerRadius::same(4),
+        Color32::from_rgba_premultiplied(
+            right_color.r(),
+            right_color.g(),
+            right_color.b(),
+            if can_right { 50 } else { 20 },
+        ),
+    );
+    ui.painter().text(
+        right_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "\u{25B6}",
+        FontId::monospace(8.0),
+        right_color,
+    );
+
+    let left_id = egui::Id::new(format!("reorder-left-{}", position_num));
+    let right_id = egui::Id::new(format!("reorder-right-{}", position_num));
+
+    let left_clicked = ui.interact(left_rect, left_id, Sense::click()).clicked() && can_left;
+    let right_clicked = ui.interact(right_rect, right_id, Sense::click()).clicked() && can_right;
+
+    if left_clicked || right_clicked {
+        let order = params.chain_order();
+        let src = position_num - 1;
+        let dst = if left_clicked {
+            src.saturating_sub(1)
+        } else {
+            (src + 1).min(3)
+        };
+        let new_order = crate::dsp::chain::reorder_module(order, src, dst);
+        set_chain_params(setter, params, &new_order);
+        return true;
+    }
+    false
+}
+
+// ── card rendering ──────────────────────────────────────────────────────
+
+fn render_module_card(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     theme: Theme,
     now: f64,
-    spec: ModuleCardSpec<'_>,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) {
+    spec: &ModuleCardSpec<'_>,
+    position_num: usize,
+    hovered: bool,
+    detect_drag: bool,
+    state: &mut UiState,
+    params: &Cc22Params,
+) -> Rect {
     let fill = if spec.active {
         theme.card
     } else {
         theme.card_dim
     };
+    let lift = if hovered { LIFT_AMOUNT } else { 0.0 };
+    let alloc_h = CARD_HEIGHT + 6.0;
 
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(CARD_WIDTH, alloc_h), Sense::hover());
+    let card_rect = Rect::from_min_size(
+        Pos2::new(rect.min.x, rect.min.y - lift),
+        Vec2::new(CARD_WIDTH, CARD_HEIGHT),
+    );
+
+    let shadow_accent = if hovered { Some(spec.accent) } else { None };
+    card_shadow(ui.painter(), card_rect, lift, shadow_accent);
+
+    let border_alpha: u8 = if hovered { 255 } else { 180 };
+    let border_color = if spec.active {
+        Color32::from_rgba_premultiplied(
+            spec.accent.r(),
+            spec.accent.g(),
+            spec.accent.b(),
+            border_alpha,
+        )
+    } else {
+        theme.card_edge
+    };
+    let card_bg = if hovered && !spec.active {
+        theme.card
+    } else {
+        fill
+    };
+
     ui.scope_builder(
         UiBuilder::new()
-            .max_rect(rect)
+            .max_rect(card_rect)
             .layout(egui::Layout::top_down(Align::Min)),
         |ui| {
             egui::Frame::new()
-                .fill(fill)
-                .stroke(Stroke::new(
-                    1.2,
-                    if spec.active {
-                        spec.accent
-                    } else {
-                        theme.card_edge
-                    },
-                ))
-                .corner_radius(CornerRadius::same(18))
-                .inner_margin(egui::Margin::same(10))
+                .fill(card_bg)
+                .stroke(Stroke::new(1.4, border_color))
+                .corner_radius(CornerRadius::same(14))
+                .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
-                    ui.set_width(CARD_WIDTH - 20.0);
-                    ui.set_min_height(CARD_HEIGHT - 20.0);
+                    ui.set_width(CARD_WIDTH - 16.0);
+                    ui.set_min_height(CARD_HEIGHT - 16.0);
+
+                    position_badge(
+                        ui,
+                        Pos2::new(card_rect.left() + 16.0, card_rect.top() + 12.0),
+                        position_num,
+                        spec.accent,
+                    );
+
+                    reorder_arrows(
+                        ui,
+                        card_rect,
+                        position_num,
+                        spec.accent,
+                        theme,
+                        setter,
+                        params,
+                    );
+
+                    let handle_resp =
+                        drag_handle(ui, card_rect, spec.accent, position_num, hovered);
+                    if detect_drag && handle_resp.drag_started() {
+                        state.drag_source = Some(position_num - 1);
+                        state.drag_hover_target = None;
+                    }
+
                     let header_rect = Rect::from_min_size(
                         ui.available_rect_before_wrap().min,
-                        Vec2::new(ui.available_width(), 30.0),
+                        Vec2::new(ui.available_width(), 26.0),
                     );
-                    ui.painter().rect_filled(
-                        header_rect,
-                        CornerRadius::same(7),
-                        if spec.active {
-                            spec.accent
-                        } else {
-                            theme.card_edge
-                        },
-                    );
+                    let header_accent = if spec.active {
+                        spec.accent
+                    } else if hovered {
+                        spec.accent.gamma_multiply(0.5)
+                    } else {
+                        theme.card_edge
+                    };
+                    ui.painter()
+                        .rect_filled(header_rect, CornerRadius::same(7), header_accent);
                     let cap_rect = Rect::from_min_size(
                         ui.available_rect_before_wrap().min,
-                        Vec2::new(ui.available_width(), 4.0),
+                        Vec2::new(ui.available_width(), 3.0),
                     );
-                    ui.painter().rect_filled(
-                        cap_rect,
-                        CornerRadius::same(3),
-                        if spec.active {
-                            spec.accent
-                        } else {
-                            theme.card_edge
-                        },
-                    );
-                    ui.add_space(8.0);
+                    let cap_accent = if spec.active {
+                        spec.accent
+                    } else if hovered {
+                        spec.accent.gamma_multiply(0.4)
+                    } else {
+                        theme.card_edge
+                    };
+                    ui.painter()
+                        .rect_filled(cap_rect, CornerRadius::same(3), cap_accent);
+                    ui.add_space(7.0);
+
                     module_header(
                         ui,
                         spec.title,
@@ -342,13 +580,14 @@ fn module_card<R>(
                         spec.bypass,
                         setter,
                         theme,
+                        hovered,
                     );
-                    ui.add_space(6.0);
-                    add_contents(ui);
+                    ui.add_space(4.0);
+                    render_module_content(ui, setter, spec, params, theme);
 
                     let icon_rect = Rect::from_min_size(
-                        Pos2::new(rect.right() - 58.0, rect.top() + 16.0),
-                        Vec2::new(46.0, 38.0),
+                        Pos2::new(card_rect.right() - 52.0, card_rect.top() + 13.0),
+                        Vec2::new(40.0, 32.0),
                     );
                     let icon_accent = if spec.active {
                         spec.accent
@@ -362,9 +601,15 @@ fn module_card<R>(
                         "TEXTURE" => draw_noise_icon(ui, icon_rect, icon_accent),
                         _ => {}
                     }
+
+                    if hovered {
+                        handle_resp.on_hover_text("\u{2195} Drag to change signal chain order");
+                    }
                 });
         },
     );
+
+    card_rect
 }
 
 fn module_header(
@@ -375,9 +620,16 @@ fn module_header(
     bypass: &BoolParam,
     setter: &ParamSetter<'_>,
     theme: Theme,
+    hovered: bool,
 ) {
     ui.horizontal(|ui| {
-        let led_color = if active { accent } else { theme.muted_dark };
+        let led_color = if active {
+            accent
+        } else if hovered {
+            accent.gamma_multiply(0.6)
+        } else {
+            theme.muted_dark
+        };
         let (led_rect, _) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::hover());
         ui.painter()
             .circle_filled(led_rect.center(), 4.0, led_color);
@@ -408,20 +660,199 @@ fn module_header(
             toggle_button(ui, setter, bypass, active, accent, theme);
         });
     });
-    ui.add_space(3.0);
+    ui.add_space(2.0);
     let line = Rect::from_min_size(
         Pos2::new(ui.min_rect().left(), ui.cursor().min.y),
         Vec2::new(ui.available_width(), 1.0),
     );
+    let line_alpha: u8 = if active {
+        95
+    } else if hovered {
+        50
+    } else {
+        28
+    };
     ui.painter().rect_filled(
         line,
         CornerRadius::same(1),
-        Color32::from_rgba_premultiplied(
-            accent.r(),
-            accent.g(),
-            accent.b(),
-            if active { 95 } else { 28 },
-        ),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), line_alpha),
     );
-    ui.add_space(5.0);
+    ui.add_space(4.0);
+}
+
+fn render_module_content(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    spec: &ModuleCardSpec<'_>,
+    params: &Cc22Params,
+    theme: Theme,
+) {
+    match spec.module {
+        ChainModule::Character => {
+            ui.horizontal(|ui| {
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.character.drive,
+                    "DRIVE",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.character.tone,
+                    "TONE",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+            });
+            module_mode_summary(
+                ui,
+                character_mode_label(params.character.mode.value()),
+                &["Clean", "Saturation", "Cassette"],
+                spec.accent,
+                theme,
+            );
+            character_mode_selector(ui, setter, &params.character.mode, spec.accent, theme);
+        }
+        ChainModule::Movement => {
+            ui.horizontal(|ui| {
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.movement.rate,
+                    "RATE",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.movement.depth,
+                    "DEPTH",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+            });
+            module_mode_summary(
+                ui,
+                movement_mode_label(params.movement.mode.value()),
+                &["Off", "Chorus", "Vibrato", "Tremolo"],
+                spec.accent,
+                theme,
+            );
+            movement_mode_selector(ui, setter, &params.movement.mode, spec.accent, theme);
+        }
+        ChainModule::Diffusion => {
+            ui.horizontal(|ui| {
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.diffusion.time,
+                    "TIME",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.diffusion.feedback,
+                    "FEEDBK",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+            });
+            module_mode_summary(
+                ui,
+                diffusion_mode_label(params.diffusion.mode.value()),
+                &["Off", "Delay", "Slap", "Reverb"],
+                spec.accent,
+                theme,
+            );
+            diffusion_mode_selector(ui, setter, &params.diffusion.mode, spec.accent, theme);
+        }
+        ChainModule::Texture => {
+            ui.horizontal(|ui| {
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.texture.wow_depth,
+                    "WOW",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+                colored_knob(
+                    ui,
+                    setter,
+                    &params.texture.flutter_depth,
+                    "FLUTTER",
+                    spec.accent,
+                    theme,
+                    KNOB_SIZE,
+                );
+            });
+            module_mode_summary(
+                ui,
+                texture_mode_label(params.texture.mode.value()),
+                &["Off", "WowFlutter", "Noise", "Tape"],
+                spec.accent,
+                theme,
+            );
+            texture_mode_selector(ui, setter, &params.texture.mode, spec.accent, theme);
+        }
+    }
+}
+
+fn module_mode_summary(
+    ui: &mut egui::Ui,
+    active_label: &'static str,
+    modes: &[&'static str],
+    accent: Color32,
+    theme: Theme,
+) {
+    ui.add_space(1.0);
+    let (bar_rect, _) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 14.0), Sense::hover());
+    ui.painter().rect_filled(
+        bar_rect,
+        CornerRadius::same(4),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 62),
+    );
+    ui.painter().text(
+        bar_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        active_label,
+        FontId::monospace(8.5),
+        theme.text_dark,
+    );
+    ui.add_space(3.0);
+    for mode in modes.iter().take(5) {
+        ui.horizontal(|ui| {
+            let selected = *mode == active_label;
+            let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
+            ui.painter().circle_filled(
+                dot_rect.center(),
+                if selected { 2.4 } else { 1.6 },
+                if selected { accent } else { theme.muted },
+            );
+            ui.label(
+                RichText::new(*mode)
+                    .font(FontId::monospace(7.5))
+                    .strong()
+                    .color(if selected {
+                        theme.text_dark
+                    } else {
+                        theme.muted
+                    }),
+            );
+        });
+    }
 }

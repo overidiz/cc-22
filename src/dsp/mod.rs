@@ -63,6 +63,8 @@ impl Processor {
         let mut input_peak = 0.0_f32;
         let mut output_peak = 0.0_f32;
 
+        let chain_order = params.chain_order();
+
         for channel_samples in buffer.iter_samples() {
             let input_gain = self
                 .input_gain
@@ -78,9 +80,12 @@ impl Processor {
                 let dry_sample = *sample;
                 input_peak = input_peak.max(dry_sample.abs());
                 let wet_sample = self.input_gain.apply(dry_sample, input_gain);
-                let wet_sample = self
-                    .chain
-                    .process_sample(channel_index, wet_sample, &chain_frame);
+                let wet_sample = self.chain.process_sample(
+                    channel_index,
+                    wet_sample,
+                    &chain_frame,
+                    &chain_order,
+                );
                 let wet_sample = self.output_gain.apply(wet_sample, output_gain);
                 let processed_sample = self.dry_wet.mix(dry_sample, wet_sample, dry_wet);
 

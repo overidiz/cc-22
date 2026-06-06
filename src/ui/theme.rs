@@ -1,8 +1,12 @@
 use nih_plug_egui::egui::Color32;
 
-pub(crate) const CARD_HEIGHT: f32 = 342.0;
+pub(crate) const CARD_HEIGHT: f32 = 318.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
-pub(crate) const KNOB_SIZE: f32 = 58.0;
+pub(crate) const KNOB_SIZE: f32 = 50.0;
+
+pub(crate) const BASE_WIDTH: f32 = 980.0;
+pub(crate) const BASE_HEIGHT: f32 = 720.0;
+pub(crate) const UI_SCALE_OPTIONS: &[u32] = &[50, 60, 70, 80, 90, 100, 120, 140, 170, 200];
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Theme {
@@ -23,18 +27,18 @@ pub(crate) struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            background: Color32::from_rgb(218, 211, 196),
-            paper: Color32::from_rgb(239, 234, 222),
-            paper_alt: Color32::from_rgb(229, 223, 210),
-            card: Color32::from_rgb(236, 231, 220),
-            card_dim: Color32::from_rgb(224, 219, 208),
-            card_edge: Color32::from_rgb(190, 183, 169),
-            text_dark: Color32::from_rgb(35, 31, 27),
-            text_light: Color32::from_rgb(35, 31, 27),
-            muted: Color32::from_rgb(150, 143, 130),
-            muted_dark: Color32::from_rgb(91, 84, 73),
-            warning: Color32::from_rgb(235, 85, 72),
-            shadow: Color32::from_rgba_premultiplied(50, 42, 31, 28),
+            background: Color32::from_rgb(207, 199, 184),
+            paper: Color32::from_rgb(244, 239, 228),
+            paper_alt: Color32::from_rgb(235, 229, 216),
+            card: Color32::from_rgb(236, 231, 219),
+            card_dim: Color32::from_rgb(219, 213, 200),
+            card_edge: Color32::from_rgb(153, 145, 130),
+            text_dark: Color32::from_rgb(30, 27, 23),
+            text_light: Color32::from_rgb(30, 27, 23),
+            muted: Color32::from_rgb(126, 118, 104),
+            muted_dark: Color32::from_rgb(70, 64, 55),
+            warning: Color32::from_rgb(225, 64, 52),
+            shadow: Color32::from_rgba_premultiplied(28, 23, 18, 44),
         }
     }
 }
@@ -58,12 +62,12 @@ pub(crate) struct Look {
 impl Default for ModuleColors {
     fn default() -> Self {
         Self {
-            character: Color32::from_rgb(245, 84, 72),
-            movement: Color32::from_rgb(245, 180, 45),
-            diffusion: Color32::from_rgb(76, 210, 126),
-            texture: Color32::from_rgb(63, 190, 224),
-            eq: Color32::from_rgb(250, 158, 48),
-            master: Color32::from_rgb(238, 229, 207),
+            character: Color32::from_rgb(235, 74, 64),
+            movement: Color32::from_rgb(235, 166, 32),
+            diffusion: Color32::from_rgb(48, 198, 112),
+            texture: Color32::from_rgb(42, 176, 214),
+            eq: Color32::from_rgb(245, 132, 34),
+            master: Color32::from_rgb(246, 239, 222),
         }
     }
 }

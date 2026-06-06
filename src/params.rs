@@ -4,8 +4,13 @@ use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 
 use crate::dsp::{
-    character::CharacterMode, diffusion::DiffusionMode, eq::EqMode, movement::LfoShape,
-    movement::MovementMode, texture::TextureMode,
+    chain::{validate_chain_order, ChainModule},
+    character::CharacterMode,
+    diffusion::DiffusionMode,
+    eq::EqMode,
+    movement::LfoShape,
+    movement::MovementMode,
+    texture::TextureMode,
 };
 
 #[derive(Params)]
@@ -39,6 +44,18 @@ pub struct Cc22Params {
 
     #[id = "global_bypass"]
     pub global_bypass: BoolParam,
+
+    #[id = "chain_s0"]
+    pub chain_slot_0: IntParam,
+
+    #[id = "chain_s1"]
+    pub chain_slot_1: IntParam,
+
+    #[id = "chain_s2"]
+    pub chain_slot_2: IntParam,
+
+    #[id = "chain_s3"]
+    pub chain_slot_3: IntParam,
 }
 
 impl Default for Cc22Params {
@@ -60,11 +77,25 @@ impl Default for Cc22Params {
             global_bypass: BoolParam::new("Global Bypass", false)
                 .with_value_to_string(formatters::v2s_bool_bypass())
                 .with_string_to_value(formatters::s2v_bool_bypass()),
+            chain_slot_0: chain_slot_param(0),
+            chain_slot_1: chain_slot_param(1),
+            chain_slot_2: chain_slot_param(2),
+            chain_slot_3: chain_slot_param(3),
         }
     }
 }
 
 impl Cc22Params {
+    pub fn chain_order(&self) -> [ChainModule; 4] {
+        let slots = [
+            self.chain_slot_0.value() as usize,
+            self.chain_slot_1.value() as usize,
+            self.chain_slot_2.value() as usize,
+            self.chain_slot_3.value() as usize,
+        ];
+        validate_chain_order(&slots)
+    }
+
     pub fn reset_smoothers(&self) {
         self.input_gain.smoothed.reset(self.input_gain.value());
         self.character.reset_smoothers();
@@ -628,4 +659,8 @@ fn module_bypass_param(name: &'static str) -> BoolParam {
     BoolParam::new(name, false)
         .with_value_to_string(formatters::v2s_bool_bypass())
         .with_string_to_value(formatters::s2v_bool_bypass())
+}
+
+fn chain_slot_param(default: i32) -> IntParam {
+    IntParam::new("Chain Slot", default, IntRange::Linear { min: 0, max: 3 })
 }

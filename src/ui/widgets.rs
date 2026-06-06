@@ -161,11 +161,11 @@ pub(crate) fn colored_knob(
     theme: Theme,
     size: f32,
 ) -> egui::Response {
-    ui.allocate_ui(Vec2::new(size + 20.0, size + 34.0), |ui| {
+    ui.allocate_ui(Vec2::new(size + 18.0, size + 28.0), |ui| {
         ui.vertical_centered(|ui| {
             ui.label(
                 RichText::new(label)
-                    .font(FontId::monospace(9.5))
+                    .font(FontId::monospace(9.0))
                     .strong()
                     .color(theme.text_light),
             );
@@ -186,7 +186,7 @@ pub(crate) fn colored_knob(
             };
             ui.label(
                 RichText::new(value_string(param))
-                    .font(FontId::monospace(9.0))
+                    .font(FontId::monospace(8.5))
                     .color(value_color),
             );
             response.on_hover_text(format!("{}: {}", param.name(), value_string(param)))
@@ -306,12 +306,17 @@ pub(crate) fn paint_colored_knob(
 
     {
         let painter = ui.painter();
-        painter.circle_filled(center, radius + 7.0, Color32::from_rgb(207, 199, 184));
-        painter.circle_filled(center, radius + 3.0, Color32::from_rgb(238, 234, 224));
+        painter.circle_filled(
+            center + Vec2::new(1.5, 2.0),
+            radius + 7.0,
+            Color32::from_rgba_premultiplied(62, 52, 40, 38),
+        );
+        painter.circle_filled(center, radius + 7.0, Color32::from_rgb(189, 181, 166));
+        painter.circle_filled(center, radius + 3.0, Color32::from_rgb(245, 241, 232));
         painter.circle_stroke(
             center,
             radius + 6.0,
-            Stroke::new(1.0, Color32::from_rgb(178, 169, 153)),
+            Stroke::new(1.1, Color32::from_rgb(155, 145, 129)),
         );
         painter.circle_filled(
             Pos2::new(center.x - radius * 0.22, center.y - radius * 0.25),
@@ -346,7 +351,7 @@ pub(crate) fn paint_colored_knob(
             center.y + angle.sin() * (radius + 17.0),
         );
         ui.painter()
-            .line_segment([inner, outer], Stroke::new(0.9, theme.muted_dark));
+            .line_segment([inner, outer], Stroke::new(0.75, theme.muted_dark));
     }
 
     let indicator = Pos2::new(
@@ -683,11 +688,7 @@ pub(crate) fn global_bypass_button(
                 .font(FontId::monospace(10.0))
                 .strong(),
         )
-        .fill(if bypassed {
-            theme.warning
-        } else {
-            theme.paper_alt
-        })
+        .fill(if bypassed { theme.warning } else { theme.paper })
         .stroke(Stroke::new(1.0, theme.text_dark))
         .corner_radius(CornerRadius::same(10))
         .min_size(Vec2::new(94.0, 30.0)),
@@ -710,7 +711,7 @@ pub(crate) fn compact_button(
                 .strong()
                 .color(theme.text_dark),
         )
-        .fill(theme.paper_alt)
+        .fill(theme.paper)
         .stroke(Stroke::new(1.0, accent))
         .corner_radius(CornerRadius::same(9))
         .min_size(Vec2::new(48.0, 30.0)),
@@ -747,7 +748,7 @@ pub(crate) fn rounded_panel<R>(
     let rect = ui.available_rect_before_wrap();
     let shadow_rect = Rect::from_min_size(
         rect.min + Vec2::new(4.0, 5.0),
-        Vec2::new(rect.width().min(1_100.0), 54.0),
+        Vec2::new(rect.width().min(1_100.0), 50.0),
     );
     ui.painter()
         .rect_filled(shadow_rect, radius, Theme::default().shadow);
@@ -755,7 +756,7 @@ pub(crate) fn rounded_panel<R>(
         .fill(fill)
         .stroke(Stroke::new(1.0, stroke))
         .corner_radius(radius)
-        .inner_margin(egui::Margin::same(12))
+        .inner_margin(egui::Margin::same(10))
         .show(ui, add_contents)
         .inner
 }

@@ -5,17 +5,40 @@ use nih_plug_egui::egui::{
 
 use super::theme::Theme;
 
-#[derive(Default)]
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            selected_preset: 0,
+            random_seed: 0,
+            ui_scale: 100,
+            settings_open: false,
+            drag_source: None,
+            drag_hover_target: None,
+            input_meter: MeterBallistics::default(),
+            output_meter: MeterBallistics::default(),
+            input_clip_events: 0,
+            output_clip_events: 0,
+            input_clip_until: 0.0,
+            output_clip_until: 0.0,
+            last_meter_time: None,
+        }
+    }
+}
+
 pub(crate) struct UiState {
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
-    input_meter: MeterBallistics,
-    output_meter: MeterBallistics,
-    input_clip_events: u32,
-    output_clip_events: u32,
-    input_clip_until: f64,
-    output_clip_until: f64,
-    last_meter_time: Option<f64>,
+    pub(crate) ui_scale: u32,
+    pub(crate) settings_open: bool,
+    pub(crate) drag_source: Option<usize>,
+    pub(crate) drag_hover_target: Option<usize>,
+    pub(crate) input_meter: MeterBallistics,
+    pub(crate) output_meter: MeterBallistics,
+    pub(crate) input_clip_events: u32,
+    pub(crate) output_clip_events: u32,
+    pub(crate) input_clip_until: f64,
+    pub(crate) output_clip_until: f64,
+    pub(crate) last_meter_time: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +54,7 @@ pub(crate) struct MeterSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct MeterBallistics {
+pub(crate) struct MeterBallistics {
     level: f32,
 }
 

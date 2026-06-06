@@ -1,5 +1,7 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui::{self, Color32, CornerRadius, FontId, RichText, Vec2};
+use nih_plug_egui::egui::{
+    self, Align, Color32, CornerRadius, FontId, RichText, Sense, UiBuilder, Vec2,
+};
 
 use crate::{params::Cc22Params, presets::internal_presets};
 
@@ -27,80 +29,90 @@ pub(crate) fn bottom_macro_row(
         CornerRadius::same(18),
         |ui| {
             ui.horizontal_top(|ui| {
-                egui::Frame::new()
-                    .fill(Color32::from_rgb(31, 26, 21))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(egui::Margin::same(10))
-                    .show(ui, |ui| {
-                        ui.set_min_size(Vec2::new(385.0, 54.0));
-                        ui.horizontal(|ui| {
-                            brand_orb(ui, colors);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new("CC-22")
-                                        .font(FontId::proportional(22.0))
-                                        .strong()
-                                        .color(Color32::from_rgb(245, 237, 218)),
-                                );
-                                ui.label(
-                                    RichText::new("MULTI-FX")
-                                        .font(FontId::monospace(8.0))
-                                        .strong()
-                                        .color(colors.eq),
-                                );
+                let (strip_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(385.0, 50.0), Sense::hover());
+                ui.scope_builder(
+                    UiBuilder::new()
+                        .max_rect(strip_rect)
+                        .layout(egui::Layout::top_down(Align::Min)),
+                    |ui| {
+                        egui::Frame::new()
+                            .fill(Color32::from_rgb(31, 26, 21))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(8))
+                            .show(ui, |ui| {
+                                ui.set_min_size(Vec2::new(369.0, 34.0));
+                                ui.horizontal(|ui| {
+                                    brand_orb(ui, colors);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            RichText::new("CC-22")
+                                                .font(FontId::proportional(20.0))
+                                                .strong()
+                                                .color(Color32::from_rgb(245, 237, 218)),
+                                        );
+                                        ui.label(
+                                            RichText::new("MULTI-FX")
+                                                .font(FontId::monospace(8.0))
+                                                .strong()
+                                                .color(colors.eq),
+                                        );
+                                    });
+                                    ui.add_space(10.0);
+                                    disabled_nav_button(ui, "<", theme).on_hover_text(
+                                        "Placeholder: use the preset controls in the top bar",
+                                    );
+                                    disabled_nav_button(ui, "INIT", theme).on_hover_text(
+                                        "Placeholder: init/reset preset is not wired yet",
+                                    );
+                                    disabled_nav_button(ui, ">", theme).on_hover_text(
+                                        "Placeholder: use the preset controls in the top bar",
+                                    );
+                                    ui.add_space(12.0);
+                                    small_strip_knob(
+                                        ui,
+                                        setter,
+                                        &params.character.mix,
+                                        "CHAR MIX",
+                                        colors.character,
+                                        theme,
+                                    );
+                                    small_strip_knob(
+                                        ui,
+                                        setter,
+                                        &params.output_gain,
+                                        "OUT",
+                                        colors.master,
+                                        theme,
+                                    );
+                                    small_strip_knob(
+                                        ui,
+                                        setter,
+                                        &params.dry_wet,
+                                        "DRY/WET",
+                                        colors.eq,
+                                        theme,
+                                    );
+                                    small_strip_knob(
+                                        ui,
+                                        setter,
+                                        &params.diffusion.mix,
+                                        "DIFF MIX",
+                                        colors.diffusion,
+                                        theme,
+                                    );
+                                    small_strip_knob(
+                                        ui,
+                                        setter,
+                                        &params.movement.rate,
+                                        "MOV RATE",
+                                        colors.movement,
+                                        theme,
+                                    );
+                                });
                             });
-                            ui.add_space(10.0);
-                            disabled_nav_button(ui, "<", theme).on_hover_text(
-                                "Placeholder: use the preset controls in the top bar",
-                            );
-                            disabled_nav_button(ui, "INIT", theme)
-                                .on_hover_text("Placeholder: init/reset preset is not wired yet");
-                            disabled_nav_button(ui, ">", theme).on_hover_text(
-                                "Placeholder: use the preset controls in the top bar",
-                            );
-                            ui.add_space(12.0);
-                            small_strip_knob(
-                                ui,
-                                setter,
-                                &params.character.mix,
-                                "CHAR MIX",
-                                colors.character,
-                                theme,
-                            );
-                            small_strip_knob(
-                                ui,
-                                setter,
-                                &params.output_gain,
-                                "OUT",
-                                colors.master,
-                                theme,
-                            );
-                            small_strip_knob(
-                                ui,
-                                setter,
-                                &params.dry_wet,
-                                "DRY/WET",
-                                colors.eq,
-                                theme,
-                            );
-                            small_strip_knob(
-                                ui,
-                                setter,
-                                &params.diffusion.mix,
-                                "DIFF MIX",
-                                colors.diffusion,
-                                theme,
-                            );
-                            small_strip_knob(
-                                ui,
-                                setter,
-                                &params.movement.rate,
-                                "MOV RATE",
-                                colors.movement,
-                                theme,
-                            );
-                        });
-                    });
+                    },
+                );
 
                 ui.add_space(6.0);
                 ui.vertical(|ui| {
