@@ -124,6 +124,15 @@ pub(crate) fn drag_handle(
 
     let alpha: u8 = if hovered { 210 } else { 80 };
 
+    if hovered {
+        let bg_rect = handle_rect.expand(3.0);
+        ui.painter().rect_filled(
+            bg_rect,
+            CornerRadius::same(5),
+            Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 45),
+        );
+    }
+
     let dots = [
         Pos2::new(handle_rect.min.x + 6.0, handle_rect.center().y - 3.0),
         Pos2::new(handle_rect.min.x + 13.0, handle_rect.center().y - 3.0),
@@ -246,4 +255,53 @@ pub(crate) fn paint_floating_card(
     painter.circle_filled(Pos2::new(dots_x + 7.0, dots_y), 1.8, Color32::WHITE);
     painter.circle_filled(Pos2::new(dots_x, dots_y + 6.0), 1.8, Color32::WHITE);
     painter.circle_filled(Pos2::new(dots_x + 7.0, dots_y + 6.0), 1.8, Color32::WHITE);
+}
+
+// ── drag reorder helpers ─────────────────────────────────────────────────
+
+/// Compute the visual drop slot (0..=4) from pointer x and card layout.
+/// 0 = before first card, 4 = after last card.
+pub(crate) fn compute_drop_slot(
+    pointer_x: f32,
+    card_rects: &[egui::Rect; 4],
+    row_start: f32,
+) -> usize {
+    let slot_center = |s: usize| -> f32 {
+        match s {
+            0 => row_start,
+            4 => card_rects[3].right(),
+            _ => (card_rects[s - 1].right() + card_rects[s].left()) * 0.5,
+        }
+    };
+
+    for i in 0..4 {
+        let boundary = (slot_center(i) + slot_center(i + 1)) * 0.5;
+        if pointer_x < boundary {
+            return i;
+        }
+    }
+    4
+}
+
+/// Convert a visual drop slot (0..=4) to the final destination index (0..=3) for `reorder_module`.
+pub(crate) fn final_index_from_drop_slot(source: usize, drop_slot: usize) -> usize {
+    if drop_slot <= source {
+        drop_slot
+    } else {
+        drop_slot.saturating_sub(1)
+    }
+}
+
+/// Compute the x position for the drop indicator bar.
+pub(crate) fn drop_indicator_x(
+    drop_slot: usize,
+    card_rects: &[egui::Rect; 4],
+    row_start: f32,
+    gaps: f32,
+) -> f32 {
+    match drop_slot {
+        0 => row_start - gaps * 0.5,
+        4 => card_rects[3].right() + gaps * 0.5,
+        s => (card_rects[s - 1].right() + card_rects[s].left()) * 0.5,
+    }
 }

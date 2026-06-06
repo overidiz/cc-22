@@ -11,8 +11,9 @@ use super::{
     master_strip::master_strip,
     meters::UiState,
     signal_flow::{
-        card_shadow, drag_handle, paint_drop_indicator, paint_floating_card, position_badge,
-        signal_flow_arrow, signal_flow_label,
+        card_shadow, compute_drop_slot, drag_handle, drop_indicator_x, final_index_from_drop_slot,
+        paint_drop_indicator, paint_floating_card, position_badge, signal_flow_arrow,
+        signal_flow_label,
     },
     theme::{Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, KNOB_SIZE},
     widgets::{
@@ -52,6 +53,18 @@ pub(crate) fn center_modules(
     let module_row_width = (CARD_WIDTH * 4.0) + (ui.spacing().item_spacing.x * 3.0);
     let card_specs: [ModuleCardSpec<'_>; 4] = chain_order.map(|m| module_spec(m, params, colors));
 
+    // ── compute card layout ──────────────────────────────────────────
+    let mut card_rects: [Rect; 4] = [Rect::NOTHING; 4];
+    let row_start = ui.cursor().min.x;
+    let gaps = ui.spacing().item_spacing.x;
+    for pos in 0..4 {
+        let x = row_start + pos as f32 * (CARD_WIDTH + gaps);
+        card_rects[pos] = Rect::from_min_size(
+            Pos2::new(x, ui.cursor().min.y),
+            Vec2::new(CARD_WIDTH, CARD_HEIGHT),
+        );
+    }
+
     // ── detect pointer & drag state ────────────────────────────────────
     let pointer = ui.ctx().input(|i| i.pointer.latest_pos());
     let pointer_x = pointer.map(|p| p.x);
@@ -59,42 +72,14 @@ pub(crate) fn center_modules(
 
     if let Some(source) = state.drag_source {
         if ui.ctx().input(|i| i.pointer.primary_released()) {
-            if let Some(target) = state.drag_hover_target {
-                drag_finished = Some((source, target));
+            if let Some(drop_slot) = state.drag_drop_slot {
+                let final_index = final_index_from_drop_slot(source, drop_slot);
+                drag_finished = Some((source, final_index));
             }
             state.drag_source = None;
-            state.drag_hover_target = None;
+            state.drag_drop_slot = None;
         } else if let Some(px) = pointer_x {
-            let row_start_x = ui.cursor().min.x;
-            let gaps = ui.spacing().item_spacing.x;
-            let mut positions = [0.0_f32; 5];
-            positions[0] = row_start_x;
-            for i in 1..=4 {
-                positions[i] = positions[i - 1] + CARD_WIDTH + gaps;
-            }
-            let mut visual_midpoints = [0.0_f32; 4];
-            let mut slot_idx = 0;
-            for i in 0..4 {
-                if i == source {
-                    continue;
-                }
-                visual_midpoints[slot_idx] = (positions[slot_idx] + positions[slot_idx + 1]) * 0.5;
-                slot_idx += 1;
-            }
-            visual_midpoints[3] = positions[4];
-            let mut target = 4;
-            for i in 0..4 {
-                if px < visual_midpoints[i] {
-                    target = i;
-                    break;
-                }
-            }
-            let adjusted = if source < target {
-                target.saturating_sub(1)
-            } else {
-                target
-            };
-            state.drag_hover_target = Some(adjusted.min(3));
+            state.drag_drop_slot = Some(compute_drop_slot(px, &card_rects, row_start));
         }
     }
 
@@ -102,17 +87,9 @@ pub(crate) fn center_modules(
 
     // ── compute hover states for each card ─────────────────────────────
     let mut card_hovered = [false; 4];
-    let mut card_rects: [Rect; 4] = [Rect::NOTHING; 4];
-    let row_start = ui.cursor().min.x;
-    let gaps = ui.spacing().item_spacing.x;
     for pos in 0..4 {
-        let x = row_start + pos as f32 * (CARD_WIDTH + gaps);
-        let r = Rect::from_min_size(
-            Pos2::new(x, ui.cursor().min.y),
-            Vec2::new(CARD_WIDTH, CARD_HEIGHT),
-        );
-        card_rects[pos] = r;
-        card_hovered[pos] = pointer.map_or(false, |p| r.contains(p)) && state.drag_source.is_none();
+        card_hovered[pos] =
+            pointer.map_or(false, |p| card_rects[pos].contains(p)) && state.drag_source.is_none();
     }
 
     // ── section header ─────────────────────────────────────────────────
@@ -193,10 +170,7 @@ pub(crate) fn center_modules(
         if from.is_positive() && to.is_positive() {
             let from_right = Pos2::new(from.right(), from.center().y);
             let to_left = Pos2::new(to.left(), to.center().y);
-            let near_drop = state.drag_source.is_some()
-                && state
-                    .drag_hover_target
-                    .map_or(false, |t| t == i || t == i + 1);
+            let near_drop = state.drag_source.is_some() && state.drag_drop_slot == Some(i + 1);
             signal_flow_arrow(
                 &painter,
                 from_right,
@@ -209,44 +183,16 @@ pub(crate) fn center_modules(
 
     // ── drop indicator + floating card ─────────────────────────────────
     if let Some(source) = state.drag_source {
-        if let Some(mut target) = state.drag_hover_target {
-            if target > source {
-                target = (target + 1).min(4);
-            }
-            let row_start_x = card_rects
-                .first()
-                .map(|r| r.left())
-                .unwrap_or(ui.cursor().min.x);
-            let gaps = ui.spacing().item_spacing.x;
-            let indicator_x = if target == 0 {
-                row_start_x - gaps * 0.5
-            } else if target >= 4 {
-                card_rects[3].right() + gaps * 0.5
-            } else {
-                let left = card_rects
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != source)
-                    .nth(target - 1)
-                    .map(|(_, r)| r.right())
-                    .unwrap_or(row_start_x);
-                let right = card_rects
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != source)
-                    .nth(target)
-                    .map(|(_, r)| r.left())
-                    .unwrap_or(card_rects[3].right());
-                (left + right) * 0.5
-            };
+        if let Some(drop_slot) = state.drag_drop_slot {
             if card_rects[0].is_positive() {
                 let overlay = ui.ctx().layer_painter(LayerId::new(
                     Order::Foreground,
                     egui::Id::new("drop-indicator"),
                 ));
+                let ix = drop_indicator_x(drop_slot, &card_rects, row_start, gaps);
                 paint_drop_indicator(
                     &overlay,
-                    indicator_x,
+                    ix,
                     card_rects[0].top() - 2.0,
                     CARD_HEIGHT + 4.0,
                     module_color(chain_order[source], colors),
@@ -379,9 +325,14 @@ fn reorder_arrows(
     position_num: usize,
     accent: Color32,
     theme: Theme,
+    hovered: bool,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
 ) -> bool {
+    if !hovered {
+        return false;
+    }
+
     let btn_w = 18.0;
     let btn_h = 14.0;
     let y = card_rect.min.y + 10.0;
@@ -533,6 +484,7 @@ fn render_module_card(
                         position_num,
                         spec.accent,
                         theme,
+                        hovered,
                         setter,
                         params,
                     );
@@ -541,7 +493,7 @@ fn render_module_card(
                         drag_handle(ui, card_rect, spec.accent, position_num, hovered);
                     if detect_drag && handle_resp.drag_started() {
                         state.drag_source = Some(position_num - 1);
-                        state.drag_hover_target = None;
+                        state.drag_drop_slot = None;
                     }
 
                     let header_rect = Rect::from_min_size(
@@ -603,7 +555,7 @@ fn render_module_card(
                     }
 
                     if hovered {
-                        handle_resp.on_hover_text("\u{2195} Drag to change signal chain order");
+                        handle_resp.on_hover_text("\u{2194} Drag handle to reorder");
                     }
                 });
         },
