@@ -40,6 +40,26 @@ pub enum DiffusionMode {
 
     #[id = "reverb"]
     Reverb,
+
+    #[id = "cascade"]
+    #[name = "Cascade"]
+    Cascade,
+
+    #[id = "reels"]
+    #[name = "Reels"]
+    Reels,
+
+    #[id = "space"]
+    #[name = "Space"]
+    Space,
+
+    #[id = "collage"]
+    #[name = "Collage"]
+    Collage,
+
+    #[id = "reverse"]
+    #[name = "Reverse"]
+    Reverse,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +72,7 @@ pub struct Diffusion {
     mode_crossfade: LinearSmoother,
     last_output: [f32; MAX_CHANNELS],
     has_processed: bool,
+    reels_wow_phase: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -106,6 +127,7 @@ impl Default for Diffusion {
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
             last_output: [0.0; MAX_CHANNELS],
             has_processed: false,
+            reels_wow_phase: 0.0,
         };
         diffusion.prepare(44_100.0);
         diffusion
@@ -128,6 +150,7 @@ impl Diffusion {
         self.mode_crossfade.reset(1.0);
         self.last_output = [0.0; MAX_CHANNELS];
         self.has_processed = false;
+        self.reels_wow_phase = 0.0;
     }
 
     pub fn next_frame(&mut self, params: &DiffusionParams) -> DiffusionFrame {
@@ -188,6 +211,11 @@ impl Diffusion {
             DiffusionMode::Delay => self.process_delay(index, dry, frame),
             DiffusionMode::Slap => self.process_slap(index, dry, frame),
             DiffusionMode::Reverb => self.process_reverb(index, dry, frame),
+            DiffusionMode::Cascade => self.process_cascade(index, dry, frame),
+            DiffusionMode::Reels => self.process_reels(index, dry, frame),
+            DiffusionMode::Space => self.process_space(index, dry, frame),
+            // TODO: Character-22 inspired modes — placeholder passthrough until DSP is implemented
+            DiffusionMode::Collage | DiffusionMode::Reverse => dry,
         };
 
         let mixed = if frame.mode == DiffusionMode::Off {
@@ -229,6 +257,161 @@ impl Diffusion {
     fn process_reverb(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         self.reverb.process(index, sample, frame)
+    }
+    fn process_cascade(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let base_ms = frame.time_ms.clamp(40.0, 800.0);
+        let density = frame.size.clamp(0.0, 1.0);
+        let decay = frame.decay.clamp(0.0, 1.0);
+
+        let tap_ratios = [1.0, 1.42, 2.05, 3.15];
+        let tap_gains = [
+            0.65,
+            0.65 * (1.0 - decay * 0.55),
+            0.65 * (1.0 - decay * 0.75),
+            0.65 * (1.0 - decay * 0.90),
+        ];
+
+        let chan_offset = if index == 0 {
+            -frame.stereo_offset * base_ms * 0.12
+        } else {
+            frame.stereo_offset * base_ms * 0.12
+        };
+
+        // Read all taps before any mutable buffer borrow
+        let buf_len = self.delay.buffers[index].len();
+        let write_pos = self.delay.write_positions[index];
+        let mut sum = 0.0;
+        for i in 0..4 {
+            let spacing = 0.7 + density * 0.6;
+            let tap_ms = base_ms * tap_ratios[i] * spacing + chan_offset * (i as f32 + 1.0);
+            let tap_samples = tap_ms * 0.001 * self.sample_rate;
+            let clamped = tap_samples.clamp(1.0, buf_len as f32 - 2.0);
+            let _read_pos = write_pos as f32 - clamped;
+            let mut rp = _read_pos;
+            while rp < 0.0 {
+                rp += buf_len as f32;
+            }
+            let ia = rp.floor() as usize % buf_len;
+            let ib = (ia + 1) % buf_len;
+            let frac = rp - rp.floor();
+            let tap = sanitize_sample(
+                self.delay.buffers[index][ia] * (1.0 - frac) + self.delay.buffers[index][ib] * frac,
+            );
+            sum += tap * tap_gains[i];
+        }
+        let wet = sanitize_sample(sum);
+
+        // Write input + feedback to buffer
+        let buffer = &mut self.delay.buffers[index];
+        buffer[write_pos] = sanitize_sample(sample);
+
+        let fb = frame.feedback.clamp(0.0, 0.80);
+        let fb_filtered = self.delay.feedback_filter_state[index]
+            + frame.tone_alpha * (wet - self.delay.feedback_filter_state[index]);
+        self.delay.feedback_filter_state[index] = sanitize_sample(fb_filtered);
+        buffer[write_pos] = sanitize_sample(sample + fb_filtered * fb * 0.7);
+
+        self.delay.write_positions[index] = (write_pos + 1) % buf_len;
+
+        sanitize_sample(fb_filtered * cascade_level_compensation(decay, frame.feedback))
+    }
+
+    fn process_reels(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let decay = frame.decay.clamp(0.0, 1.0);
+        let tone_alpha = frame.tone_alpha;
+
+        // Wow modulation: slow tape-speed drift
+        let wow_rate = 0.45 + frame.size * 1.8;
+        self.reels_wow_phase += wow_rate / self.sample_rate.max(1.0);
+        if self.reels_wow_phase >= 1.0 {
+            self.reels_wow_phase -= 1.0;
+        }
+        let ch_phase = (self.reels_wow_phase + if index == 0 { 0.0 } else { 0.34 }).fract();
+        let wow_ms = (ch_phase * core::f32::consts::TAU).sin() * frame.size * 3.8;
+
+        let delay_ms = (frame.time_ms + wow_ms).clamp(25.0, 2_000.0);
+        let delay_samples = delay_ms * 0.001 * self.sample_rate;
+
+        // Read delayed signal (interpolated)
+        let buf_len = self.delay.buffers[index].len();
+        let write_pos = self.delay.write_positions[index];
+        let clamped = delay_samples.clamp(1.0, buf_len as f32 - 2.0);
+        let rp = write_pos as f32 - clamped;
+        let mut rp = rp;
+        while rp < 0.0 {
+            rp += buf_len as f32;
+        }
+        let ia = rp.floor() as usize % buf_len;
+        let ib = (ia + 1) % buf_len;
+        let frac = rp - rp.floor();
+        let delayed = sanitize_sample(
+            self.delay.buffers[index][ia] * (1.0 - frac) + self.delay.buffers[index][ib] * frac,
+        );
+
+        // Tape saturation in feedback path
+        let sat_gain = 1.0 + decay * 3.8;
+        let saturated = (delayed * sat_gain).tanh();
+
+        // Progressive tone damping
+        let fb_filtered = self.delay.feedback_filter_state[index]
+            + tone_alpha * (saturated - self.delay.feedback_filter_state[index]);
+        self.delay.feedback_filter_state[index] = sanitize_sample(fb_filtered);
+
+        // Write back with feedback
+        let fb = frame.feedback.clamp(0.0, 0.92);
+        let buffer = &mut self.delay.buffers[index];
+        buffer[write_pos] = sanitize_sample(sample + fb_filtered * fb);
+        self.delay.write_positions[index] = (write_pos + 1) % buf_len;
+
+        sanitize_sample(fb_filtered * reels_level_compensation(frame.feedback, decay))
+    }
+
+    fn process_space(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+
+        // Pre-delay
+        let pre_delay_samples = frame.pre_delay_ms * 0.001 * self.sample_rate;
+        let reverb_input = self.reverb.pre_delay[index].process_delay(sample, pre_delay_samples);
+
+        // Space: larger size scaling for ambient tail
+        let size_scale = 0.78 + frame.size * 1.42;
+        let feedback = space_reverb_feedback(frame.decay);
+        let damping_alpha = space_damping_alpha(frame.damping);
+
+        // 6 comb filters — gentler modulation for smoother ambience
+        let mut sum = 0.0;
+        for (comb_index, delay_ms) in REVERB_COMB_DELAYS_MS[index].iter().enumerate() {
+            let mod_phase = self.reverb.next_mod_phase(index, comb_index);
+            let mod_ms = mod_phase.sin() * REVERB_MOD_DEPTH_MS * (0.45 + frame.size * 0.55);
+            let delay_samples = (*delay_ms + mod_ms) * 0.001 * self.sample_rate * size_scale;
+            sum += self.reverb.combs[index][comb_index].process_comb(
+                reverb_input * 0.14,
+                delay_samples,
+                feedback,
+                damping_alpha,
+            );
+        }
+
+        // 3 allpass diffusers
+        let mut wet = sum * 0.14;
+        for (allpass_index, delay_ms) in REVERB_ALLPASS_DELAYS_MS[index].iter().enumerate() {
+            let delay_samples = *delay_ms * 0.001 * self.sample_rate * size_scale;
+            wet = self.reverb.allpasses[index][allpass_index].process_allpass(
+                wet,
+                delay_samples,
+                0.55,
+            );
+        }
+
+        // Smooth tail + wide stereo
+        wet = sanitize_sample((wet * 0.76) + (self.reverb.last_wet[index] * 0.24));
+        let other = self.reverb.last_wet[1 - index];
+        self.reverb.last_wet[index] = wet;
+
+        let monoish = (wet + other) * 0.5;
+        sanitize_sample((monoish * (1.0 - frame.width)) + (wet * frame.width))
     }
 
     fn set_mode(&mut self, mode: DiffusionMode) {
@@ -543,11 +726,36 @@ fn tone_to_alpha(tone: f32, sample_rate: f32) -> f32 {
     (1.0 - (-2.0 * core::f32::consts::PI * cutoff / sample_rate).exp()).clamp(0.0, 1.0)
 }
 
+#[inline]
+fn cascade_level_compensation(decay: f32, feedback: f32) -> f32 {
+    let decay = decay.clamp(0.0, 1.0);
+    let feedback = feedback.clamp(0.0, 1.0);
+    (1.0 - (decay * 0.08) - (feedback * 0.10)).clamp(0.78, 1.0)
+}
+
+#[inline]
+fn reels_level_compensation(feedback: f32, decay: f32) -> f32 {
+    let feedback = feedback.clamp(0.0, 1.0);
+    let decay = decay.clamp(0.0, 1.0);
+    (1.0 - (feedback * 0.10) - (decay * 0.04)).clamp(0.80, 1.0)
+}
+
+#[inline]
+fn space_reverb_feedback(decay: f32) -> f32 {
+    (0.55 + (decay.clamp(0.0, 1.0) * 0.35)).clamp(0.55, 0.90)
+}
+
+#[inline]
+fn space_damping_alpha(damping: f32) -> f32 {
+    (0.72 - (damping.clamp(0.0, 1.0) * 0.52)).clamp(0.20, 0.72)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        channel_delay_ms, damping_to_alpha, read_interpolated, reverb_feedback,
-        slap_channel_delay_ms, Diffusion, DiffusionFrame, DiffusionMode, StereoDelay,
+        cascade_level_compensation, channel_delay_ms, damping_to_alpha, read_interpolated,
+        reels_level_compensation, reverb_feedback, slap_channel_delay_ms, space_reverb_feedback,
+        Diffusion, DiffusionFrame, DiffusionMode, StereoDelay,
     };
 
     fn test_frame(mode: DiffusionMode) -> DiffusionFrame {
@@ -710,5 +918,327 @@ mod tests {
             tail_energy > 0.000_01,
             "high decay reverb tail died too quickly"
         );
+    }
+
+    fn cascade_frame(time_ms: f32, feedback: f32, size: f32, decay: f32) -> DiffusionFrame {
+        DiffusionFrame {
+            mode: DiffusionMode::Cascade,
+            time_ms,
+            feedback,
+            size,
+            decay,
+            pre_delay_ms: 0.0,
+            damping: 0.5,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 1.0,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn cascade_output_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = cascade_frame(150.0, 0.5, 0.5, 0.6);
+
+        let mut sample = 0.3;
+        for _ in 0..2048 {
+            sample = diffusion.process_sample_for_channel(0, sample, &frame);
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn cascade_impulse_has_multiple_taps() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        // Short time so taps fall within reach of the ~100k sample buffer
+        let frame = cascade_frame(60.0, 0.0, 0.5, 0.7);
+
+        // Feed impulse, then wait for taps to emerge from buffer
+        let mut nonzero_count = 0;
+        for i in 0..16000 {
+            let input = if i == 0 { 0.9 } else { 0.0 };
+            let s = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(s.is_finite());
+            if i > 1000 && s.abs() > 0.001 {
+                nonzero_count += 1;
+            }
+        }
+        assert!(
+            nonzero_count > 3,
+            "cascade should produce multiple taps, got {nonzero_count}"
+        );
+    }
+
+    #[test]
+    fn cascade_max_feedback_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = cascade_frame(100.0, 1.0, 0.5, 0.5);
+
+        let mut sample = 0.3;
+        for _ in 0..4096 {
+            sample = diffusion.process_sample_for_channel(0, sample, &frame);
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn cascade_differs_from_delay() {
+        let mut c = Diffusion::default();
+        c.prepare(48_000.0);
+        let mut d = Diffusion::default();
+        d.prepare(48_000.0);
+
+        let delay_frame = DiffusionFrame {
+            mode: DiffusionMode::Delay,
+            time_ms: 140.0,
+            feedback: 0.3,
+            size: 0.5,
+            decay: 0.5,
+            pre_delay_ms: 0.0,
+            damping: 0.5,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 1.0,
+            mode_fade: 1.0,
+        };
+        let cascade_frame = cascade_frame(140.0, 0.3, 0.5, 0.6);
+
+        let input = 0.3;
+        for _ in 0..8000 {
+            d.process_sample_for_channel(0, input, &delay_frame);
+            c.process_sample_for_channel(0, input, &cascade_frame);
+        }
+        let delay_out = d.process_sample_for_channel(0, input, &delay_frame);
+        let cascade_out = c.process_sample_for_channel(0, input, &cascade_frame);
+        assert!(delay_out.is_finite() && cascade_out.is_finite());
+        assert!(
+            (delay_out - cascade_out).abs() > 0.000_01,
+            "Cascade and Delay should differ"
+        );
+    }
+
+    #[test]
+    fn cascade_compensation_is_reasonable() {
+        let c = cascade_level_compensation(1.0, 1.0);
+        assert!(c > 0.70 && c < 1.0, "cascade comp={c}");
+        let c0 = cascade_level_compensation(0.0, 0.0);
+        assert!((c0 - 1.0).abs() < 0.01);
+    }
+
+    fn reels_frame(time_ms: f32, feedback: f32, size: f32, decay: f32) -> DiffusionFrame {
+        DiffusionFrame {
+            mode: DiffusionMode::Reels,
+            time_ms,
+            feedback,
+            size,
+            decay,
+            pre_delay_ms: 0.0,
+            damping: 0.5,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.5,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn reels_output_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reels_frame(200.0, 0.7, 0.5, 0.5);
+
+        let mut sample = 0.3;
+        for _ in 0..4096 {
+            sample = diffusion.process_sample_for_channel(0, sample, &frame);
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn reels_max_feedback_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reels_frame(200.0, 1.0, 0.5, 0.5);
+
+        for _ in 0..8192 {
+            let sample = diffusion.process_sample_for_channel(0, 0.3, &frame);
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn reels_differs_from_delay() {
+        let mut r = Diffusion::default();
+        r.prepare(48_000.0);
+        let mut d = Diffusion::default();
+        d.prepare(48_000.0);
+
+        let delay_frame = DiffusionFrame {
+            mode: DiffusionMode::Delay,
+            time_ms: 80.0,
+            feedback: 0.5,
+            size: 0.5,
+            decay: 0.5,
+            pre_delay_ms: 0.0,
+            damping: 0.5,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.5,
+            mode_fade: 1.0,
+        };
+        let reels_frame = reels_frame(80.0, 0.5, 0.9, 0.5);
+
+        let input = 0.3;
+        // Warm up: 80ms = 3840 samples, need more for feedback to build
+        for _ in 0..12000 {
+            d.process_sample_for_channel(0, input, &delay_frame);
+            r.process_sample_for_channel(0, input, &reels_frame);
+        }
+        let d_out = d.process_sample_for_channel(0, input, &delay_frame);
+        let r_out = r.process_sample_for_channel(0, input, &reels_frame);
+        assert!(d_out.is_finite() && r_out.is_finite());
+        assert!(
+            (d_out - r_out).abs() > 0.000_01 || r_out.abs() > 0.01,
+            "Reels output should be active, d={d_out}, r={r_out}"
+        );
+    }
+
+    #[test]
+    fn reels_compensation_is_reasonable() {
+        let c = reels_level_compensation(1.0, 1.0);
+        assert!(c > 0.75 && c < 1.0);
+        let c0 = reels_level_compensation(0.0, 0.0);
+        assert!((c0 - 1.0).abs() < 0.01);
+    }
+
+    fn space_frame(size: f32, decay: f32, damping: f32, width: f32) -> DiffusionFrame {
+        DiffusionFrame {
+            mode: DiffusionMode::Space,
+            time_ms: 0.0,
+            feedback: 0.0,
+            size,
+            decay,
+            pre_delay_ms: 20.0,
+            damping,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width,
+            active_mix: 1.0,
+            tone_alpha: 0.4,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn space_output_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = space_frame(1.0, 0.8, 0.5, 1.0);
+
+        let mut phase = 0.0;
+        for _ in 0..4096 {
+            phase += 440.0 / 48_000.0;
+            let s = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let out = diffusion.process_sample_for_channel(0, s, &frame);
+            assert!(out.is_finite());
+            assert!(out.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn space_impulse_tail_is_stable() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = space_frame(1.0, 0.9, 0.7, 1.0);
+
+        let mut peak: f32 = 0.0;
+        let mut tail_energy = 0.0;
+        for i in 0..32000 {
+            let input = if i == 0 { 0.9 } else { 0.0 };
+            let s = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(s.is_finite());
+            assert!(s.abs() <= 8.0);
+            peak = peak.max(s.abs());
+            if i > 3000 {
+                tail_energy += s * s;
+            }
+        }
+        assert!(peak < 2.0, "space reverb peak was {peak}");
+        assert!(tail_energy > 0.000_01, "space tail died too quickly");
+    }
+
+    #[test]
+    fn space_max_decay_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = space_frame(1.0, 1.0, 0.5, 1.0);
+
+        for _ in 0..8000 {
+            let s = diffusion.process_sample_for_channel(0, 0.3, &frame);
+            assert!(s.is_finite());
+            assert!(s.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn space_differs_from_reverb() {
+        let mut s = Diffusion::default();
+        s.prepare(48_000.0);
+        let mut r = Diffusion::default();
+        r.prepare(48_000.0);
+
+        let reverb_frame = DiffusionFrame {
+            mode: DiffusionMode::Reverb,
+            time_ms: 0.0,
+            feedback: 0.0,
+            size: 0.7,
+            decay: 0.7,
+            pre_delay_ms: 20.0,
+            damping: 0.5,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.4,
+            mode_fade: 1.0,
+        };
+        let space_frame = space_frame(0.7, 0.7, 0.5, 1.0);
+
+        let input = 0.3;
+        for _ in 0..4000 {
+            r.process_sample_for_channel(0, input, &reverb_frame);
+            s.process_sample_for_channel(0, input, &space_frame);
+        }
+        let r_out = r.process_sample_for_channel(0, input, &reverb_frame);
+        let s_out = s.process_sample_for_channel(0, input, &space_frame);
+        assert!(r_out.is_finite() && s_out.is_finite());
+        assert!(
+            (r_out - s_out).abs() > 0.000_01,
+            "Space and Reverb should differ"
+        );
+    }
+
+    #[test]
+    fn space_reverb_feedback_is_in_range() {
+        let fb0 = space_reverb_feedback(0.0);
+        let fb1 = space_reverb_feedback(1.0);
+        assert!(fb0 > 0.50 && fb0 < 0.65);
+        assert!(fb1 > 0.80 && fb1 < 0.92);
     }
 }

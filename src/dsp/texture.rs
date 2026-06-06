@@ -28,6 +28,26 @@ pub enum TextureMode {
     #[id = "tape"]
     #[name = "Tape"]
     Tape,
+
+    #[id = "filter"]
+    #[name = "Filter"]
+    Filter,
+
+    #[id = "squash"]
+    #[name = "Squash"]
+    Squash,
+
+    #[id = "cassette"]
+    #[name = "Cassette"]
+    Cassette,
+
+    #[id = "broken"]
+    #[name = "Broken"]
+    Broken,
+
+    #[id = "interference"]
+    #[name = "Interference"]
+    Interference,
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +223,12 @@ impl Texture {
                 let unstable = self.process_wow_flutter(index, dry, frame);
                 self.process_noise(index, unstable, frame)
             }
+            // TODO: Character-22 inspired modes — placeholder passthrough until DSP is implemented
+            TextureMode::Filter
+            | TextureMode::Squash
+            | TextureMode::Cassette
+            | TextureMode::Broken
+            | TextureMode::Interference => dry,
         };
 
         let mixed = if frame.mode == TextureMode::Off {

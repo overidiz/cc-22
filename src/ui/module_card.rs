@@ -19,8 +19,8 @@ use super::{
     widgets::{
         character_active, character_mode_label, character_mode_selector, colored_knob,
         diffusion_active, diffusion_mode_label, diffusion_mode_selector, draw_curve_icon,
-        draw_lfo_icon, draw_noise_icon, draw_reflection_icon, movement_active, movement_mode_label,
-        movement_mode_selector, set_param, texture_active, texture_mode_label,
+        draw_lfo_icon, draw_noise_icon, draw_reflection_icon, mini_slider, movement_active,
+        movement_mode_label, movement_mode_selector, set_param, texture_active, texture_mode_label,
         texture_mode_selector, toggle_button,
     },
 };
@@ -661,10 +661,31 @@ fn render_module_content(
                     KNOB_SIZE,
                 );
             });
+            ui.add_space(2.0);
+            mini_slider(ui, setter, &params.character.mix, "MIX", spec.accent, theme);
+            ui.add_space(4.0);
+            mini_slider(
+                ui,
+                setter,
+                &params.character.noise,
+                "NOISE",
+                spec.accent,
+                theme,
+            );
+            ui.add_space(2.0);
             module_mode_summary(
                 ui,
                 character_mode_label(params.character.mode.value()),
-                &["Clean", "Saturation", "Cassette"],
+                &[
+                    "Clean",
+                    "Saturation",
+                    "Cassette",
+                    "Drive",
+                    "Sweet",
+                    "Fuzz",
+                    "Howl",
+                    "Swell",
+                ],
                 spec.accent,
                 theme,
             );
@@ -691,10 +712,24 @@ fn render_module_content(
                     KNOB_SIZE,
                 );
             });
+            ui.add_space(2.0);
+            mini_slider(ui, setter, &params.movement.mix, "MIX", spec.accent, theme);
+            ui.add_space(4.0);
+            mini_slider(
+                ui,
+                setter,
+                &params.movement.width,
+                "WIDTH",
+                spec.accent,
+                theme,
+            );
+            ui.add_space(2.0);
             module_mode_summary(
                 ui,
                 movement_mode_label(params.movement.mode.value()),
-                &["Off", "Chorus", "Vibrato", "Tremolo"],
+                &[
+                    "Off", "Chorus", "Vibrato", "Tremolo", "Doubler", "Phaser", "Pitch",
+                ],
                 spec.accent,
                 theme,
             );
@@ -721,10 +756,25 @@ fn render_module_content(
                     KNOB_SIZE,
                 );
             });
+            ui.add_space(2.0);
+            mini_slider(ui, setter, &params.diffusion.mix, "MIX", spec.accent, theme);
+            ui.add_space(4.0);
+            mini_slider(
+                ui,
+                setter,
+                &params.diffusion.tone,
+                "TONE",
+                spec.accent,
+                theme,
+            );
+            ui.add_space(2.0);
             module_mode_summary(
                 ui,
                 diffusion_mode_label(params.diffusion.mode.value()),
-                &["Off", "Delay", "Slap", "Reverb"],
+                &[
+                    "Off", "Delay", "Slap", "Reverb", "Cascade", "Reels", "Space", "Collage",
+                    "Reverse",
+                ],
                 spec.accent,
                 theme,
             );
@@ -751,10 +801,32 @@ fn render_module_content(
                     KNOB_SIZE,
                 );
             });
+            ui.add_space(2.0);
+            mini_slider(ui, setter, &params.texture.mix, "MIX", spec.accent, theme);
+            ui.add_space(4.0);
+            mini_slider(
+                ui,
+                setter,
+                &params.texture.degrade,
+                "DEGRADE",
+                spec.accent,
+                theme,
+            );
+            ui.add_space(2.0);
             module_mode_summary(
                 ui,
                 texture_mode_label(params.texture.mode.value()),
-                &["Off", "WowFlutter", "Noise", "Tape"],
+                &[
+                    "Off",
+                    "WowFlutter",
+                    "Noise",
+                    "Tape",
+                    "Filter",
+                    "Squash",
+                    "Cassette",
+                    "Broken",
+                    "Interference",
+                ],
                 spec.accent,
                 theme,
             );

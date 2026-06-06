@@ -102,6 +102,11 @@ fn character_modes_handle_standard_test_signals() {
         ("clean", CharacterMode::Clean),
         ("saturation", CharacterMode::Saturation),
         ("cassette", CharacterMode::Cassette),
+        ("drive", CharacterMode::Drive),
+        ("sweet", CharacterMode::Sweet),
+        ("fuzz", CharacterMode::Fuzz),
+        ("howl", CharacterMode::Howl),
+        ("swell", CharacterMode::Swell),
     ] {
         for signal in TestSignal::ALL {
             let mut params = CharacterParams::default();
@@ -130,6 +135,9 @@ fn movement_modes_handle_standard_test_signals() {
         ("chorus", MovementMode::Chorus),
         ("vibrato", MovementMode::Vibrato),
         ("tremolo", MovementMode::Tremolo),
+        ("doubler", MovementMode::Doubler),
+        ("phaser", MovementMode::Phaser),
+        ("pitch", MovementMode::Pitch),
     ] {
         for signal in TestSignal::ALL {
             let mut params = MovementParams::default();
@@ -158,6 +166,11 @@ fn diffusion_modes_handle_standard_test_signals() {
         ("delay", DiffusionMode::Delay),
         ("slap", DiffusionMode::Slap),
         ("reverb", DiffusionMode::Reverb),
+        ("cascade", DiffusionMode::Cascade),
+        ("reels", DiffusionMode::Reels),
+        ("space", DiffusionMode::Space),
+        ("collage", DiffusionMode::Collage),
+        ("reverse", DiffusionMode::Reverse),
     ] {
         for signal in TestSignal::ALL {
             let mut params = DiffusionParams::default();
@@ -186,6 +199,11 @@ fn texture_modes_handle_standard_test_signals() {
         ("wow-flutter", TextureMode::WowFlutter),
         ("noise", TextureMode::Noise),
         ("tape", TextureMode::Tape),
+        ("filter", TextureMode::Filter),
+        ("squash", TextureMode::Squash),
+        ("cassette", TextureMode::Cassette),
+        ("broken", TextureMode::Broken),
+        ("interference", TextureMode::Interference),
     ] {
         for signal in TestSignal::ALL {
             let mut params = TextureParams::default();

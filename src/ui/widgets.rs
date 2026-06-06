@@ -535,6 +535,11 @@ pub(crate) fn character_mode_selector(
                 CharacterMode::Cassette,
                 "Cassette",
             );
+            enum_option(ui, setter, param, current, CharacterMode::Drive, "Drive");
+            enum_option(ui, setter, param, current, CharacterMode::Sweet, "Sweet");
+            enum_option(ui, setter, param, current, CharacterMode::Fuzz, "Fuzz");
+            enum_option(ui, setter, param, current, CharacterMode::Howl, "Howl");
+            enum_option(ui, setter, param, current, CharacterMode::Swell, "Swell");
         },
     );
 }
@@ -558,6 +563,9 @@ pub(crate) fn movement_mode_selector(
             enum_option(ui, setter, param, current, MovementMode::Chorus, "Chorus");
             enum_option(ui, setter, param, current, MovementMode::Vibrato, "Vibrato");
             enum_option(ui, setter, param, current, MovementMode::Tremolo, "Tremolo");
+            enum_option(ui, setter, param, current, MovementMode::Doubler, "Doubler");
+            enum_option(ui, setter, param, current, MovementMode::Phaser, "Phaser");
+            enum_option(ui, setter, param, current, MovementMode::Pitch, "Pitch");
         },
     );
 }
@@ -581,6 +589,32 @@ pub(crate) fn diffusion_mode_selector(
             enum_option(ui, setter, param, current, DiffusionMode::Delay, "Delay");
             enum_option(ui, setter, param, current, DiffusionMode::Slap, "Slap");
             enum_option(ui, setter, param, current, DiffusionMode::Reverb, "Reverb");
+            enum_option(
+                ui,
+                setter,
+                param,
+                current,
+                DiffusionMode::Cascade,
+                "Cascade",
+            );
+            enum_option(ui, setter, param, current, DiffusionMode::Reels, "Reels");
+            enum_option(ui, setter, param, current, DiffusionMode::Space, "Space");
+            enum_option(
+                ui,
+                setter,
+                param,
+                current,
+                DiffusionMode::Collage,
+                "Collage",
+            );
+            enum_option(
+                ui,
+                setter,
+                param,
+                current,
+                DiffusionMode::Reverse,
+                "Reverse",
+            );
         },
     );
 }
@@ -611,6 +645,25 @@ pub(crate) fn texture_mode_selector(
             );
             enum_option(ui, setter, param, current, TextureMode::Noise, "Noise");
             enum_option(ui, setter, param, current, TextureMode::Tape, "Tape");
+            enum_option(ui, setter, param, current, TextureMode::Filter, "Filter");
+            enum_option(ui, setter, param, current, TextureMode::Squash, "Squash");
+            enum_option(
+                ui,
+                setter,
+                param,
+                current,
+                TextureMode::Cassette,
+                "Cassette",
+            );
+            enum_option(ui, setter, param, current, TextureMode::Broken, "Broken");
+            enum_option(
+                ui,
+                setter,
+                param,
+                current,
+                TextureMode::Interference,
+                "Interference",
+            );
         },
     );
 }
@@ -802,6 +855,11 @@ pub(crate) fn character_mode_label(mode: CharacterMode) -> &'static str {
         CharacterMode::Clean => "Clean",
         CharacterMode::Saturation => "Saturation",
         CharacterMode::Cassette => "Cassette",
+        CharacterMode::Drive => "Drive",
+        CharacterMode::Sweet => "Sweet",
+        CharacterMode::Fuzz => "Fuzz",
+        CharacterMode::Howl => "Howl",
+        CharacterMode::Swell => "Swell",
     }
 }
 
@@ -811,6 +869,9 @@ pub(crate) fn movement_mode_label(mode: MovementMode) -> &'static str {
         MovementMode::Chorus => "Chorus",
         MovementMode::Vibrato => "Vibrato",
         MovementMode::Tremolo => "Tremolo",
+        MovementMode::Doubler => "Doubler",
+        MovementMode::Phaser => "Phaser",
+        MovementMode::Pitch => "Pitch",
     }
 }
 
@@ -820,6 +881,11 @@ pub(crate) fn diffusion_mode_label(mode: DiffusionMode) -> &'static str {
         DiffusionMode::Delay => "Delay",
         DiffusionMode::Slap => "Slap",
         DiffusionMode::Reverb => "Reverb",
+        DiffusionMode::Cascade => "Cascade",
+        DiffusionMode::Reels => "Reels",
+        DiffusionMode::Space => "Space",
+        DiffusionMode::Collage => "Collage",
+        DiffusionMode::Reverse => "Reverse",
     }
 }
 
@@ -829,6 +895,11 @@ pub(crate) fn texture_mode_label(mode: TextureMode) -> &'static str {
         TextureMode::WowFlutter => "WowFlutter",
         TextureMode::Noise => "Noise",
         TextureMode::Tape => "Tape",
+        TextureMode::Filter => "Filter",
+        TextureMode::Squash => "Squash",
+        TextureMode::Cassette => "Cassette",
+        TextureMode::Broken => "Broken",
+        TextureMode::Interference => "Interference",
     }
 }
 
