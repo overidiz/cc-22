@@ -18,7 +18,7 @@ use nih_plug::prelude::Buffer;
 
 use crate::{meters::Meters, params::Cc22Params};
 use bypass::BypassCrossfade;
-use chain::{sanitize_sample, EffectChain};
+use chain::{safety_limit_sample, EffectChain};
 use dry_wet::DryWet;
 use gain::GainStage;
 
@@ -81,11 +81,11 @@ impl Processor {
                 let wet_sample = self
                     .chain
                     .process_sample(channel_index, wet_sample, &chain_frame);
-                let wet_sample = sanitize_sample(self.output_gain.apply(wet_sample, output_gain));
+                let wet_sample = self.output_gain.apply(wet_sample, output_gain);
                 let processed_sample = self.dry_wet.mix(dry_sample, wet_sample, dry_wet);
 
                 *sample =
-                    sanitize_sample(self.bypass.mix(dry_sample, processed_sample, active_mix));
+                    safety_limit_sample(self.bypass.mix(dry_sample, processed_sample, active_mix));
                 output_peak = output_peak.max(sample.abs());
             }
         }

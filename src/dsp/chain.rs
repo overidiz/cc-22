@@ -13,7 +13,8 @@ use super::{
     texture::{Texture, TextureFrame},
 };
 
-const MAX_ABS_SAMPLE: f32 = 8.0;
+pub const SAFETY_LIMIT_CEILING: f32 = 8.0;
+const SOFT_CLIP_START: f32 = 6.0;
 
 #[derive(Default)]
 pub struct EffectChain {
@@ -39,7 +40,6 @@ pub struct ModuleCore {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ModuleFrame {
-    pub amount: f32,
     pub mix: f32,
     pub output_gain: f32,
     pub active_mix: f32,
@@ -54,17 +54,10 @@ impl ModuleCore {
         self.bypass.reset(false);
     }
 
-    pub fn next_frame(
-        &mut self,
-        bypassed: bool,
-        amount: f32,
-        mix: f32,
-        output_trim_db: f32,
-    ) -> ModuleFrame {
+    pub fn next_frame(&mut self, bypassed: bool, mix: f32, output_trim_db: f32) -> ModuleFrame {
         self.bypass.set_bypassed(bypassed);
 
         ModuleFrame {
-            amount: amount.clamp(0.0, 1.0),
             mix: mix.clamp(0.0, 1.0),
             output_gain: db_to_gain(output_trim_db.clamp(-12.0, 12.0)),
             active_mix: self.bypass.next_active_mix(),
@@ -83,7 +76,6 @@ impl ModuleCore {
             dry,
             processed,
             &ModuleFrame {
-                amount: 1.0,
                 mix: 1.0,
                 output_gain: 1.0,
                 active_mix,
@@ -150,28 +142,57 @@ impl EffectChain {
 #[inline]
 pub fn sanitize_sample(sample: f32) -> f32 {
     if sample.is_finite() {
-        sample.clamp(-MAX_ABS_SAMPLE, MAX_ABS_SAMPLE)
+        sample
     } else {
         0.0
     }
 }
 
+#[inline]
+pub fn soft_clip_sample(sample: f32) -> f32 {
+    let sample = sanitize_sample(sample);
+    let magnitude = sample.abs();
+
+    if magnitude <= SOFT_CLIP_START {
+        sample
+    } else {
+        let headroom = SAFETY_LIMIT_CEILING - SOFT_CLIP_START;
+        let limited =
+            SOFT_CLIP_START + (headroom * ((magnitude - SOFT_CLIP_START) / headroom).tanh());
+        sample.signum() * limited
+    }
+}
+
+#[inline]
+pub fn safety_limit_sample(sample: f32) -> f32 {
+    soft_clip_sample(sample).clamp(-SAFETY_LIMIT_CEILING, SAFETY_LIMIT_CEILING)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_sample, ModuleCore};
+    use super::{safety_limit_sample, sanitize_sample, soft_clip_sample, ModuleCore};
 
     #[test]
-    fn sanitizes_invalid_samples() {
+    fn sanitizes_invalid_samples_without_limiting_finite_audio() {
         assert_eq!(sanitize_sample(f32::NAN), 0.0);
         assert_eq!(sanitize_sample(f32::INFINITY), 0.0);
         assert_eq!(sanitize_sample(-f32::INFINITY), 0.0);
+        assert_eq!(sanitize_sample(32.0), 32.0);
+    }
+
+    #[test]
+    fn safety_limiter_is_explicit_and_bounded() {
+        assert_eq!(soft_clip_sample(1.0), 1.0);
+        assert!(soft_clip_sample(16.0) < 8.0);
+        assert!(safety_limit_sample(1_000.0) <= 8.0);
+        assert!(safety_limit_sample(-1_000.0) >= -8.0);
     }
 
     #[test]
     fn module_core_applies_trim_mix_and_bypass() {
         let mut core = ModuleCore::default();
         core.prepare(1_000.0);
-        let frame = core.next_frame(false, 0.0, 1.0, 0.0);
+        let frame = core.next_frame(false, 1.0, 0.0);
 
         assert!((core.apply_frame(0.25, 0.5, &frame) - 0.5).abs() < 0.000_001);
     }

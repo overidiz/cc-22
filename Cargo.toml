@@ -11,6 +11,13 @@ members = [".", "xtask"]
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "cc22-standalone"
+path = "src/main.rs"
+
 [dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f", features = ["standalone"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f" }
+
+[build-dependencies]
+winresource = "0.1"

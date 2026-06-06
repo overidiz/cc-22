@@ -138,7 +138,7 @@ impl Movement {
         let phase_degrees = params.phase.smoothed.next().clamp(0.0, 180.0);
         let tone = params.tone.smoothed.next().clamp(0.0, 1.0);
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
-        let module_frame = self.core.next_frame(params.bypass.value(), depth, mix, 0.0);
+        let module_frame = self.core.next_frame(params.bypass.value(), mix, 0.0);
 
         let phase = self.lfo_phase;
         let frame_shape = match mode {
@@ -152,10 +152,10 @@ impl Movement {
         };
         self.set_lfo_shape(frame_shape);
         let shape_blend = self.shape_crossfade.next_value();
-        let right_phase_offset = if mode == MovementMode::Tremolo {
-            phase_degrees / 360.0
-        } else {
-            0.5
+        let right_phase_offset = match mode {
+            MovementMode::Off => 0.0,
+            MovementMode::Chorus | MovementMode::Vibrato => 0.25 + (phase_degrees / 720.0),
+            MovementMode::Tremolo => phase_degrees / 360.0,
         };
         let lfo_left =
             blended_lfo_value(phase, self.previous_shape, self.target_shape, shape_blend);

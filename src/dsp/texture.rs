@@ -24,6 +24,10 @@ pub enum TextureMode {
     #[id = "noise"]
     #[name = "Noise"]
     Noise,
+
+    #[id = "tape"]
+    #[name = "Tape"]
+    Tape,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +79,7 @@ struct DriftGenerator {
 struct NoiseGenerator {
     rng_state: u32,
     low_state: f32,
+    low2_state: f32,
 }
 
 impl Default for Texture {
@@ -146,9 +151,7 @@ impl Texture {
         let degrade = params.degrade.smoothed.next().clamp(0.0, 1.0);
         let stereo_spread = params.stereo_spread.smoothed.next().clamp(0.0, 1.0);
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
-        let module_frame = self
-            .core
-            .next_frame(params.bypass.value(), wow_depth, mix, 0.0);
+        let module_frame = self.core.next_frame(params.bypass.value(), mix, 0.0);
 
         let wow_phase = self.wow_phase;
         let flutter_phase = self.flutter_phase;
@@ -196,6 +199,10 @@ impl Texture {
             TextureMode::Off => dry,
             TextureMode::WowFlutter => self.process_wow_flutter(index, dry, frame),
             TextureMode::Noise => self.process_noise(index, dry, frame),
+            TextureMode::Tape => {
+                let unstable = self.process_wow_flutter(index, dry, frame);
+                self.process_noise(index, unstable, frame)
+            }
         };
 
         let mixed = if frame.mode == TextureMode::Off {
@@ -363,23 +370,27 @@ impl NoiseGenerator {
         Self {
             rng_state: seed,
             low_state: 0.0,
+            low2_state: 0.0,
         }
     }
 
     fn reset(&mut self) {
         self.low_state = 0.0;
+        self.low2_state = 0.0;
     }
 
     fn next_colored(&mut self, color: f32) -> f32 {
         let white = self.random_bipolar();
         let color = color.clamp(0.0, 1.0);
-        let alpha = 0.015 + (color * color * 0.45);
+        let alpha = 0.03 + (color * color * 0.55);
         self.low_state += alpha * (white - self.low_state);
         self.low_state = sanitize_sample(self.low_state);
+        self.low2_state += alpha * (self.low_state - self.low2_state);
+        self.low2_state = sanitize_sample(self.low2_state);
 
-        let high = white - self.low_state;
+        let high = white - self.low2_state;
         let dark_weight = 1.0 - color;
-        sanitize_sample((self.low_state * dark_weight) + (high * color * 0.65))
+        sanitize_sample((self.low2_state * dark_weight) + (high * color * 0.7))
     }
 
     fn random_bipolar(&mut self) -> f32 {
@@ -563,5 +574,26 @@ mod tests {
             assert!(sample.is_finite());
             assert!(sample.abs() <= 8.0);
         }
+    }
+
+    #[test]
+    fn tape_mode_combines_wow_flutter_noise_and_degrade() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let mut frame = test_frame(TextureMode::Tape);
+        frame.noise_amount = 0.6;
+        frame.noise_color = 0.7;
+        frame.degrade = 0.35;
+        frame.random_drift = 0.2;
+
+        let mut changed = false;
+        for _ in 0..2_000 {
+            let sample = texture.process_sample_for_channel(0, 0.2, &frame);
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 8.0);
+            changed |= (sample - 0.2).abs() > 0.000_1;
+        }
+
+        assert!(changed, "Tape mode should alter the wet path");
     }
 }

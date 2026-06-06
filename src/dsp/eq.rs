@@ -9,6 +9,10 @@ use super::{
 
 const MAX_CHANNELS: usize = 2;
 const NUM_BANDS: usize = 5;
+const COEFFICIENT_FREQUENCY_EPSILON: f32 = 0.01;
+const COEFFICIENT_GAIN_EPSILON: f32 = 0.000_5;
+const COEFFICIENT_Q_EPSILON: f32 = 0.000_1;
+const COEFFICIENT_SAMPLE_RATE_EPSILON: f32 = 0.01;
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EqMode {
@@ -26,6 +30,7 @@ pub struct Eq {
     filters: [[Biquad; NUM_BANDS]; MAX_CHANNELS],
     current_mode: EqMode,
     mode_crossfade: LinearSmoother,
+    coefficient_state: Option<EqCoefficientState>,
     last_output: [f32; MAX_CHANNELS],
     has_processed: bool,
 }
@@ -62,6 +67,20 @@ struct BiquadCoefficients {
     a2: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct EqCoefficientState {
+    sample_rate: f32,
+    low_cut_frequency: f32,
+    low_shelf_gain: f32,
+    low_shelf_frequency: f32,
+    mid_gain: f32,
+    mid_frequency: f32,
+    mid_q: f32,
+    high_shelf_gain: f32,
+    high_shelf_frequency: f32,
+    high_cut_frequency: f32,
+}
+
 impl Default for Eq {
     fn default() -> Self {
         let mut eq = Self {
@@ -70,6 +89,7 @@ impl Default for Eq {
             filters: [[Biquad::default(); NUM_BANDS]; MAX_CHANNELS],
             current_mode: EqMode::On,
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
+            coefficient_state: None,
             last_output: [0.0; MAX_CHANNELS],
             has_processed: false,
         };
@@ -105,6 +125,7 @@ impl Eq {
         self.sample_rate = sample_rate.max(1.0);
         self.core.prepare(self.sample_rate);
         self.mode_crossfade.prepare(self.sample_rate);
+        self.coefficient_state = None;
         self.update_coefficients(&EqFrame::neutral(self.sample_rate));
     }
 
@@ -128,7 +149,7 @@ impl Eq {
             mode,
             active_mix: self
                 .core
-                .next_frame(params.bypass.value(), 1.0, 1.0, 0.0)
+                .next_frame(params.bypass.value(), 1.0, 0.0)
                 .active_mix,
             mode_fade: self.mode_crossfade.next_value().clamp(0.0, 1.0),
             low_cut_frequency: clamp_frequency(
@@ -166,7 +187,7 @@ impl Eq {
                 sample_rate,
             ),
         };
-        self.update_coefficients(&frame);
+        self.update_coefficients_if_needed(&frame);
         frame
     }
 
@@ -207,6 +228,7 @@ impl Eq {
     }
 
     fn update_coefficients(&mut self, frame: &EqFrame) {
+        let state = EqCoefficientState::from_frame(frame, self.sample_rate);
         let coefficients = [
             BiquadCoefficients::high_pass(frame.low_cut_frequency, 0.707, self.sample_rate),
             BiquadCoefficients::low_shelf(
@@ -232,6 +254,18 @@ impl Eq {
             for (filter, coefficients) in channel.iter_mut().zip(coefficients) {
                 filter.set_coefficients(coefficients);
             }
+        }
+
+        self.coefficient_state = Some(state);
+    }
+
+    fn update_coefficients_if_needed(&mut self, frame: &EqFrame) {
+        let next_state = EqCoefficientState::from_frame(frame, self.sample_rate);
+        if self
+            .coefficient_state
+            .is_none_or(|last_state| last_state.differs_from(next_state))
+        {
+            self.update_coefficients(frame);
         }
     }
 
@@ -276,10 +310,73 @@ impl EqFrame {
     }
 }
 
+impl EqCoefficientState {
+    fn from_frame(frame: &EqFrame, sample_rate: f32) -> Self {
+        Self {
+            sample_rate,
+            low_cut_frequency: frame.low_cut_frequency,
+            low_shelf_gain: frame.low_shelf_gain,
+            low_shelf_frequency: frame.low_shelf_frequency,
+            mid_gain: frame.mid_gain,
+            mid_frequency: frame.mid_frequency,
+            mid_q: frame.mid_q,
+            high_shelf_gain: frame.high_shelf_gain,
+            high_shelf_frequency: frame.high_shelf_frequency,
+            high_cut_frequency: frame.high_cut_frequency,
+        }
+    }
+
+    fn differs_from(self, other: Self) -> bool {
+        value_changed(
+            self.sample_rate,
+            other.sample_rate,
+            COEFFICIENT_SAMPLE_RATE_EPSILON,
+        ) || value_changed(
+            self.low_cut_frequency,
+            other.low_cut_frequency,
+            COEFFICIENT_FREQUENCY_EPSILON,
+        ) || value_changed(
+            self.low_shelf_gain,
+            other.low_shelf_gain,
+            COEFFICIENT_GAIN_EPSILON,
+        ) || value_changed(
+            self.low_shelf_frequency,
+            other.low_shelf_frequency,
+            COEFFICIENT_FREQUENCY_EPSILON,
+        ) || value_changed(self.mid_gain, other.mid_gain, COEFFICIENT_GAIN_EPSILON)
+            || value_changed(
+                self.mid_frequency,
+                other.mid_frequency,
+                COEFFICIENT_FREQUENCY_EPSILON,
+            )
+            || value_changed(self.mid_q, other.mid_q, COEFFICIENT_Q_EPSILON)
+            || value_changed(
+                self.high_shelf_gain,
+                other.high_shelf_gain,
+                COEFFICIENT_GAIN_EPSILON,
+            )
+            || value_changed(
+                self.high_shelf_frequency,
+                other.high_shelf_frequency,
+                COEFFICIENT_FREQUENCY_EPSILON,
+            )
+            || value_changed(
+                self.high_cut_frequency,
+                other.high_cut_frequency,
+                COEFFICIENT_FREQUENCY_EPSILON,
+            )
+    }
+}
+
 #[inline]
 fn linear_crossfade(dry: f32, wet: f32, amount: f32) -> f32 {
     let amount = amount.clamp(0.0, 1.0);
     sanitize_sample((dry * (1.0 - amount)) + (wet * amount))
+}
+
+#[inline]
+fn value_changed(previous: f32, next: f32, epsilon: f32) -> bool {
+    (previous - next).abs() > epsilon
 }
 
 impl Biquad {
@@ -468,12 +565,15 @@ mod tests {
         let mut filter = Biquad::default();
         filter.set_coefficients(BiquadCoefficients::peaking(1_000.0, 18.0, 10.0, 48_000.0));
 
-        let mut sample = 1.0;
-        for _ in 0..4_000 {
-            sample = filter.process(sample);
+        let mut peak = 0.0_f32;
+        for index in 0..4_000 {
+            let input = if index == 0 { 1.0 } else { 0.0 };
+            let sample = filter.process(input);
             assert!(sample.is_finite());
-            assert!(sample.abs() <= 8.0);
+            peak = peak.max(sample.abs());
         }
+
+        assert!(peak < 8.0, "biquad impulse response peak was {peak}");
     }
 
     #[test]
@@ -496,11 +596,14 @@ mod tests {
         };
         eq.update_coefficients(&frame);
 
-        let mut sample = 0.5;
-        for _ in 0..4_000 {
-            sample = eq.process_sample_for_channel(0, sample, &frame);
+        let mut peak = 0.0_f32;
+        for index in 0..4_000 {
+            let input = if index == 0 { 0.5 } else { 0.0 };
+            let sample = eq.process_sample_for_channel(0, input, &frame);
             assert!(sample.is_finite());
-            assert!(sample.abs() <= 8.0);
+            peak = peak.max(sample.abs());
         }
+
+        assert!(peak < 8.0, "eq impulse response peak was {peak}");
     }
 }

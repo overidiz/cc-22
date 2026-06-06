@@ -3,7 +3,7 @@ use nih_plug::prelude::*;
 use crate::params::CharacterParams;
 
 use super::{
-    chain::{sanitize_sample, ModuleCore},
+    chain::{sanitize_sample, soft_clip_sample, ModuleCore},
     dry_wet::DryWet,
     gain::db_to_gain,
     smoothing::LinearSmoother,
@@ -101,7 +101,7 @@ impl Character {
         let noise = params.noise.smoothed.next().clamp(0.0, 1.0);
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
         let output_gain = db_to_gain(params.output_trim.smoothed.next().clamp(-12.0, 12.0));
-        let module_frame = self.core.next_frame(params.bypass.value(), drive, mix, 0.0);
+        let module_frame = self.core.next_frame(params.bypass.value(), mix, 0.0);
 
         CharacterFrame {
             mode,
@@ -149,7 +149,8 @@ impl Character {
 
     fn process_saturation(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let drive_gain = drive_to_gain(frame.drive);
-        let driven = sanitize_sample(sample * drive_gain);
+        let bias = 0.008 * frame.drive;
+        let driven = soft_clip_sample((sample + bias) * drive_gain);
         let saturated = fast_tanh(driven);
         let compensated = saturated * drive_compensation(frame.drive, drive_gain);
         self.apply_tone(channel, compensated, frame)
@@ -159,7 +160,7 @@ impl Character {
         let index = channel.min(MAX_CHANNELS - 1);
         let instability = self.next_instability(index, frame);
         let drive_gain = cassette_drive_to_gain(frame.drive, frame.age) * instability;
-        let driven = sanitize_sample(sample * drive_gain);
+        let driven = soft_clip_sample(sample * drive_gain);
         let saturated = fast_tanh(driven + (0.015 * frame.age * driven * driven));
         let compressed = saturated * cassette_compensation(frame.drive, frame.age, drive_gain);
         let aged = self.apply_cassette_tone(index, compressed, frame);
@@ -261,8 +262,11 @@ fn cassette_compensation(drive: f32, age: f32, drive_gain: f32) -> f32 {
 }
 
 #[inline]
-fn fast_tanh(sample: f32) -> f32 {
-    sample.tanh()
+fn fast_tanh(x: f32) -> f32 {
+    let x2 = x * x;
+    let num = x * (27.0 + x2);
+    let den = 27.0 + 9.0 * x2;
+    num / den
 }
 
 #[inline]
@@ -331,6 +335,33 @@ mod tests {
         let sample = character.process_sample(0, 100.0, &frame);
         assert!(sample.is_finite());
         assert!(sample.abs() <= 8.0);
+    }
+
+    #[test]
+    fn high_drive_saturation_is_soft_limited() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = CharacterFrame {
+            mode: CharacterMode::Saturation,
+            drive: 1.0,
+            age: 0.0,
+            tone: 1.0,
+            mix: 1.0,
+            output_gain: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 1.0,
+            cassette_tone_alpha: 1.0,
+            cassette_noise_gain: 0.0,
+            cassette_flutter_depth: 0.0,
+            mode_fade: 1.0,
+        };
+
+        let sample = character.process_sample(0, 1_000.0, &frame);
+        assert!(sample.is_finite());
+        assert!(
+            sample.abs() < 2.0,
+            "high drive saturation should be bounded by the waveshaper, got {sample}"
+        );
     }
 
     #[test]

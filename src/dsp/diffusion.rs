@@ -11,14 +11,21 @@ use super::{
 const MAX_CHANNELS: usize = 2;
 const MAX_DELAY_SECONDS: f32 = 2.1;
 const MAX_REVERB_PRE_DELAY_SECONDS: f32 = 0.13;
-const NUM_REVERB_COMBS: usize = 4;
-const NUM_REVERB_ALLPASSES: usize = 2;
+const NUM_REVERB_COMBS: usize = 6;
+const NUM_REVERB_ALLPASSES: usize = 3;
 const MIN_TONE_HZ: f32 = 900.0;
 const MAX_TONE_HZ: f32 = 16_000.0;
-const REVERB_COMB_DELAYS_MS: [[f32; NUM_REVERB_COMBS]; MAX_CHANNELS] =
-    [[29.7, 37.1, 41.1, 43.7], [30.9, 33.3, 39.5, 45.1]];
+const REVERB_COMB_DELAYS_MS: [[f32; NUM_REVERB_COMBS]; MAX_CHANNELS] = [
+    [23.83, 31.37, 37.11, 43.73, 53.17, 61.71],
+    [25.31, 33.89, 39.79, 47.29, 56.11, 64.43],
+];
 const REVERB_ALLPASS_DELAYS_MS: [[f32; NUM_REVERB_ALLPASSES]; MAX_CHANNELS] =
-    [[5.0, 1.7], [5.6, 1.9]];
+    [[7.13, 3.97, 1.73], [7.91, 4.31, 1.91]];
+const REVERB_MOD_RATES_HZ: [[f32; NUM_REVERB_COMBS]; MAX_CHANNELS] = [
+    [0.071, 0.083, 0.097, 0.113, 0.131, 0.149],
+    [0.079, 0.089, 0.103, 0.121, 0.137, 0.157],
+];
+const REVERB_MOD_DEPTH_MS: f32 = 0.38;
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffusionMode {
@@ -76,6 +83,7 @@ struct ReverbTank {
     pre_delay: [DelayLine; MAX_CHANNELS],
     combs: [[DelayLine; NUM_REVERB_COMBS]; MAX_CHANNELS],
     allpasses: [[DelayLine; NUM_REVERB_ALLPASSES]; MAX_CHANNELS],
+    mod_phases: [[f32; NUM_REVERB_COMBS]; MAX_CHANNELS],
     last_wet: [f32; MAX_CHANNELS],
     sample_rate: f32,
 }
@@ -135,9 +143,7 @@ impl Diffusion {
         let tone = params.tone.smoothed.next().clamp(0.0, 1.0);
         let stereo_offset = params.stereo_offset.smoothed.next().clamp(-0.5, 0.5);
         let width = params.width.smoothed.next().clamp(0.0, 1.0);
-        let module_frame = self
-            .core
-            .next_frame(params.bypass.value(), feedback, mix, 0.0);
+        let module_frame = self.core.next_frame(params.bypass.value(), mix, 0.0);
 
         DiffusionFrame {
             mode,
@@ -310,6 +316,7 @@ impl Default for ReverbTank {
             pre_delay: std::array::from_fn(|_| DelayLine::default()),
             combs: std::array::from_fn(|_| std::array::from_fn(|_| DelayLine::default())),
             allpasses: std::array::from_fn(|_| std::array::from_fn(|_| DelayLine::default())),
+            mod_phases: [[0.0; NUM_REVERB_COMBS]; MAX_CHANNELS],
             last_wet: [0.0; MAX_CHANNELS],
             sample_rate: 44_100.0,
         }
@@ -334,6 +341,10 @@ impl ReverbTank {
             for allpass in &mut self.allpasses[channel] {
                 allpass.prepare(allpass_samples);
             }
+
+            for (index, phase) in self.mod_phases[channel].iter_mut().enumerate() {
+                *phase = ((index as f32 * 0.173) + (channel as f32 * 0.091)).fract();
+            }
         }
 
         self.last_wet = [0.0; MAX_CHANNELS];
@@ -350,6 +361,10 @@ impl ReverbTank {
             for allpass in &mut self.allpasses[channel] {
                 allpass.reset();
             }
+
+            for (index, phase) in self.mod_phases[channel].iter_mut().enumerate() {
+                *phase = ((index as f32 * 0.173) + (channel as f32 * 0.091)).fract();
+            }
         }
 
         self.last_wet = [0.0; MAX_CHANNELS];
@@ -364,27 +379,36 @@ impl ReverbTank {
 
         let mut sum = 0.0;
         for (comb_index, delay_ms) in REVERB_COMB_DELAYS_MS[channel].iter().enumerate() {
-            let delay_samples = *delay_ms * 0.001 * self.sample_rate * size_scale;
+            let mod_phase = self.next_mod_phase(channel, comb_index);
+            let mod_ms = mod_phase.sin() * REVERB_MOD_DEPTH_MS * (0.25 + frame.size * 0.75);
+            let delay_samples = (*delay_ms + mod_ms) * 0.001 * self.sample_rate * size_scale;
             sum += self.combs[channel][comb_index].process_comb(
-                reverb_input * 0.28,
+                reverb_input * 0.16,
                 delay_samples,
                 feedback,
                 damping_alpha,
             );
         }
 
-        let mut wet = sum * 0.22;
+        let mut wet = sum * 0.16;
         for (allpass_index, delay_ms) in REVERB_ALLPASS_DELAYS_MS[channel].iter().enumerate() {
             let delay_samples = *delay_ms * 0.001 * self.sample_rate * size_scale;
-            wet = self.allpasses[channel][allpass_index].process_allpass(wet, delay_samples, 0.5);
+            wet = self.allpasses[channel][allpass_index].process_allpass(wet, delay_samples, 0.58);
         }
 
-        wet = sanitize_sample(wet);
+        wet = sanitize_sample((wet * 0.82) + (self.last_wet[channel] * 0.18));
         let other = self.last_wet[1 - channel];
         self.last_wet[channel] = wet;
 
         let monoish = (wet + other) * 0.5;
         sanitize_sample((monoish * (1.0 - frame.width)) + (wet * frame.width))
+    }
+
+    fn next_mod_phase(&mut self, channel: usize, comb_index: usize) -> f32 {
+        let phase = self.mod_phases[channel][comb_index];
+        let next = phase + (REVERB_MOD_RATES_HZ[channel][comb_index] / self.sample_rate.max(1.0));
+        self.mod_phases[channel][comb_index] = if next >= 1.0 { next - 1.0 } else { next };
+        phase * core::f32::consts::TAU
     }
 }
 
@@ -489,12 +513,12 @@ fn slap_channel_delay_ms(channel: usize, frame: &DiffusionFrame) -> f32 {
 
 #[inline]
 fn reverb_feedback(decay: f32) -> f32 {
-    (0.55 + (decay.clamp(0.0, 1.0) * 0.36)).clamp(0.55, 0.91)
+    (0.50 + (decay.clamp(0.0, 1.0) * 0.36)).clamp(0.50, 0.86)
 }
 
 #[inline]
 fn damping_to_alpha(damping: f32) -> f32 {
-    (1.0 - (damping.clamp(0.0, 1.0) * 0.9)).clamp(0.1, 1.0)
+    (0.78 - (damping.clamp(0.0, 1.0) * 0.68)).clamp(0.10, 0.78)
 }
 
 #[inline]
@@ -579,12 +603,34 @@ mod tests {
         let mut delay = StereoDelay::default();
         delay.prepare(48_000.0);
 
-        let mut sample = 1.0;
-        for _ in 0..8_000 {
-            sample = delay.process(0, sample, 480.0, 0.949, 0.25);
+        let mut peak = 0.0_f32;
+        for index in 0..8_000 {
+            let input = if index == 0 { 1.0 } else { 0.0 };
+            let sample = delay.process(0, input, 480.0, 0.949, 0.25);
             assert!(sample.is_finite());
-            assert!(sample.abs() <= 8.0);
+            peak = peak.max(sample.abs());
         }
+
+        assert!(peak < 4.0, "high feedback delay peak was {peak}");
+    }
+
+    #[test]
+    fn high_feedback_delay_does_not_run_away_without_safety_limiter() {
+        let mut delay = StereoDelay::default();
+        delay.prepare(48_000.0);
+
+        let mut peak = 0.0_f32;
+        for index in 0..48_000 {
+            let input = if index == 0 { 1.0 } else { 0.0 };
+            let sample = delay.process(0, input, 480.0, 0.949, 1.0);
+            assert!(sample.is_finite());
+            peak = peak.max(sample.abs());
+        }
+
+        assert!(
+            peak <= 1.000_1,
+            "high feedback delay should decay instead of relying on output safety limiting, peak {peak}"
+        );
     }
 
     #[test]
@@ -624,5 +670,45 @@ mod tests {
             assert!(sample.is_finite());
             assert!(sample.abs() <= 8.0);
         }
+    }
+
+    #[test]
+    fn high_decay_reverb_impulse_has_smooth_tail() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let mut frame = test_frame(DiffusionMode::Reverb);
+        frame.size = 1.0;
+        frame.decay = 1.0;
+        frame.damping = 0.75;
+        frame.width = 1.0;
+        frame.pre_delay_ms = 0.0;
+
+        let mut peak = 0.0_f32;
+        let mut max_tail_step = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut tail_energy = 0.0_f32;
+
+        for index in 0..36_000 {
+            let input = if index == 0 { 1.0 } else { 0.0 };
+            let sample = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(sample.is_finite());
+            peak = peak.max(sample.abs());
+
+            if index > 2_000 {
+                max_tail_step = max_tail_step.max((sample - previous).abs());
+                tail_energy += sample * sample;
+            }
+            previous = sample;
+        }
+
+        assert!(peak < 1.5, "high decay reverb peak was {peak}");
+        assert!(
+            max_tail_step < 0.12,
+            "high decay reverb tail had a large metallic step: {max_tail_step}"
+        );
+        assert!(
+            tail_energy > 0.000_01,
+            "high decay reverb tail died too quickly"
+        );
     }
 }
