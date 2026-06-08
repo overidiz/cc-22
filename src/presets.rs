@@ -15,6 +15,11 @@ pub enum PresetId {
     PsychedelicMotion,
     LoFiRoom,
     CleanWiden,
+    SweetConsole,
+    FuzzCollage,
+    ReverseDream,
+    TapeReels,
+    InterferenceSwell,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,7 +110,7 @@ pub struct EqPreset {
     pub high_cut_hz: f32,
 }
 
-pub const INTERNAL_PRESETS: [InternalPreset; 5] = [
+pub const INTERNAL_PRESETS: [InternalPreset; 10] = [
     InternalPreset {
         id: PresetId::WarmTapeChorus,
         name: "Warm Tape Chorus",
@@ -446,6 +451,346 @@ pub const INTERNAL_PRESETS: [InternalPreset; 5] = [
             dry_wet: 1.0,
         },
     },
+    InternalPreset {
+        id: PresetId::SweetConsole,
+        name: "Sweet Console",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Sweet,
+                drive: 0.34,
+                age: 0.0,
+                tone: 0.58,
+                noise: 0.0,
+                mix: 0.70,
+                output_trim_db: -1.2,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Doubler,
+                rate_hz: 0.35,
+                depth: 0.18,
+                shape: LfoShape::Sine,
+                delay_ms: 20.0,
+                feedback: 0.06,
+                width: 0.72,
+                phase_degrees: 120.0,
+                tone: 0.58,
+                mix: 0.32,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Space,
+                time_ms: 360.0,
+                feedback: 0.24,
+                size: 0.52,
+                decay: 0.48,
+                pre_delay_ms: 18.0,
+                damping: 0.50,
+                mix: 0.26,
+                tone: 0.56,
+                stereo_offset: 0.08,
+                width: 0.82,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Cassette,
+                wow_depth: 0.18,
+                wow_rate_hz: 0.38,
+                flutter_depth: 0.07,
+                flutter_rate_hz: 7.2,
+                random_drift: 0.10,
+                noise_amount: 0.16,
+                noise_color: 0.42,
+                degrade: 0.22,
+                stereo_spread: 0.72,
+                mix: 0.24,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 35.0,
+                low_shelf_gain_db: -0.4,
+                low_shelf_hz: 140.0,
+                mid_gain_db: 0.6,
+                mid_hz: 1_500.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: -0.8,
+                high_shelf_hz: 8_500.0,
+                high_cut_hz: 17_000.0,
+            },
+            input_gain_db: -0.5,
+            output_gain_db: -1.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::FuzzCollage,
+        name: "Fuzz Collage",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Fuzz,
+                drive: 0.44,
+                age: 0.0,
+                tone: 0.46,
+                noise: 0.0,
+                mix: 0.64,
+                output_trim_db: -3.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Phaser,
+                rate_hz: 0.72,
+                depth: 0.42,
+                shape: LfoShape::Sine,
+                delay_ms: 14.0,
+                feedback: 0.24,
+                width: 0.70,
+                phase_degrees: 140.0,
+                tone: 0.48,
+                mix: 0.38,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Collage,
+                time_ms: 520.0,
+                feedback: 0.34,
+                size: 0.46,
+                decay: 0.36,
+                pre_delay_ms: 12.0,
+                damping: 0.58,
+                mix: 0.30,
+                tone: 0.50,
+                stereo_offset: 0.18,
+                width: 0.78,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Broken,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.32,
+                noise_amount: 0.20,
+                noise_color: 0.62,
+                degrade: 0.38,
+                stereo_spread: 0.76,
+                mix: 0.28,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 70.0,
+                low_shelf_gain_db: -1.2,
+                low_shelf_hz: 160.0,
+                mid_gain_db: 0.8,
+                mid_hz: 1_200.0,
+                mid_q: 0.95,
+                high_shelf_gain_db: -2.0,
+                high_shelf_hz: 7_000.0,
+                high_cut_hz: 14_000.0,
+            },
+            input_gain_db: -2.0,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ReverseDream,
+        name: "Reverse Dream",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Drive,
+                drive: 0.26,
+                age: 0.0,
+                tone: 0.60,
+                noise: 0.0,
+                mix: 0.58,
+                output_trim_db: -1.4,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Vibrato,
+                rate_hz: 2.1,
+                depth: 0.24,
+                shape: LfoShape::Triangle,
+                delay_ms: 13.0,
+                feedback: 0.0,
+                width: 0.84,
+                phase_degrees: 160.0,
+                tone: 0.62,
+                mix: 0.34,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reverse,
+                time_ms: 620.0,
+                feedback: 0.28,
+                size: 0.42,
+                decay: 0.36,
+                pre_delay_ms: 16.0,
+                damping: 0.52,
+                mix: 0.32,
+                tone: 0.55,
+                stereo_offset: 0.22,
+                width: 0.86,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Filter,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.0,
+                noise_amount: 0.0,
+                noise_color: 0.36,
+                degrade: 0.24,
+                stereo_spread: 0.58,
+                mix: 0.24,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 45.0,
+                low_shelf_gain_db: -0.6,
+                low_shelf_hz: 140.0,
+                mid_gain_db: -0.4,
+                mid_hz: 2_500.0,
+                mid_q: 0.75,
+                high_shelf_gain_db: -1.0,
+                high_shelf_hz: 9_000.0,
+                high_cut_hz: 16_000.0,
+            },
+            input_gain_db: -0.5,
+            output_gain_db: -1.2,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::TapeReels,
+        name: "Tape Reels",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Sweet,
+                drive: 0.30,
+                age: 0.0,
+                tone: 0.52,
+                noise: 0.0,
+                mix: 0.66,
+                output_trim_db: -1.5,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Doubler,
+                rate_hz: 0.30,
+                depth: 0.14,
+                shape: LfoShape::Sine,
+                delay_ms: 24.0,
+                feedback: 0.08,
+                width: 0.82,
+                phase_degrees: 150.0,
+                tone: 0.50,
+                mix: 0.30,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reels,
+                time_ms: 460.0,
+                feedback: 0.36,
+                size: 0.38,
+                decay: 0.34,
+                pre_delay_ms: 14.0,
+                damping: 0.54,
+                mix: 0.28,
+                tone: 0.44,
+                stereo_offset: 0.16,
+                width: 0.74,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Cassette,
+                wow_depth: 0.25,
+                wow_rate_hz: 0.42,
+                flutter_depth: 0.10,
+                flutter_rate_hz: 8.4,
+                random_drift: 0.18,
+                noise_amount: 0.20,
+                noise_color: 0.35,
+                degrade: 0.30,
+                stereo_spread: 0.78,
+                mix: 0.30,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 50.0,
+                low_shelf_gain_db: -0.8,
+                low_shelf_hz: 130.0,
+                mid_gain_db: -0.8,
+                mid_hz: 2_200.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: -2.6,
+                high_shelf_hz: 6_800.0,
+                high_cut_hz: 13_500.0,
+            },
+            input_gain_db: -0.5,
+            output_gain_db: -1.5,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::InterferenceSwell,
+        name: "Interference Swell",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Swell,
+                drive: 0.48,
+                age: 0.0,
+                tone: 0.54,
+                noise: 0.0,
+                mix: 0.72,
+                output_trim_db: -2.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Pitch,
+                rate_hz: 0.80,
+                depth: 0.28,
+                shape: LfoShape::Sine,
+                delay_ms: 15.0,
+                feedback: 0.0,
+                width: 0.76,
+                phase_degrees: 180.0,
+                tone: 0.55,
+                mix: 0.30,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Space,
+                time_ms: 500.0,
+                feedback: 0.22,
+                size: 0.58,
+                decay: 0.52,
+                pre_delay_ms: 24.0,
+                damping: 0.56,
+                mix: 0.30,
+                tone: 0.50,
+                stereo_offset: 0.12,
+                width: 0.88,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Interference,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.36,
+                noise_amount: 0.26,
+                noise_color: 0.68,
+                degrade: 0.28,
+                stereo_spread: 0.84,
+                mix: 0.24,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 60.0,
+                low_shelf_gain_db: -1.0,
+                low_shelf_hz: 150.0,
+                mid_gain_db: -0.6,
+                mid_hz: 1_800.0,
+                mid_q: 0.85,
+                high_shelf_gain_db: -1.5,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 15_500.0,
+            },
+            input_gain_db: -1.0,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
 ];
 
 pub fn internal_presets() -> &'static [InternalPreset] {
@@ -575,12 +920,14 @@ mod tests {
     };
 
     #[test]
-    fn exposes_five_named_presets() {
+    fn exposes_named_presets_without_reordering_existing_ones() {
         let presets = internal_presets();
 
-        assert_eq!(presets.len(), 5);
+        assert_eq!(presets.len(), 10);
         assert_eq!(presets[0].name, "Warm Tape Chorus");
         assert_eq!(presets[4].name, "Clean Widen");
+        assert_eq!(presets[5].name, "Sweet Console");
+        assert_eq!(presets[9].name, "Interference Swell");
     }
 
     #[test]
@@ -602,6 +949,9 @@ mod tests {
             assert!(values.diffusion.mix <= 0.40);
             assert!(values.texture.mix <= 0.45);
             assert!(values.movement.mix <= 0.60);
+            assert!(values.character.mix <= 0.85);
+            assert!(values.input_gain_db <= 0.0);
+            assert!(values.output_gain_db <= 0.0);
         }
     }
 
@@ -612,5 +962,47 @@ mod tests {
         assert_eq!(preset.values.character.mode, CharacterMode::Clean);
         assert_eq!(preset.values.texture.mode, TextureMode::Off);
         assert_eq!(preset.values.movement.mode, MovementMode::Chorus);
+    }
+
+    #[test]
+    fn new_presets_cover_new_mode_combinations() {
+        let sweet_console = find_preset(PresetId::SweetConsole).expect("preset exists");
+        assert_eq!(sweet_console.values.character.mode, CharacterMode::Sweet);
+        assert_eq!(sweet_console.values.movement.mode, MovementMode::Doubler);
+        assert_eq!(sweet_console.values.diffusion.mode, DiffusionMode::Space);
+        assert_eq!(sweet_console.values.texture.mode, TextureMode::Cassette);
+
+        let fuzz_collage = find_preset(PresetId::FuzzCollage).expect("preset exists");
+        assert_eq!(fuzz_collage.values.character.mode, CharacterMode::Fuzz);
+        assert_eq!(fuzz_collage.values.movement.mode, MovementMode::Phaser);
+        assert_eq!(fuzz_collage.values.diffusion.mode, DiffusionMode::Collage);
+        assert_eq!(fuzz_collage.values.texture.mode, TextureMode::Broken);
+
+        let reverse_dream = find_preset(PresetId::ReverseDream).expect("preset exists");
+        assert_eq!(reverse_dream.values.character.mode, CharacterMode::Drive);
+        assert_eq!(reverse_dream.values.movement.mode, MovementMode::Vibrato);
+        assert_eq!(reverse_dream.values.diffusion.mode, DiffusionMode::Reverse);
+        assert_eq!(reverse_dream.values.texture.mode, TextureMode::Filter);
+
+        let tape_reels = find_preset(PresetId::TapeReels).expect("preset exists");
+        assert_eq!(tape_reels.values.character.mode, CharacterMode::Sweet);
+        assert_eq!(tape_reels.values.movement.mode, MovementMode::Doubler);
+        assert_eq!(tape_reels.values.diffusion.mode, DiffusionMode::Reels);
+        assert_eq!(tape_reels.values.texture.mode, TextureMode::Cassette);
+
+        let interference_swell = find_preset(PresetId::InterferenceSwell).expect("preset exists");
+        assert_eq!(
+            interference_swell.values.character.mode,
+            CharacterMode::Swell
+        );
+        assert_eq!(interference_swell.values.movement.mode, MovementMode::Pitch);
+        assert_eq!(
+            interference_swell.values.diffusion.mode,
+            DiffusionMode::Space
+        );
+        assert_eq!(
+            interference_swell.values.texture.mode,
+            TextureMode::Interference
+        );
     }
 }

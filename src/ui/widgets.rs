@@ -203,7 +203,7 @@ pub(crate) fn mini_slider(
     label: &'static str,
     accent: Color32,
     theme: Theme,
-) {
+) -> egui::Response {
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.label(
@@ -232,8 +232,9 @@ pub(crate) fn mini_slider(
             accent,
             theme,
         );
-        response.on_hover_text(format!("{}: {}", param.name(), value_string(param)));
-    });
+        response.on_hover_text(format!("{}: {}", param.name(), value_string(param)))
+    })
+    .inner
 }
 
 pub(crate) fn handle_float_drag(

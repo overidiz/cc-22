@@ -468,6 +468,349 @@ fn texture_wow_flutter_integration_moves_audio_without_instability() {
     );
 }
 
+#[test]
+fn new_character_modes_validate_active_settings_mix_and_bypass() {
+    for (mode_id, mode) in [
+        ("drive", CharacterMode::Drive),
+        ("sweet", CharacterMode::Sweet),
+        ("fuzz", CharacterMode::Fuzz),
+        ("howl", CharacterMode::Howl),
+        ("swell", CharacterMode::Swell),
+    ] {
+        for signal in TestSignal::ALL {
+            let input = signal.render(TEST_BLOCK_SAMPLES * 2, TEST_SAMPLE_RATE);
+
+            let mut active_params = active_character_params(mode, 1.0, false);
+            let mut character = Character::default();
+            character.prepare(TEST_SAMPLE_RATE);
+            character.reset();
+            let mut active = input.clone();
+            with_stereo_buffer(&mut active, |buffer| {
+                character.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("character/{mode_id}/active/{}", signal.name()),
+                &active,
+            );
+
+            let dry_params = active_character_params(mode, 0.0, false);
+            let mut character = Character::default();
+            character.prepare(TEST_SAMPLE_RATE);
+            character.reset();
+            let mut dry = input.clone();
+            with_stereo_buffer(&mut dry, |buffer| {
+                character.process_block(buffer, &dry_params);
+            });
+            assert_audio_sane(&format!("character/{mode_id}/mix0/{}", signal.name()), &dry);
+            assert!(
+                max_abs_difference(&dry, &input) < 0.000_001,
+                "character/{mode_id} mix 0 should preserve dry {}",
+                signal.name()
+            );
+
+            active_params.bypass = BoolParam::new("Character Bypass", true);
+            active_params.reset_smoothers();
+            let mut character = Character::default();
+            character.prepare(TEST_SAMPLE_RATE);
+            character.reset();
+            let mut warmup = input.clone();
+            with_stereo_buffer(&mut warmup, |buffer| {
+                character.process_block(buffer, &active_params);
+            });
+            let mut bypassed = input.clone();
+            with_stereo_buffer(&mut bypassed, |buffer| {
+                character.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("character/{mode_id}/bypass/{}", signal.name()),
+                &bypassed,
+            );
+            assert!(
+                max_abs_difference(&bypassed, &input) < 0.000_001,
+                "character/{mode_id} bypass should preserve dry {}",
+                signal.name()
+            );
+        }
+    }
+}
+
+#[test]
+fn new_movement_modes_validate_active_settings_mix_and_bypass() {
+    for (mode_id, mode) in [
+        ("doubler", MovementMode::Doubler),
+        ("vibrato", MovementMode::Vibrato),
+        ("phaser", MovementMode::Phaser),
+        ("tremolo", MovementMode::Tremolo),
+        ("pitch", MovementMode::Pitch),
+    ] {
+        for signal in TestSignal::ALL {
+            let input = signal.render(TEST_BLOCK_SAMPLES * 2, TEST_SAMPLE_RATE);
+
+            let mut active_params = active_movement_params(mode, 1.0, false);
+            let mut movement = Movement::default();
+            movement.prepare(TEST_SAMPLE_RATE);
+            movement.reset();
+            let mut active = input.clone();
+            with_stereo_buffer(&mut active, |buffer| {
+                movement.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("movement/{mode_id}/active/{}", signal.name()),
+                &active,
+            );
+
+            let dry_params = active_movement_params(mode, 0.0, false);
+            let mut movement = Movement::default();
+            movement.prepare(TEST_SAMPLE_RATE);
+            movement.reset();
+            let mut dry = input.clone();
+            with_stereo_buffer(&mut dry, |buffer| {
+                movement.process_block(buffer, &dry_params);
+            });
+            assert_audio_sane(&format!("movement/{mode_id}/mix0/{}", signal.name()), &dry);
+            assert!(
+                max_abs_difference(&dry, &input) < 0.000_001,
+                "movement/{mode_id} mix 0 should preserve dry {}",
+                signal.name()
+            );
+
+            active_params.bypass = BoolParam::new("Movement Bypass", true);
+            active_params.reset_smoothers();
+            let mut movement = Movement::default();
+            movement.prepare(TEST_SAMPLE_RATE);
+            movement.reset();
+            let mut warmup = input.clone();
+            with_stereo_buffer(&mut warmup, |buffer| {
+                movement.process_block(buffer, &active_params);
+            });
+            let mut bypassed = input.clone();
+            with_stereo_buffer(&mut bypassed, |buffer| {
+                movement.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("movement/{mode_id}/bypass/{}", signal.name()),
+                &bypassed,
+            );
+            assert!(
+                max_abs_difference(&bypassed, &input) < 0.000_001,
+                "movement/{mode_id} bypass should preserve dry {}",
+                signal.name()
+            );
+        }
+    }
+}
+
+#[test]
+fn new_diffusion_modes_validate_active_settings_mix_and_bypass() {
+    for (mode_id, mode) in [
+        ("cascade", DiffusionMode::Cascade),
+        ("reels", DiffusionMode::Reels),
+        ("space", DiffusionMode::Space),
+        ("collage", DiffusionMode::Collage),
+        ("reverse", DiffusionMode::Reverse),
+    ] {
+        for signal in TestSignal::ALL {
+            let input = signal.render(TEST_BLOCK_SAMPLES * 4, TEST_SAMPLE_RATE);
+
+            let mut active_params = active_diffusion_params(mode, 1.0, false);
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(TEST_SAMPLE_RATE);
+            diffusion.reset();
+            let mut active = input.clone();
+            with_stereo_buffer(&mut active, |buffer| {
+                diffusion.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("diffusion/{mode_id}/active/{}", signal.name()),
+                &active,
+            );
+
+            let dry_params = active_diffusion_params(mode, 0.0, false);
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(TEST_SAMPLE_RATE);
+            diffusion.reset();
+            let mut dry = input.clone();
+            with_stereo_buffer(&mut dry, |buffer| {
+                diffusion.process_block(buffer, &dry_params);
+            });
+            assert_audio_sane(&format!("diffusion/{mode_id}/mix0/{}", signal.name()), &dry);
+            assert!(
+                max_abs_difference(&dry, &input) < 0.000_001,
+                "diffusion/{mode_id} mix 0 should preserve dry {}",
+                signal.name()
+            );
+
+            active_params.bypass = BoolParam::new("Diffusion Bypass", true);
+            active_params.reset_smoothers();
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(TEST_SAMPLE_RATE);
+            diffusion.reset();
+            let mut warmup = input.clone();
+            with_stereo_buffer(&mut warmup, |buffer| {
+                diffusion.process_block(buffer, &active_params);
+            });
+            let mut bypassed = input.clone();
+            with_stereo_buffer(&mut bypassed, |buffer| {
+                diffusion.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("diffusion/{mode_id}/bypass/{}", signal.name()),
+                &bypassed,
+            );
+            assert!(
+                max_abs_difference(&bypassed, &input) < 0.000_001,
+                "diffusion/{mode_id} bypass should preserve dry {}",
+                signal.name()
+            );
+        }
+    }
+}
+
+#[test]
+fn new_texture_modes_validate_active_settings_mix_and_bypass() {
+    for (mode_id, mode) in [
+        ("filter", TextureMode::Filter),
+        ("squash", TextureMode::Squash),
+        ("cassette", TextureMode::Cassette),
+        ("broken", TextureMode::Broken),
+        ("interference", TextureMode::Interference),
+    ] {
+        for signal in TestSignal::ALL {
+            let input = signal.render(TEST_BLOCK_SAMPLES * 4, TEST_SAMPLE_RATE);
+
+            let mut active_params = active_texture_params(mode, 1.0, false);
+            let mut texture = Texture::default();
+            texture.prepare(TEST_SAMPLE_RATE);
+            texture.reset();
+            let mut active = input.clone();
+            with_stereo_buffer(&mut active, |buffer| {
+                texture.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("texture/{mode_id}/active/{}", signal.name()),
+                &active,
+            );
+
+            let dry_params = active_texture_params(mode, 0.0, false);
+            let mut texture = Texture::default();
+            texture.prepare(TEST_SAMPLE_RATE);
+            texture.reset();
+            let mut dry = input.clone();
+            with_stereo_buffer(&mut dry, |buffer| {
+                texture.process_block(buffer, &dry_params);
+            });
+            assert_audio_sane(&format!("texture/{mode_id}/mix0/{}", signal.name()), &dry);
+            assert!(
+                max_abs_difference(&dry, &input) < 0.000_001,
+                "texture/{mode_id} mix 0 should preserve dry {}",
+                signal.name()
+            );
+
+            active_params.bypass = BoolParam::new("Texture Bypass", true);
+            active_params.reset_smoothers();
+            let mut texture = Texture::default();
+            texture.prepare(TEST_SAMPLE_RATE);
+            texture.reset();
+            let mut warmup = input.clone();
+            with_stereo_buffer(&mut warmup, |buffer| {
+                texture.process_block(buffer, &active_params);
+            });
+            let mut bypassed = input.clone();
+            with_stereo_buffer(&mut bypassed, |buffer| {
+                texture.process_block(buffer, &active_params);
+            });
+            assert_audio_sane(
+                &format!("texture/{mode_id}/bypass/{}", signal.name()),
+                &bypassed,
+            );
+            assert!(
+                max_abs_difference(&bypassed, &input) < 0.000_001,
+                "texture/{mode_id} bypass should preserve dry {}",
+                signal.name()
+            );
+        }
+    }
+}
+
+#[test]
+fn new_modes_survive_mode_switch_sequences() {
+    let mut character = Character::default();
+    character.prepare(TEST_SAMPLE_RATE);
+    character.reset();
+    for mode in [
+        CharacterMode::Drive,
+        CharacterMode::Sweet,
+        CharacterMode::Fuzz,
+        CharacterMode::Howl,
+        CharacterMode::Swell,
+        CharacterMode::Drive,
+    ] {
+        let params = active_character_params(mode, 1.0, false);
+        let mut audio = TestSignal::WhiteNoise.render(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE);
+        with_stereo_buffer(&mut audio, |buffer| {
+            character.process_block(buffer, &params);
+        });
+        assert_audio_sane(&format!("character/switch/{mode:?}"), &audio);
+    }
+
+    let mut movement = Movement::default();
+    movement.prepare(TEST_SAMPLE_RATE);
+    movement.reset();
+    for mode in [
+        MovementMode::Doubler,
+        MovementMode::Vibrato,
+        MovementMode::Phaser,
+        MovementMode::Tremolo,
+        MovementMode::Pitch,
+        MovementMode::Doubler,
+    ] {
+        let params = active_movement_params(mode, 1.0, false);
+        let mut audio = TestSignal::WhiteNoise.render(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE);
+        with_stereo_buffer(&mut audio, |buffer| {
+            movement.process_block(buffer, &params);
+        });
+        assert_audio_sane(&format!("movement/switch/{mode:?}"), &audio);
+    }
+
+    let mut diffusion = Diffusion::default();
+    diffusion.prepare(TEST_SAMPLE_RATE);
+    diffusion.reset();
+    for mode in [
+        DiffusionMode::Cascade,
+        DiffusionMode::Reels,
+        DiffusionMode::Space,
+        DiffusionMode::Collage,
+        DiffusionMode::Reverse,
+        DiffusionMode::Cascade,
+    ] {
+        let params = active_diffusion_params(mode, 1.0, false);
+        let mut audio = TestSignal::WhiteNoise.render(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE);
+        with_stereo_buffer(&mut audio, |buffer| {
+            diffusion.process_block(buffer, &params);
+        });
+        assert_audio_sane(&format!("diffusion/switch/{mode:?}"), &audio);
+    }
+
+    let mut texture = Texture::default();
+    texture.prepare(TEST_SAMPLE_RATE);
+    texture.reset();
+    for mode in [
+        TextureMode::Filter,
+        TextureMode::Squash,
+        TextureMode::Cassette,
+        TextureMode::Broken,
+        TextureMode::Interference,
+        TextureMode::Filter,
+    ] {
+        let params = active_texture_params(mode, 1.0, false);
+        let mut audio = TestSignal::WhiteNoise.render(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE);
+        with_stereo_buffer(&mut audio, |buffer| {
+            texture.process_block(buffer, &params);
+        });
+        assert_audio_sane(&format!("texture/switch/{mode:?}"), &audio);
+    }
+}
+
 // Verifies bypass crossfade endpoints and reset behavior without depending on a DAW bypass lane.
 #[test]
 fn bypass_crossfade_reaches_expected_dry_and_processed_states() {
@@ -566,6 +909,72 @@ fn process_with_params(mut audio: [Vec<f32>; 2], params: &Cc22Params) -> [Vec<f3
         processor.process_block(buffer, params, &meters);
     });
     audio
+}
+
+fn active_character_params(mode: CharacterMode, mix: f32, bypass: bool) -> CharacterParams {
+    let mut params = CharacterParams::default();
+    params.mode = EnumParam::new("Character Mode", mode);
+    params.bypass = BoolParam::new("Character Bypass", bypass);
+    params.drive = float_param("Drive", 0.46);
+    params.age = float_param("Age", 0.35);
+    params.tone = float_param("Tone", 0.56);
+    params.noise = float_param("Noise", 0.08);
+    params.mix = float_param("Mix", mix);
+    params.output_trim = float_param("Output Trim", -3.0);
+    params.reset_smoothers();
+    params
+}
+
+fn active_movement_params(mode: MovementMode, mix: f32, bypass: bool) -> MovementParams {
+    let mut params = MovementParams::default();
+    params.mode = EnumParam::new("Movement Mode", mode);
+    params.bypass = BoolParam::new("Movement Bypass", bypass);
+    params.rate = float_param("Rate", 1.4);
+    params.depth = float_param("Depth", 0.48);
+    params.delay = float_param("Delay", 18.0);
+    params.feedback = float_param("Feedback", 0.24);
+    params.width = float_param("Width", 0.78);
+    params.phase = float_param("Phase", 150.0);
+    params.tone = float_param("Tone", 0.52);
+    params.mix = float_param("Mix", mix);
+    params.reset_smoothers();
+    params
+}
+
+fn active_diffusion_params(mode: DiffusionMode, mix: f32, bypass: bool) -> DiffusionParams {
+    let mut params = DiffusionParams::default();
+    params.mode = EnumParam::new("Diffusion Mode", mode);
+    params.bypass = BoolParam::new("Diffusion Bypass", bypass);
+    params.time = float_param("Time", 460.0);
+    params.feedback = float_param("Feedback", 0.34);
+    params.size = float_param("Size", 0.52);
+    params.decay = float_param("Decay", 0.48);
+    params.pre_delay = float_param("Pre-delay", 18.0);
+    params.damping = float_param("Damping", 0.55);
+    params.mix = float_param("Mix", mix);
+    params.tone = float_param("Tone", 0.52);
+    params.stereo_offset = float_param("Stereo Offset", 0.18);
+    params.width = float_param("Width", 0.82);
+    params.reset_smoothers();
+    params
+}
+
+fn active_texture_params(mode: TextureMode, mix: f32, bypass: bool) -> TextureParams {
+    let mut params = TextureParams::default();
+    params.mode = EnumParam::new("Texture Mode", mode);
+    params.bypass = BoolParam::new("Texture Bypass", bypass);
+    params.wow_depth = float_param("Wow Depth", 0.24);
+    params.wow_rate = float_param("Wow Rate", 0.45);
+    params.flutter_depth = float_param("Flutter Depth", 0.10);
+    params.flutter_rate = float_param("Flutter Rate", 8.0);
+    params.random_drift = float_param("Random Drift", 0.34);
+    params.noise_amount = float_param("Noise Amount", 0.28);
+    params.noise_color = float_param("Noise Color", 0.58);
+    params.degrade = float_param("Degrade", 0.36);
+    params.stereo_spread = float_param("Stereo Spread", 0.82);
+    params.mix = float_param("Mix", mix);
+    params.reset_smoothers();
+    params
 }
 
 fn float_param(name: &'static str, value: f32) -> FloatParam {

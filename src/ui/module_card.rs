@@ -4,7 +4,17 @@ use nih_plug_egui::egui::{
     Stroke, StrokeKind, UiBuilder, Vec2,
 };
 
-use crate::{dsp::chain::ChainModule, meters::Meters, params::Cc22Params};
+use crate::{
+    dsp::{
+        chain::ChainModule,
+        character::CharacterMode,
+        diffusion::DiffusionMode,
+        movement::{LfoShape, MovementMode},
+        texture::TextureMode,
+    },
+    meters::Meters,
+    params::Cc22Params,
+};
 
 use super::{
     eq_view::eq_workbench,
@@ -641,37 +651,52 @@ fn render_module_content(
 ) {
     match spec.module {
         ChainModule::Character => {
-            ui.horizontal(|ui| {
-                colored_knob(
-                    ui,
-                    setter,
+            let mode = params.character.mode.value();
+            let (first_label, first_param, first_tip) = match mode {
+                CharacterMode::Swell => (
+                    "SENS",
                     &params.character.drive,
+                    Some(
+                        "SENS controls the real Drive parameter as the swell detector sensitivity.",
+                    ),
+                ),
+                CharacterMode::Cassette => (
                     "DRIVE",
-                    spec.accent,
-                    theme,
-                    KNOB_SIZE,
-                );
-                colored_knob(
+                    &params.character.drive,
+                    Some("DRIVE controls the real Drive parameter before the cassette stage."),
+                ),
+                _ => ("DRIVE", &params.character.drive, None),
+            };
+            let (second_label, second_param, second_tip) = match mode {
+                CharacterMode::Cassette => (
+                    "AGE",
+                    &params.character.age,
+                    Some("AGE controls the real Age parameter for cassette wear."),
+                ),
+                _ => ("TONE", &params.character.tone, None),
+            };
+            ui.horizontal(|ui| {
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.character.tone,
-                    "TONE",
+                    first_param,
+                    first_label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    first_tip,
+                );
+                knob_with_tip(
+                    ui,
+                    setter,
+                    second_param,
+                    second_label,
+                    spec.accent,
+                    theme,
+                    second_tip,
                 );
             });
             ui.add_space(2.0);
             mini_slider(ui, setter, &params.character.mix, "MIX", spec.accent, theme);
-            ui.add_space(4.0);
-            mini_slider(
-                ui,
-                setter,
-                &params.character.noise,
-                "NOISE",
-                spec.accent,
-                theme,
-            );
             ui.add_space(2.0);
             module_mode_summary(
                 ui,
@@ -692,37 +717,53 @@ fn render_module_content(
             character_mode_selector(ui, setter, &params.character.mode, spec.accent, theme);
         }
         ChainModule::Movement => {
+            let mode = params.movement.mode.value();
+            let first = movement_first_control(mode, params);
+            let second = movement_second_control(mode, params);
             ui.horizontal(|ui| {
-                colored_knob(
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.movement.rate,
-                    "RATE",
+                    first.param,
+                    first.label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    first.tip,
                 );
-                colored_knob(
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.movement.depth,
-                    "DEPTH",
+                    second.param,
+                    second.label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    second.tip,
                 );
             });
             ui.add_space(2.0);
-            mini_slider(ui, setter, &params.movement.mix, "MIX", spec.accent, theme);
-            ui.add_space(4.0);
-            mini_slider(
-                ui,
-                setter,
-                &params.movement.width,
-                "WIDTH",
-                spec.accent,
-                theme,
-            );
+            match mode {
+                MovementMode::Phaser => slider_with_tip(
+                    ui,
+                    setter,
+                    &params.movement.feedback,
+                    "FEEDBACK",
+                    spec.accent,
+                    theme,
+                    None,
+                ),
+                MovementMode::Tremolo => {
+                    let _ = shape_selector(ui, setter, &params.movement.shape, spec.accent, theme);
+                }
+                _ => slider_with_tip(
+                    ui,
+                    setter,
+                    &params.movement.mix,
+                    "MIX",
+                    spec.accent,
+                    theme,
+                    None,
+                ),
+            };
             ui.add_space(2.0);
             module_mode_summary(
                 ui,
@@ -736,37 +777,31 @@ fn render_module_content(
             movement_mode_selector(ui, setter, &params.movement.mode, spec.accent, theme);
         }
         ChainModule::Diffusion => {
+            let mode = params.diffusion.mode.value();
+            let first = diffusion_first_control(mode, params);
+            let second = diffusion_second_control(mode, params);
             ui.horizontal(|ui| {
-                colored_knob(
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.diffusion.time,
-                    "TIME",
+                    first.param,
+                    first.label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    first.tip,
                 );
-                colored_knob(
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.diffusion.feedback,
-                    "FEEDBK",
+                    second.param,
+                    second.label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    second.tip,
                 );
             });
             ui.add_space(2.0);
             mini_slider(ui, setter, &params.diffusion.mix, "MIX", spec.accent, theme);
-            ui.add_space(4.0);
-            mini_slider(
-                ui,
-                setter,
-                &params.diffusion.tone,
-                "TONE",
-                spec.accent,
-                theme,
-            );
             ui.add_space(2.0);
             module_mode_summary(
                 ui,
@@ -781,37 +816,31 @@ fn render_module_content(
             diffusion_mode_selector(ui, setter, &params.diffusion.mode, spec.accent, theme);
         }
         ChainModule::Texture => {
+            let mode = params.texture.mode.value();
+            let first = texture_first_control(mode, params);
+            let second = texture_second_control(mode, params);
             ui.horizontal(|ui| {
-                colored_knob(
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.texture.wow_depth,
-                    "WOW",
+                    first.param,
+                    first.label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    first.tip,
                 );
-                colored_knob(
+                knob_with_tip(
                     ui,
                     setter,
-                    &params.texture.flutter_depth,
-                    "FLUTTER",
+                    second.param,
+                    second.label,
                     spec.accent,
                     theme,
-                    KNOB_SIZE,
+                    second.tip,
                 );
             });
             ui.add_space(2.0);
             mini_slider(ui, setter, &params.texture.mix, "MIX", spec.accent, theme);
-            ui.add_space(4.0);
-            mini_slider(
-                ui,
-                setter,
-                &params.texture.degrade,
-                "DEGRADE",
-                spec.accent,
-                theme,
-            );
             ui.add_space(2.0);
             module_mode_summary(
                 ui,
@@ -832,6 +861,257 @@ fn render_module_content(
             );
             texture_mode_selector(ui, setter, &params.texture.mode, spec.accent, theme);
         }
+    }
+}
+
+struct FloatControlSpec<'a> {
+    label: &'static str,
+    param: &'a FloatParam,
+    tip: Option<&'static str>,
+}
+
+fn knob_with_tip(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    param: &FloatParam,
+    label: &'static str,
+    accent: Color32,
+    theme: Theme,
+    tip: Option<&'static str>,
+) {
+    let response = colored_knob(ui, setter, param, label, accent, theme, KNOB_SIZE);
+    if let Some(tip) = tip {
+        response.on_hover_text(tip);
+    }
+}
+
+fn slider_with_tip(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    param: &FloatParam,
+    label: &'static str,
+    accent: Color32,
+    theme: Theme,
+    tip: Option<&'static str>,
+) {
+    let response = mini_slider(ui, setter, param, label, accent, theme);
+    if let Some(tip) = tip {
+        response.on_hover_text(tip);
+    }
+}
+
+fn movement_first_control<'a>(mode: MovementMode, params: &'a Cc22Params) -> FloatControlSpec<'a> {
+    match mode {
+        MovementMode::Doubler => FloatControlSpec {
+            label: "TIME",
+            param: &params.movement.delay,
+            tip: Some("TIME controls the real Delay parameter for the doubler offset."),
+        },
+        _ => FloatControlSpec {
+            label: "RATE",
+            param: &params.movement.rate,
+            tip: None,
+        },
+    }
+}
+
+fn movement_second_control<'a>(mode: MovementMode, params: &'a Cc22Params) -> FloatControlSpec<'a> {
+    match mode {
+        MovementMode::Doubler | MovementMode::Pitch => FloatControlSpec {
+            label: "WIDTH",
+            param: &params.movement.width,
+            tip: None,
+        },
+        _ => FloatControlSpec {
+            label: "DEPTH",
+            param: &params.movement.depth,
+            tip: None,
+        },
+    }
+}
+
+fn diffusion_first_control<'a>(
+    mode: DiffusionMode,
+    params: &'a Cc22Params,
+) -> FloatControlSpec<'a> {
+    match mode {
+        DiffusionMode::Reverb | DiffusionMode::Space | DiffusionMode::Collage => FloatControlSpec {
+            label: "SIZE",
+            param: &params.diffusion.size,
+            tip: None,
+        },
+        _ => FloatControlSpec {
+            label: "TIME",
+            param: &params.diffusion.time,
+            tip: None,
+        },
+    }
+}
+
+fn diffusion_second_control<'a>(
+    mode: DiffusionMode,
+    params: &'a Cc22Params,
+) -> FloatControlSpec<'a> {
+    match mode {
+        DiffusionMode::Reverb | DiffusionMode::Space => FloatControlSpec {
+            label: "DECAY",
+            param: &params.diffusion.decay,
+            tip: None,
+        },
+        DiffusionMode::Collage => FloatControlSpec {
+            label: "DENSITY",
+            param: &params.diffusion.feedback,
+            tip: Some(
+                "DENSITY controls the real Feedback parameter used by Collage fragment density.",
+            ),
+        },
+        _ => FloatControlSpec {
+            label: "FEEDBACK",
+            param: &params.diffusion.feedback,
+            tip: None,
+        },
+    }
+}
+
+fn texture_first_control<'a>(mode: TextureMode, params: &'a Cc22Params) -> FloatControlSpec<'a> {
+    match mode {
+        TextureMode::Filter => FloatControlSpec {
+            label: "COLOR",
+            param: &params.texture.noise_color,
+            tip: Some("COLOR controls the real Noise Color parameter for the filter character."),
+        },
+        TextureMode::Squash => FloatControlSpec {
+            label: "AMOUNT",
+            param: &params.texture.degrade,
+            tip: Some("AMOUNT controls the real Degrade parameter for squash intensity."),
+        },
+        TextureMode::Broken => FloatControlSpec {
+            label: "DEGRADE",
+            param: &params.texture.degrade,
+            tip: None,
+        },
+        TextureMode::Interference => FloatControlSpec {
+            label: "AMOUNT",
+            param: &params.texture.noise_amount,
+            tip: Some("AMOUNT controls the real Noise Amount parameter for interference level."),
+        },
+        TextureMode::Noise => FloatControlSpec {
+            label: "AMOUNT",
+            param: &params.texture.noise_amount,
+            tip: Some("AMOUNT controls the real Noise Amount parameter."),
+        },
+        _ => FloatControlSpec {
+            label: "WOW",
+            param: &params.texture.wow_depth,
+            tip: None,
+        },
+    }
+}
+
+fn texture_second_control<'a>(mode: TextureMode, params: &'a Cc22Params) -> FloatControlSpec<'a> {
+    match mode {
+        TextureMode::Filter => FloatControlSpec {
+            label: "RES/DEG",
+            param: &params.texture.degrade,
+            tip: Some("RES/DEG controls the real Degrade parameter, mapped to filter drive/resonance."),
+        },
+        TextureMode::Squash => FloatControlSpec {
+            label: "TONE",
+            param: &params.texture.noise_color,
+            tip: Some("TONE controls the real Noise Color parameter for squash detector color."),
+        },
+        TextureMode::Cassette | TextureMode::Tape => FloatControlSpec {
+            label: "NOISE",
+            param: &params.texture.noise_amount,
+            tip: Some("NOISE controls the real Noise Amount parameter."),
+        },
+        TextureMode::Broken => FloatControlSpec {
+            label: "DRIFT",
+            param: &params.texture.random_drift,
+            tip: Some("DRIFT controls the real Random Drift parameter."),
+        },
+        TextureMode::Interference => FloatControlSpec {
+            label: "FREQ/COL",
+            param: &params.texture.noise_color,
+            tip: Some("FREQ/COL controls the real Noise Color parameter, mapped to interference frequency and color."),
+        },
+        TextureMode::Noise => FloatControlSpec {
+            label: "COLOR",
+            param: &params.texture.noise_color,
+            tip: Some("COLOR controls the real Noise Color parameter."),
+        },
+        _ => FloatControlSpec {
+            label: "FLUTTER",
+            param: &params.texture.flutter_depth,
+            tip: None,
+        },
+    }
+}
+
+fn shape_selector(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    param: &EnumParam<LfoShape>,
+    accent: Color32,
+    theme: Theme,
+) -> egui::Response {
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("SHAPE")
+                    .font(FontId::monospace(9.0))
+                    .color(theme.muted),
+            );
+            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.label(
+                    RichText::new(lfo_shape_label(param.value()))
+                        .font(FontId::monospace(8.0))
+                        .color(theme.muted),
+                );
+            });
+        });
+
+        let response = egui::ComboBox::from_id_salt("movement-shape-card")
+            .selected_text(lfo_shape_label(param.value()))
+            .width(ui.available_width().max(80.0))
+            .show_ui(ui, |ui| {
+                shape_option(ui, setter, param, LfoShape::Sine, "Sine");
+                shape_option(ui, setter, param, LfoShape::Triangle, "Triangle");
+                shape_option(ui, setter, param, LfoShape::SquareSmooth, "Square");
+            })
+            .response;
+
+        let rect = response.rect;
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(7),
+            Stroke::new(1.0, accent.gamma_multiply(0.45)),
+            StrokeKind::Inside,
+        );
+
+        response.on_hover_text("SHAPE controls the real Shape enum parameter for Tremolo.")
+    })
+    .inner
+}
+
+fn shape_option(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    param: &EnumParam<LfoShape>,
+    value: LfoShape,
+    label: &'static str,
+) {
+    if ui.selectable_label(param.value() == value, label).clicked() {
+        set_param(setter, param, value);
+        ui.close_menu();
+    }
+}
+
+fn lfo_shape_label(shape: LfoShape) -> &'static str {
+    match shape {
+        LfoShape::Sine => "Sine",
+        LfoShape::Triangle => "Triangle",
+        LfoShape::SquareSmooth => "Square",
     }
 }
 

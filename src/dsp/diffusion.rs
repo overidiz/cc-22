@@ -26,6 +26,7 @@ const REVERB_MOD_RATES_HZ: [[f32; NUM_REVERB_COMBS]; MAX_CHANNELS] = [
     [0.079, 0.089, 0.103, 0.121, 0.137, 0.157],
 ];
 const REVERB_MOD_DEPTH_MS: f32 = 0.38;
+const COLLAGE_SEEDS: [u32; MAX_CHANNELS] = [0x6d2b_79f5, 0x1f12_bb5d];
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffusionMode {
@@ -67,6 +68,8 @@ pub struct Diffusion {
     core: ModuleCore,
     delay: StereoDelay,
     reverb: ReverbTank,
+    collage: CollageState,
+    reverse: ReverseState,
     sample_rate: f32,
     current_mode: DiffusionMode,
     mode_crossfade: LinearSmoother,
@@ -109,6 +112,35 @@ struct ReverbTank {
     sample_rate: f32,
 }
 
+#[derive(Debug, Clone)]
+struct CollageState {
+    rng_state: [u32; MAX_CHANNELS],
+    fragment_delay_samples: [f32; MAX_CHANNELS],
+    fade_from_delay_samples: [f32; MAX_CHANNELS],
+    fragment_length_samples: [usize; MAX_CHANNELS],
+    fragment_position_samples: [usize; MAX_CHANNELS],
+    fragment_loop_index: [usize; MAX_CHANNELS],
+    repeats_remaining: [usize; MAX_CHANNELS],
+    crossfade_position_samples: [usize; MAX_CHANNELS],
+    crossfade_length_samples: [usize; MAX_CHANNELS],
+    filter_state: [f32; MAX_CHANNELS],
+}
+
+#[derive(Debug, Clone, Default)]
+struct ReverseState {
+    buffers: [Vec<f32>; MAX_CHANNELS],
+    write_positions: [usize; MAX_CHANNELS],
+    segment_starts: [usize; MAX_CHANNELS],
+    segment_lengths: [usize; MAX_CHANNELS],
+    playback_positions: [usize; MAX_CHANNELS],
+    previous_segment_starts: [usize; MAX_CHANNELS],
+    previous_segment_lengths: [usize; MAX_CHANNELS],
+    previous_playback_positions: [usize; MAX_CHANNELS],
+    crossfade_position_samples: [usize; MAX_CHANNELS],
+    crossfade_length_samples: [usize; MAX_CHANNELS],
+    filter_state: [f32; MAX_CHANNELS],
+}
+
 #[derive(Debug, Clone, Default)]
 struct DelayLine {
     buffer: Vec<f32>,
@@ -122,6 +154,8 @@ impl Default for Diffusion {
             core: ModuleCore::default(),
             delay: StereoDelay::default(),
             reverb: ReverbTank::default(),
+            collage: CollageState::default(),
+            reverse: ReverseState::default(),
             sample_rate: 44_100.0,
             current_mode: DiffusionMode::Off,
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
@@ -140,6 +174,8 @@ impl Diffusion {
         self.core.prepare(self.sample_rate);
         self.delay.prepare(self.sample_rate);
         self.reverb.prepare(self.sample_rate);
+        self.collage.reset();
+        self.reverse.prepare(self.sample_rate);
         self.mode_crossfade.prepare(self.sample_rate);
     }
 
@@ -147,6 +183,8 @@ impl Diffusion {
         self.core.reset();
         self.delay.reset();
         self.reverb.reset();
+        self.collage.reset();
+        self.reverse.reset();
         self.mode_crossfade.reset(1.0);
         self.last_output = [0.0; MAX_CHANNELS];
         self.has_processed = false;
@@ -214,8 +252,8 @@ impl Diffusion {
             DiffusionMode::Cascade => self.process_cascade(index, dry, frame),
             DiffusionMode::Reels => self.process_reels(index, dry, frame),
             DiffusionMode::Space => self.process_space(index, dry, frame),
-            // TODO: Character-22 inspired modes — placeholder passthrough until DSP is implemented
-            DiffusionMode::Collage | DiffusionMode::Reverse => dry,
+            DiffusionMode::Collage => self.process_collage(index, dry, frame),
+            DiffusionMode::Reverse => self.process_reverse(index, dry, frame),
         };
 
         let mixed = if frame.mode == DiffusionMode::Off {
@@ -414,6 +452,254 @@ impl Diffusion {
         sanitize_sample((monoish * (1.0 - frame.width)) + (wet * frame.width))
     }
 
+    fn process_collage(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let buf_len = self.delay.buffers[index].len();
+        if buf_len < 4 {
+            return sample;
+        }
+
+        if self.collage.fragment_length_samples[index] == 0 {
+            self.choose_collage_fragment(index, frame, buf_len, false);
+        }
+
+        let write_pos = self.delay.write_positions[index];
+        let current_delay = self.collage_current_delay(index, buf_len);
+        let wet = {
+            let buffer = &self.delay.buffers[index];
+            let current = read_interpolated(buffer, write_pos, current_delay);
+            let crossfade_len = self.collage.crossfade_length_samples[index];
+            if crossfade_len == 0 {
+                current
+            } else {
+                let fade_pos = self.collage.crossfade_position_samples[index];
+                let fade_from_delay =
+                    self.collage.fade_from_delay_samples[index].clamp(1.0, buf_len as f32 - 2.0);
+                let previous = read_interpolated(buffer, write_pos, fade_from_delay);
+                let amount = smoothstep(fade_pos as f32 / crossfade_len as f32);
+                linear_crossfade(previous, current, amount)
+            }
+        };
+
+        if self.collage.crossfade_length_samples[index] > 0 {
+            self.collage.crossfade_position_samples[index] += 1;
+            if self.collage.crossfade_position_samples[index]
+                >= self.collage.crossfade_length_samples[index]
+            {
+                self.collage.crossfade_position_samples[index] = 0;
+                self.collage.crossfade_length_samples[index] = 0;
+            }
+        }
+
+        let tone_alpha = collage_tone_alpha(frame);
+        let filtered = self.collage.filter_state[index]
+            + tone_alpha * (wet - self.collage.filter_state[index]);
+        self.collage.filter_state[index] = sanitize_sample(filtered);
+
+        let feedback = collage_feedback_gain(frame.feedback, frame.decay);
+        self.delay.buffers[index][write_pos] = sanitize_sample(sample + filtered * feedback);
+        self.delay.write_positions[index] = (write_pos + 1) % buf_len;
+
+        self.advance_collage_position(index, frame, buf_len);
+
+        sanitize_sample(filtered * collage_level_compensation(frame.feedback, frame.decay))
+    }
+
+    fn advance_collage_position(&mut self, channel: usize, frame: &DiffusionFrame, buf_len: usize) {
+        self.collage.fragment_position_samples[channel] += 1;
+        let fragment_len = self.collage.fragment_length_samples[channel].max(1);
+        if self.collage.fragment_position_samples[channel] < fragment_len {
+            return;
+        }
+
+        let fade_from_delay = self.collage_current_delay(channel, buf_len);
+        let change_probability = collage_change_probability(frame.feedback, frame.decay);
+        let should_choose_new = self.collage.repeats_remaining[channel] == 0
+            || self.collage.next_random_unit(channel) < change_probability;
+
+        if should_choose_new {
+            self.choose_collage_fragment(channel, frame, buf_len, true);
+        } else {
+            self.collage.repeats_remaining[channel] -= 1;
+            self.collage.fragment_loop_index[channel] += 1;
+            self.collage.fragment_position_samples[channel] = 0;
+            self.start_collage_crossfade(channel, fade_from_delay, fragment_len);
+        }
+    }
+
+    fn choose_collage_fragment(
+        &mut self,
+        channel: usize,
+        frame: &DiffusionFrame,
+        buf_len: usize,
+        crossfade: bool,
+    ) {
+        let fade_from_delay = self.collage_current_delay(channel, buf_len);
+        let fragment_len = collage_fragment_length_samples(frame, self.sample_rate, buf_len);
+        let random_a = self.collage.next_random_unit(channel);
+        let random_b = self.collage.next_random_unit(channel);
+        let delay_samples = collage_fragment_delay_samples(
+            channel,
+            frame,
+            self.sample_rate,
+            buf_len,
+            fragment_len,
+            random_a,
+            random_b,
+        );
+        let repeat_random = self.collage.next_random_unit(channel);
+
+        self.collage.fragment_delay_samples[channel] = delay_samples;
+        self.collage.fragment_length_samples[channel] = fragment_len;
+        self.collage.fragment_position_samples[channel] = 0;
+        self.collage.fragment_loop_index[channel] = 0;
+        self.collage.repeats_remaining[channel] =
+            collage_repeats_remaining(frame.feedback, frame.decay, repeat_random);
+
+        if crossfade {
+            self.start_collage_crossfade(channel, fade_from_delay, fragment_len);
+        } else {
+            self.collage.crossfade_position_samples[channel] = 0;
+            self.collage.crossfade_length_samples[channel] = 0;
+        }
+    }
+
+    fn start_collage_crossfade(
+        &mut self,
+        channel: usize,
+        fade_from_delay: f32,
+        fragment_len: usize,
+    ) {
+        self.collage.fade_from_delay_samples[channel] = fade_from_delay;
+        self.collage.crossfade_position_samples[channel] = 0;
+        self.collage.crossfade_length_samples[channel] =
+            collage_crossfade_samples(fragment_len, self.sample_rate);
+    }
+
+    fn collage_current_delay(&self, channel: usize, buf_len: usize) -> f32 {
+        let fragment_len = self.collage.fragment_length_samples[channel].max(1) as f32;
+        let loop_offset = self.collage.fragment_loop_index[channel] as f32 * fragment_len;
+        (self.collage.fragment_delay_samples[channel] + loop_offset)
+            .clamp(1.0, buf_len as f32 - 2.0)
+    }
+
+    fn process_reverse(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let buf_len = self.reverse.buffers[index].len();
+        if buf_len < 4 {
+            return sample;
+        }
+
+        if self.reverse.segment_lengths[index] == 0 {
+            self.capture_reverse_segment(index, frame, buf_len, false);
+        }
+
+        let write_pos = self.reverse.write_positions[index];
+        let wet = {
+            let buffer = &self.reverse.buffers[index];
+            let current_pos = self.reverse.playback_positions[index];
+            let current_len = self.reverse.segment_lengths[index];
+            let current = read_reverse_segment(
+                buffer,
+                self.reverse.segment_starts[index],
+                current_len,
+                current_pos,
+            ) * reverse_segment_envelope(
+                current_pos,
+                current_len,
+                frame.decay,
+                self.sample_rate,
+            );
+
+            let crossfade_len = self.reverse.crossfade_length_samples[index];
+            if crossfade_len == 0 {
+                current
+            } else {
+                let previous_pos = self.reverse.previous_playback_positions[index];
+                let previous_len = self.reverse.previous_segment_lengths[index];
+                let previous = read_reverse_segment(
+                    buffer,
+                    self.reverse.previous_segment_starts[index],
+                    previous_len,
+                    previous_pos,
+                ) * reverse_segment_envelope(
+                    previous_pos,
+                    previous_len,
+                    frame.decay,
+                    self.sample_rate,
+                );
+                let amount = smoothstep(
+                    self.reverse.crossfade_position_samples[index] as f32 / crossfade_len as f32,
+                );
+                linear_crossfade(previous, current, amount)
+            }
+        };
+
+        if self.reverse.crossfade_length_samples[index] > 0 {
+            self.reverse.previous_playback_positions[index] =
+                (self.reverse.previous_playback_positions[index] + 1)
+                    .min(self.reverse.previous_segment_lengths[index].saturating_sub(1));
+            self.reverse.crossfade_position_samples[index] += 1;
+            if self.reverse.crossfade_position_samples[index]
+                >= self.reverse.crossfade_length_samples[index]
+            {
+                self.reverse.crossfade_position_samples[index] = 0;
+                self.reverse.crossfade_length_samples[index] = 0;
+            }
+        }
+
+        let tone_alpha = reverse_tone_alpha(frame);
+        let filtered = self.reverse.filter_state[index]
+            + tone_alpha * (wet - self.reverse.filter_state[index]);
+        self.reverse.filter_state[index] = sanitize_sample(filtered);
+
+        let feedback = reverse_feedback_gain(frame.feedback, frame.decay);
+        self.reverse.buffers[index][write_pos] = sanitize_sample(sample + filtered * feedback);
+        self.reverse.write_positions[index] = (write_pos + 1) % buf_len;
+
+        self.reverse.playback_positions[index] += 1;
+        if self.reverse.playback_positions[index] >= self.reverse.segment_lengths[index].max(1) {
+            self.capture_reverse_segment(index, frame, buf_len, true);
+        }
+
+        sanitize_sample(filtered * reverse_level_compensation(frame.feedback, frame.decay))
+    }
+
+    fn capture_reverse_segment(
+        &mut self,
+        channel: usize,
+        frame: &DiffusionFrame,
+        buf_len: usize,
+        crossfade: bool,
+    ) {
+        let previous_start = self.reverse.segment_starts[channel];
+        let previous_len = self.reverse.segment_lengths[channel];
+        let segment_len = reverse_segment_length_samples(frame, self.sample_rate, buf_len);
+        let window = reverse_window_samples(channel, frame, self.sample_rate, buf_len, segment_len);
+        let write_pos = self.reverse.write_positions[channel];
+        let start = wrap_sub(write_pos, window, buf_len);
+
+        if crossfade && previous_len > 0 {
+            let crossfade_len =
+                reverse_crossfade_samples(segment_len.min(previous_len), self.sample_rate)
+                    .min(segment_len)
+                    .min(previous_len);
+            self.reverse.previous_segment_starts[channel] = previous_start;
+            self.reverse.previous_segment_lengths[channel] = previous_len;
+            self.reverse.previous_playback_positions[channel] =
+                previous_len.saturating_sub(crossfade_len.max(1));
+            self.reverse.crossfade_position_samples[channel] = 0;
+            self.reverse.crossfade_length_samples[channel] = crossfade_len.max(1);
+        } else {
+            self.reverse.crossfade_position_samples[channel] = 0;
+            self.reverse.crossfade_length_samples[channel] = 0;
+        }
+
+        self.reverse.segment_starts[channel] = start;
+        self.reverse.segment_lengths[channel] = segment_len;
+        self.reverse.playback_positions[channel] = 0;
+    }
+
     fn set_mode(&mut self, mode: DiffusionMode) {
         if mode != self.current_mode {
             self.current_mode = mode;
@@ -440,6 +726,82 @@ impl Diffusion {
 fn linear_crossfade(dry: f32, wet: f32, amount: f32) -> f32 {
     let amount = amount.clamp(0.0, 1.0);
     sanitize_sample((dry * (1.0 - amount)) + (wet * amount))
+}
+
+impl Default for CollageState {
+    fn default() -> Self {
+        Self {
+            rng_state: COLLAGE_SEEDS,
+            fragment_delay_samples: [1.0; MAX_CHANNELS],
+            fade_from_delay_samples: [1.0; MAX_CHANNELS],
+            fragment_length_samples: [0; MAX_CHANNELS],
+            fragment_position_samples: [0; MAX_CHANNELS],
+            fragment_loop_index: [0; MAX_CHANNELS],
+            repeats_remaining: [0; MAX_CHANNELS],
+            crossfade_position_samples: [0; MAX_CHANNELS],
+            crossfade_length_samples: [0; MAX_CHANNELS],
+            filter_state: [0.0; MAX_CHANNELS],
+        }
+    }
+}
+
+impl CollageState {
+    fn reset(&mut self) {
+        self.rng_state = COLLAGE_SEEDS;
+        self.fragment_delay_samples = [1.0; MAX_CHANNELS];
+        self.fade_from_delay_samples = [1.0; MAX_CHANNELS];
+        self.fragment_length_samples = [0; MAX_CHANNELS];
+        self.fragment_position_samples = [0; MAX_CHANNELS];
+        self.fragment_loop_index = [0; MAX_CHANNELS];
+        self.repeats_remaining = [0; MAX_CHANNELS];
+        self.crossfade_position_samples = [0; MAX_CHANNELS];
+        self.crossfade_length_samples = [0; MAX_CHANNELS];
+        self.filter_state = [0.0; MAX_CHANNELS];
+    }
+
+    fn next_random_unit(&mut self, channel: usize) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let mut state = self.rng_state[index];
+        if state == 0 {
+            state = COLLAGE_SEEDS[index];
+        }
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        self.rng_state[index] = state;
+        ((state >> 8) as f32) * (1.0 / 16_777_216.0)
+    }
+}
+
+impl ReverseState {
+    fn prepare(&mut self, sample_rate: f32) {
+        let samples = ((sample_rate.max(1.0) * MAX_DELAY_SECONDS).ceil() as usize).max(4);
+        for buffer in &mut self.buffers {
+            buffer.resize(samples, 0.0);
+            buffer.fill(0.0);
+        }
+        self.reset_positions();
+    }
+
+    fn reset(&mut self) {
+        for buffer in &mut self.buffers {
+            buffer.fill(0.0);
+        }
+        self.reset_positions();
+    }
+
+    fn reset_positions(&mut self) {
+        self.write_positions = [0; MAX_CHANNELS];
+        self.segment_starts = [0; MAX_CHANNELS];
+        self.segment_lengths = [0; MAX_CHANNELS];
+        self.playback_positions = [0; MAX_CHANNELS];
+        self.previous_segment_starts = [0; MAX_CHANNELS];
+        self.previous_segment_lengths = [0; MAX_CHANNELS];
+        self.previous_playback_positions = [0; MAX_CHANNELS];
+        self.crossfade_position_samples = [0; MAX_CHANNELS];
+        self.crossfade_length_samples = [0; MAX_CHANNELS];
+        self.filter_state = [0.0; MAX_CHANNELS];
+    }
 }
 
 impl StereoDelay {
@@ -719,6 +1081,32 @@ fn read_interpolated(buffer: &[f32], write_pos: usize, delay_samples: f32) -> f3
 }
 
 #[inline]
+fn read_reverse_segment(
+    buffer: &[f32],
+    segment_start: usize,
+    segment_len: usize,
+    playback_pos: usize,
+) -> f32 {
+    if buffer.is_empty() || segment_len == 0 {
+        return 0.0;
+    }
+
+    let len = buffer.len();
+    let pos = playback_pos.min(segment_len - 1);
+    let reverse_offset = segment_len - 1 - pos;
+    sanitize_sample(buffer[(segment_start + reverse_offset) % len])
+}
+
+#[inline]
+fn wrap_sub(position: usize, amount: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        (position + len - (amount % len)) % len
+    }
+}
+
+#[inline]
 fn tone_to_alpha(tone: f32, sample_rate: f32) -> f32 {
     let tone = tone.clamp(0.0, 1.0);
     let cutoff = MIN_TONE_HZ + ((MAX_TONE_HZ - MIN_TONE_HZ) * tone * tone);
@@ -750,12 +1138,223 @@ fn space_damping_alpha(damping: f32) -> f32 {
     (0.72 - (damping.clamp(0.0, 1.0) * 0.52)).clamp(0.20, 0.72)
 }
 
+#[inline]
+fn reverse_segment_length_samples(
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    buf_len: usize,
+) -> usize {
+    let time_ms = frame.time_ms.clamp(18.0, 1_800.0);
+    let size = frame.size.clamp(0.0, 1.0);
+    let segment_ms = (time_ms * (0.18 + size * 0.70)).clamp(12.0, 1_200.0);
+    let samples = (segment_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
+    samples.clamp(8, (buf_len / 3).max(8))
+}
+
+#[inline]
+fn reverse_window_samples(
+    channel: usize,
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    buf_len: usize,
+    segment_len: usize,
+) -> usize {
+    let offset = frame.stereo_offset.clamp(-0.5, 0.5) * frame.width.clamp(0.0, 1.0) * 0.35;
+    let multiplier = if channel == 0 {
+        1.0 - offset
+    } else {
+        1.0 + offset
+    };
+    let window_ms = (frame.time_ms.clamp(20.0, 2_000.0) * multiplier).clamp(12.0, 2_000.0);
+    let samples = (window_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
+    let min_window = segment_len.saturating_add(2);
+    samples.clamp(min_window, buf_len.saturating_sub(2).max(min_window))
+}
+
+#[inline]
+fn reverse_crossfade_samples(segment_len: usize, sample_rate: f32) -> usize {
+    let min_samples = (sample_rate.max(1.0) * 0.002).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 0.008).round() as usize;
+    let max_for_segment = (segment_len / 2).max(1);
+    (segment_len / 5)
+        .clamp(min_samples.max(4), max_samples.max(4))
+        .min(max_for_segment)
+        .max(1)
+}
+
+#[inline]
+fn reverse_segment_envelope(
+    position: usize,
+    segment_len: usize,
+    decay: f32,
+    sample_rate: f32,
+) -> f32 {
+    if segment_len <= 1 {
+        return 1.0;
+    }
+
+    let position = position.min(segment_len - 1);
+    let progress = position as f32 / (segment_len - 1) as f32;
+    let fade_len = reverse_envelope_samples(segment_len, decay, sample_rate);
+    let fade_in = if position < fade_len {
+        smoothstep(position as f32 / fade_len as f32)
+    } else {
+        1.0
+    };
+    let remaining = segment_len - 1 - position;
+    let fade_out = if remaining < fade_len {
+        smoothstep(remaining as f32 / fade_len as f32)
+    } else {
+        1.0
+    };
+    let swell = smoothstep(progress).powf(1.0 + decay.clamp(0.0, 1.0) * 1.2);
+    let edge = fade_in * (0.35 + 0.65 * fade_out);
+
+    ((0.22 + 0.78 * swell) * edge).clamp(0.0, 1.0)
+}
+
+#[inline]
+fn reverse_envelope_samples(segment_len: usize, decay: f32, sample_rate: f32) -> usize {
+    let min_samples = (sample_rate.max(1.0) * 0.003).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 0.035).round() as usize;
+    let by_decay = (segment_len as f32 * (0.08 + decay.clamp(0.0, 1.0) * 0.18)).round() as usize;
+    by_decay
+        .clamp(min_samples.max(2), max_samples.max(2))
+        .min((segment_len / 2).max(1))
+        .max(1)
+}
+
+#[inline]
+fn reverse_tone_alpha(frame: &DiffusionFrame) -> f32 {
+    (frame.tone_alpha * (1.0 - frame.damping.clamp(0.0, 1.0) * 0.72)).clamp(0.025, 0.92)
+}
+
+#[inline]
+fn reverse_feedback_gain(feedback: f32, decay: f32) -> f32 {
+    let feedback = feedback.clamp(0.0, 1.0);
+    let decay = decay.clamp(0.0, 1.0);
+    (feedback * (0.28 + decay * 0.18)).clamp(0.0, 0.50)
+}
+
+#[inline]
+fn reverse_level_compensation(feedback: f32, decay: f32) -> f32 {
+    let feedback = feedback.clamp(0.0, 1.0);
+    let decay = decay.clamp(0.0, 1.0);
+    (0.92 + decay * 0.08 - feedback * 0.14).clamp(0.70, 0.98)
+}
+
+#[inline]
+fn collage_fragment_length_samples(
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    buf_len: usize,
+) -> usize {
+    let time_ms = frame.time_ms.clamp(8.0, 600.0);
+    let size = frame.size.clamp(0.0, 1.0);
+    let decay = frame.decay.clamp(0.0, 1.0);
+    let density_scale = 1.0 - decay * 0.35;
+    let fragment_ms = (6.0 + time_ms * (0.10 + size * 0.42) * density_scale).clamp(6.0, 320.0);
+    let samples = (fragment_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
+    samples.clamp(8, (buf_len / 4).max(8))
+}
+
+#[inline]
+fn collage_fragment_delay_samples(
+    channel: usize,
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    buf_len: usize,
+    fragment_len: usize,
+    random_a: f32,
+    random_b: f32,
+) -> f32 {
+    let sample_rate = sample_rate.max(1.0);
+    let base_samples = frame.time_ms.clamp(12.0, 1_600.0) * 0.001 * sample_rate;
+    let min_delay = (fragment_len as f32 + sample_rate * 0.006).clamp(2.0, buf_len as f32 - 2.0);
+    let max_delay = (buf_len as f32 - 2.0 - fragment_len as f32 * 4.0)
+        .max(min_delay + 1.0)
+        .min(buf_len as f32 - 2.0);
+    let spread = base_samples
+        * (0.30 + frame.size.clamp(0.0, 1.0) * 1.40 + frame.decay.clamp(0.0, 1.0) * 0.80)
+        * (0.35 + frame.width.clamp(0.0, 1.0) * 0.65);
+    let random_offset = ((random_a.clamp(0.0, 0.999_999) * 2.0) - 1.0) * spread;
+    let stereo_sign = if channel == 0 { -1.0 } else { 1.0 };
+    let stereo_offset = stereo_sign
+        * frame.stereo_offset.clamp(-0.5, 0.5)
+        * frame.width.clamp(0.0, 1.0)
+        * base_samples
+        * 0.55;
+    let snap =
+        (fragment_len as f32 * (1.0 + (random_b.clamp(0.0, 0.999_999) * 4.0).floor())).max(16.0);
+    let unsnapped = base_samples + random_offset + stereo_offset;
+    let snapped = (unsnapped / snap).round() * snap;
+
+    snapped.clamp(min_delay, max_delay)
+}
+
+#[inline]
+fn collage_repeats_remaining(feedback: f32, decay: f32, random: f32) -> usize {
+    let feedback = feedback.clamp(0.0, 1.0);
+    let decay = decay.clamp(0.0, 1.0);
+    let base = (feedback * 5.0).floor() as usize;
+    let extra = if random < feedback * decay * 0.85 {
+        1
+    } else {
+        0
+    };
+    (base + extra).min(6)
+}
+
+#[inline]
+fn collage_change_probability(feedback: f32, decay: f32) -> f32 {
+    (0.18 + decay.clamp(0.0, 1.0) * 0.58 - feedback.clamp(0.0, 1.0) * 0.22).clamp(0.08, 0.78)
+}
+
+#[inline]
+fn collage_crossfade_samples(fragment_len: usize, sample_rate: f32) -> usize {
+    let min_samples = (sample_rate.max(1.0) * 0.0015).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 0.006).round() as usize;
+    let max_for_fragment = (fragment_len / 2).max(1);
+    (fragment_len / 4)
+        .clamp(min_samples.max(4), max_samples.max(4))
+        .min(max_for_fragment)
+        .max(1)
+}
+
+#[inline]
+fn collage_tone_alpha(frame: &DiffusionFrame) -> f32 {
+    (frame.tone_alpha * (1.0 - frame.damping.clamp(0.0, 1.0) * 0.68)).clamp(0.03, 0.95)
+}
+
+#[inline]
+fn collage_feedback_gain(feedback: f32, decay: f32) -> f32 {
+    let feedback = feedback.clamp(0.0, 1.0);
+    let decay = decay.clamp(0.0, 1.0);
+    (feedback * (0.34 + decay * 0.22)).clamp(0.0, 0.58)
+}
+
+#[inline]
+fn collage_level_compensation(feedback: f32, decay: f32) -> f32 {
+    let feedback = feedback.clamp(0.0, 1.0);
+    let decay = decay.clamp(0.0, 1.0);
+    (0.86 + decay * 0.10 - feedback * 0.12).clamp(0.68, 0.96)
+}
+
+#[inline]
+fn smoothstep(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        cascade_level_compensation, channel_delay_ms, damping_to_alpha, read_interpolated,
-        reels_level_compensation, reverb_feedback, slap_channel_delay_ms, space_reverb_feedback,
-        Diffusion, DiffusionFrame, DiffusionMode, StereoDelay,
+        cascade_level_compensation, channel_delay_ms, collage_crossfade_samples,
+        collage_feedback_gain, collage_fragment_length_samples, collage_level_compensation,
+        damping_to_alpha, read_interpolated, reels_level_compensation, reverb_feedback,
+        reverse_crossfade_samples, reverse_feedback_gain, reverse_level_compensation,
+        reverse_segment_length_samples, reverse_window_samples, slap_channel_delay_ms,
+        space_reverb_feedback, Diffusion, DiffusionFrame, DiffusionMode, StereoDelay,
     };
 
     fn test_frame(mode: DiffusionMode) -> DiffusionFrame {
@@ -1125,6 +1724,295 @@ mod tests {
         assert!(c > 0.75 && c < 1.0);
         let c0 = reels_level_compensation(0.0, 0.0);
         assert!((c0 - 1.0).abs() < 0.01);
+    }
+
+    fn collage_frame(
+        time_ms: f32,
+        feedback: f32,
+        size: f32,
+        decay: f32,
+        stereo_offset: f32,
+        width: f32,
+    ) -> DiffusionFrame {
+        DiffusionFrame {
+            mode: DiffusionMode::Collage,
+            time_ms,
+            feedback,
+            size,
+            decay,
+            pre_delay_ms: 0.0,
+            damping: 0.45,
+            mix: 1.0,
+            stereo_offset,
+            width,
+            active_mix: 1.0,
+            tone_alpha: 0.65,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn collage_output_stays_finite_with_sine() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = collage_frame(45.0, 0.55, 0.35, 0.75, 0.25, 1.0);
+
+        let mut phase = 0.0;
+        let mut previous = 0.0;
+        let mut peak = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..24_000 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.25;
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+
+            peak = peak.max(output.abs());
+            if index > 6_000 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+
+        assert!(peak > 0.001, "collage sine output should become audible");
+        assert!(
+            max_step < 0.35,
+            "collage sine output had a click-sized step: {max_step}"
+        );
+    }
+
+    #[test]
+    fn collage_impulse_tail_stays_bounded_and_smooth() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = collage_frame(38.0, 0.70, 0.30, 0.85, -0.2, 1.0);
+
+        let mut previous = 0.0;
+        let mut peak = 0.0_f32;
+        let mut tail_energy = 0.0_f32;
+        let mut max_tail_step = 0.0_f32;
+        for index in 0..32_000 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+
+            peak = peak.max(output.abs());
+            if index > 4_000 {
+                tail_energy += output * output;
+                max_tail_step = max_tail_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+
+        assert!(peak < 1.2, "collage impulse peak was {peak}");
+        assert!(
+            tail_energy > 0.000_001,
+            "collage impulse tail died too quickly"
+        );
+        assert!(
+            max_tail_step < 0.45,
+            "collage impulse tail had a click-sized step: {max_tail_step}"
+        );
+    }
+
+    #[test]
+    fn collage_uses_crossfade_at_fragment_boundaries() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = collage_frame(18.0, 0.8, 0.10, 0.35, 0.0, 1.0);
+
+        diffusion.process_sample_for_channel(0, 0.2, &frame);
+        let fragment_len = diffusion.collage.fragment_length_samples[0];
+        assert!(fragment_len > 0);
+
+        let mut saw_crossfade = false;
+        for _ in 0..(fragment_len + 8) {
+            diffusion.process_sample_for_channel(0, 0.2, &frame);
+            saw_crossfade |= diffusion.collage.crossfade_length_samples[0] > 0;
+        }
+
+        assert!(
+            saw_crossfade,
+            "collage should crossfade after fragment wrap"
+        );
+    }
+
+    #[test]
+    fn collage_stereo_offset_spreads_fragment_choices() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = collage_frame(55.0, 0.4, 0.4, 0.6, 0.5, 1.0);
+
+        diffusion.process_sample_for_channel(0, 0.2, &frame);
+        diffusion.process_sample_for_channel(1, 0.2, &frame);
+
+        let left = diffusion.collage.fragment_delay_samples[0];
+        let right = diffusion.collage.fragment_delay_samples[1];
+        assert!(
+            (left - right).abs() > 1.0,
+            "stereo offset should choose different fragment delays, l={left}, r={right}"
+        );
+    }
+
+    #[test]
+    fn collage_parameter_helpers_are_controlled() {
+        let frame = collage_frame(40.0, 1.0, 0.5, 1.0, 0.0, 1.0);
+        let len = collage_fragment_length_samples(&frame, 48_000.0, 100_800);
+        let xfade = collage_crossfade_samples(len, 48_000.0);
+
+        assert!(len >= 8);
+        assert!(xfade > 0 && xfade <= len / 2);
+        assert!(collage_feedback_gain(1.0, 1.0) <= 0.58);
+        assert!(collage_level_compensation(1.0, 1.0) < 1.0);
+    }
+
+    fn reverse_frame(
+        time_ms: f32,
+        feedback: f32,
+        size: f32,
+        decay: f32,
+        stereo_offset: f32,
+        width: f32,
+    ) -> DiffusionFrame {
+        DiffusionFrame {
+            mode: DiffusionMode::Reverse,
+            time_ms,
+            feedback,
+            size,
+            decay,
+            pre_delay_ms: 0.0,
+            damping: 0.45,
+            mix: 1.0,
+            stereo_offset,
+            width,
+            active_mix: 1.0,
+            tone_alpha: 0.65,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn reverse_impulse_becomes_audible_and_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reverse_frame(32.0, 0.55, 0.65, 0.75, 0.0, 1.0);
+
+        let mut peak = 0.0_f32;
+        let mut tail_energy = 0.0_f32;
+        let mut previous = 0.0;
+        let mut max_tail_step = 0.0_f32;
+        for index in 0..12_000 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+
+            peak = peak.max(output.abs());
+            if index > 700 {
+                tail_energy += output * output;
+                max_tail_step = max_tail_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+
+        assert!(peak > 0.01, "reverse impulse should become audible");
+        assert!(
+            tail_energy > 0.000_01,
+            "reverse impulse tail died too quickly"
+        );
+        assert!(
+            max_tail_step < 0.55,
+            "reverse impulse produced a click-sized step: {max_tail_step}"
+        );
+    }
+
+    #[test]
+    fn reverse_time_change_does_not_click_extremely() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let short_frame = reverse_frame(28.0, 0.45, 0.55, 0.60, 0.0, 1.0);
+        let long_frame = reverse_frame(120.0, 0.45, 0.55, 0.60, 0.0, 1.0);
+
+        let mut phase = 0.0;
+        let mut previous = 0.0;
+        let mut max_step_after_change = 0.0_f32;
+        for index in 0..24_000 {
+            phase += 330.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.28;
+            let frame = if index < 8_000 {
+                &short_frame
+            } else {
+                &long_frame
+            };
+            let output = diffusion.process_sample_for_channel(0, input, frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+
+            if index > 8_000 {
+                max_step_after_change = max_step_after_change.max((output - previous).abs());
+            }
+            previous = output;
+        }
+
+        assert!(
+            max_step_after_change < 0.45,
+            "reverse time change produced a click-sized step: {max_step_after_change}"
+        );
+    }
+
+    #[test]
+    fn reverse_uses_crossfade_between_segments() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reverse_frame(24.0, 0.5, 0.5, 0.6, 0.0, 1.0);
+
+        diffusion.process_sample_for_channel(0, 0.2, &frame);
+        let segment_len = diffusion.reverse.segment_lengths[0];
+        assert!(segment_len > 0);
+
+        let mut saw_crossfade = false;
+        for _ in 0..(segment_len + 8) {
+            diffusion.process_sample_for_channel(0, 0.2, &frame);
+            saw_crossfade |= diffusion.reverse.crossfade_length_samples[0] > 0;
+        }
+
+        assert!(
+            saw_crossfade,
+            "reverse should crossfade between captured segments"
+        );
+    }
+
+    #[test]
+    fn reverse_stereo_offset_changes_capture_windows() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reverse_frame(60.0, 0.4, 0.5, 0.5, 0.5, 1.0);
+
+        diffusion.process_sample_for_channel(0, 0.2, &frame);
+        diffusion.process_sample_for_channel(1, 0.2, &frame);
+
+        let left = diffusion.reverse.segment_starts[0];
+        let right = diffusion.reverse.segment_starts[1];
+        assert_ne!(
+            left, right,
+            "stereo offset should capture different reverse windows"
+        );
+    }
+
+    #[test]
+    fn reverse_parameter_helpers_are_controlled() {
+        let frame = reverse_frame(80.0, 1.0, 1.0, 1.0, 0.0, 1.0);
+        let len = reverse_segment_length_samples(&frame, 48_000.0, 100_800);
+        let window = reverse_window_samples(0, &frame, 48_000.0, 100_800, len);
+        let xfade = reverse_crossfade_samples(len, 48_000.0);
+
+        assert!(len >= 8);
+        assert!(window > len);
+        assert!(xfade > 0 && xfade <= len / 2);
+        assert!(reverse_feedback_gain(1.0, 1.0) <= 0.50);
+        assert!(reverse_level_compensation(1.0, 1.0) < 1.0);
     }
 
     fn space_frame(size: f32, decay: f32, damping: f32, width: f32) -> DiffusionFrame {
