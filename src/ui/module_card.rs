@@ -836,7 +836,7 @@ fn mode_list_row<T>(
     T: Enum + Copy + PartialEq,
 {
     let selected = current == value && !bypass.value();
-    let row_height = 18.0;
+    let row_height = 13.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
 
@@ -848,13 +848,13 @@ fn mode_list_row<T>(
         );
     }
 
-    let square_center = Pos2::new(rect.left() + 7.0, rect.center().y);
-    mode_square_at(ui, square_center, accent, selected, 4.0);
+    let square_center = Pos2::new(rect.left() + 6.0, rect.center().y);
+    mode_square_at(ui, square_center, accent, selected, 3.6);
     ui.painter().text(
-        Pos2::new(rect.left() + 17.0, rect.center().y),
+        Pos2::new(rect.left() + 15.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        FontId::monospace(FONT_SECONDARY),
+        FontId::monospace(FONT_SECONDARY - 0.5),
         if selected {
             theme.text_dark
         } else {
@@ -895,7 +895,6 @@ fn mode_square_at(ui: &mut egui::Ui, center: Pos2, color: Color32, active: bool,
     }
 }
 
-#[allow(unreachable_code)]
 fn render_module_content(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -904,7 +903,7 @@ fn render_module_content(
     theme: Theme,
 ) {
     render_module_mode_list(ui, setter, spec, params, theme);
-    return;
+    ui.add_space(5.0);
 
     match spec.module {
         ChainModule::Character => {
