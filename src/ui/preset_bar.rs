@@ -29,7 +29,7 @@ pub(crate) fn bottom_macro_row(
         |ui| {
             ui.horizontal_top(|ui| {
                 let (strip_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(385.0, 50.0), Sense::hover());
+                    ui.allocate_exact_size(Vec2::new(440.0, 50.0), Sense::hover());
                 ui.scope_builder(
                     UiBuilder::new()
                         .max_rect(strip_rect)
@@ -40,7 +40,7 @@ pub(crate) fn bottom_macro_row(
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(egui::Margin::same(8))
                             .show(ui, |ui| {
-                                ui.set_min_size(Vec2::new(369.0, 34.0));
+                                ui.set_min_size(Vec2::new(424.0, 34.0));
                                 ui.horizontal(|ui| {
                                     brand_orb(ui, colors);
                                     ui.vertical(|ui| {

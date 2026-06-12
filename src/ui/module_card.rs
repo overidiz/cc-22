@@ -253,7 +253,7 @@ pub(crate) fn center_modules(
     // Master/output row: smaller final stage, visually downstream from the EQ.
     ui.add_space(8.0);
     ui.horizontal_top(|ui| {
-        align_row_start(ui, row_start + 170.0);
+        align_row_start(ui, row_start);
         master_strip(ui, setter, params, meter_reading, colors.master, theme);
     });
 }
