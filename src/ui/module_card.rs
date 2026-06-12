@@ -597,7 +597,7 @@ fn render_module_mode_list(
                 current,
                 CharacterMode::Drive,
                 "DRIVE",
-                spec.accent,
+                mode_option_color(0),
                 theme,
             );
             mode_list_row(
@@ -608,7 +608,7 @@ fn render_module_mode_list(
                 current,
                 CharacterMode::Sweet,
                 "SWEET",
-                spec.accent,
+                mode_option_color(1),
                 theme,
             );
             mode_list_row(
@@ -619,7 +619,7 @@ fn render_module_mode_list(
                 current,
                 CharacterMode::Fuzz,
                 "FUZZ",
-                spec.accent,
+                mode_option_color(2),
                 theme,
             );
             mode_list_row(
@@ -630,7 +630,7 @@ fn render_module_mode_list(
                 current,
                 CharacterMode::Howl,
                 "HOWL",
-                spec.accent,
+                mode_option_color(3),
                 theme,
             );
             mode_list_row(
@@ -641,7 +641,7 @@ fn render_module_mode_list(
                 current,
                 CharacterMode::Swell,
                 "SWELL",
-                spec.accent,
+                mode_option_color(4),
                 theme,
             );
         }
@@ -655,7 +655,7 @@ fn render_module_mode_list(
                 current,
                 MovementMode::Doubler,
                 "DOUBLER",
-                spec.accent,
+                mode_option_color(0),
                 theme,
             );
             mode_list_row(
@@ -666,7 +666,7 @@ fn render_module_mode_list(
                 current,
                 MovementMode::Vibrato,
                 "VIBRATO",
-                spec.accent,
+                mode_option_color(1),
                 theme,
             );
             mode_list_row(
@@ -677,7 +677,7 @@ fn render_module_mode_list(
                 current,
                 MovementMode::Phaser,
                 "PHASER",
-                spec.accent,
+                mode_option_color(2),
                 theme,
             );
             mode_list_row(
@@ -688,7 +688,7 @@ fn render_module_mode_list(
                 current,
                 MovementMode::Tremolo,
                 "TREMOLO",
-                spec.accent,
+                mode_option_color(3),
                 theme,
             );
             mode_list_row(
@@ -699,7 +699,7 @@ fn render_module_mode_list(
                 current,
                 MovementMode::Pitch,
                 "PITCH",
-                spec.accent,
+                mode_option_color(4),
                 theme,
             );
         }
@@ -713,7 +713,7 @@ fn render_module_mode_list(
                 current,
                 DiffusionMode::Cascade,
                 "CASCADE",
-                spec.accent,
+                mode_option_color(0),
                 theme,
             );
             mode_list_row(
@@ -724,7 +724,7 @@ fn render_module_mode_list(
                 current,
                 DiffusionMode::Reels,
                 "REELS",
-                spec.accent,
+                mode_option_color(1),
                 theme,
             );
             mode_list_row(
@@ -735,7 +735,7 @@ fn render_module_mode_list(
                 current,
                 DiffusionMode::Space,
                 "SPACE",
-                spec.accent,
+                mode_option_color(2),
                 theme,
             );
             mode_list_row(
@@ -746,7 +746,7 @@ fn render_module_mode_list(
                 current,
                 DiffusionMode::Collage,
                 "COLLAGE",
-                spec.accent,
+                mode_option_color(3),
                 theme,
             );
             mode_list_row(
@@ -757,7 +757,7 @@ fn render_module_mode_list(
                 current,
                 DiffusionMode::Reverse,
                 "REVERSE",
-                spec.accent,
+                mode_option_color(4),
                 theme,
             );
         }
@@ -771,7 +771,7 @@ fn render_module_mode_list(
                 current,
                 TextureMode::Filter,
                 "FILTER",
-                spec.accent,
+                mode_option_color(0),
                 theme,
             );
             mode_list_row(
@@ -782,7 +782,7 @@ fn render_module_mode_list(
                 current,
                 TextureMode::Squash,
                 "SQUASH",
-                spec.accent,
+                mode_option_color(1),
                 theme,
             );
             mode_list_row(
@@ -793,7 +793,7 @@ fn render_module_mode_list(
                 current,
                 TextureMode::Cassette,
                 "CASSETTE",
-                spec.accent,
+                mode_option_color(2),
                 theme,
             );
             mode_list_row(
@@ -804,7 +804,7 @@ fn render_module_mode_list(
                 current,
                 TextureMode::Broken,
                 "BROKEN",
-                spec.accent,
+                mode_option_color(3),
                 theme,
             );
             mode_list_row(
@@ -815,10 +815,20 @@ fn render_module_mode_list(
                 current,
                 TextureMode::Interference,
                 "INTERFERENCE",
-                spec.accent,
+                mode_option_color(4),
                 theme,
             );
         }
+    }
+}
+
+fn mode_option_color(index: usize) -> Color32 {
+    match index {
+        0 => Color32::from_rgb(232, 48, 36),
+        1 => Color32::from_rgb(240, 205, 28),
+        2 => Color32::from_rgb(24, 184, 70),
+        3 => Color32::from_rgb(45, 180, 220),
+        _ => Color32::from_rgb(130, 82, 200),
     }
 }
 
