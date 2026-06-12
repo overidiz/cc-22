@@ -46,6 +46,25 @@ fn scale_from_size(width: u32) -> u32 {
         .unwrap_or(100)
 }
 
+fn should_request_size(
+    state: &mut UiState,
+    current_size: (u32, u32),
+    target_size: (u32, u32),
+    force: bool,
+) -> bool {
+    if target_size == current_size {
+        state.last_requested_size = None;
+        return false;
+    }
+
+    if force || state.last_requested_size != Some(target_size) {
+        state.last_requested_size = Some(target_size);
+        return true;
+    }
+
+    false
+}
+
 pub fn create_editor(
     params: Arc<Cc22Params>,
     meters: Arc<Meters>,
@@ -91,11 +110,11 @@ pub fn create_editor(
                     state.eq_open_reset_done = true;
                 }
 
-                let (target_w, target_h) = computed_size(state.ui_scale);
-                let (current_w, current_h) = editor_state.size();
+                let target_size = computed_size(state.ui_scale);
+                let current_size = editor_state.size();
 
-                if (target_w, target_h) != (current_w, current_h) {
-                    editor_state.set_requested_size((target_w, target_h));
+                if should_request_size(state, current_size, target_size, false) {
+                    editor_state.set_requested_size(target_size);
                 }
 
                 CentralPanel::default().show(ctx, |ui| {
@@ -115,10 +134,14 @@ pub fn create_editor(
 
                 let mut scale_copy = state.ui_scale;
                 let mut open_copy = state.settings_open;
-                settings::settings_panel(ctx, &mut scale_copy, &mut open_copy, |new_scale| {
-                    let (w, h) = computed_size(new_scale);
-                    editor_state.set_requested_size((w, h));
-                });
+                settings::settings_panel(ctx, &mut scale_copy, &mut open_copy, |_| {});
+                if scale_copy != state.ui_scale {
+                    let target_size = computed_size(scale_copy);
+                    let current_size = editor_state.size();
+                    if should_request_size(state, current_size, target_size, true) {
+                        editor_state.set_requested_size(target_size);
+                    }
+                }
                 state.ui_scale = scale_copy;
                 state.settings_open = open_copy;
             }
