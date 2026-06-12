@@ -12,7 +12,7 @@ impl Default for UiState {
             random_seed: 0,
             ui_scale: 100,
             settings_open: false,
-            selected_eq_band: 2,
+            selected_eq_band: 0,
             eq_open_reset_done: false,
             drag_source: None,
             drag_drop_slot: None,

@@ -87,7 +87,7 @@ pub fn create_editor(
 
                 if !state.eq_open_reset_done {
                     reset_eq_to_defaults(setter, &params);
-                    state.selected_eq_band = 2;
+                    state.selected_eq_band = 0;
                     state.eq_open_reset_done = true;
                 }
 

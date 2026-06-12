@@ -335,16 +335,16 @@ fn eq_node_specs(params: &Cc22Params, colors: ModuleColors, rect: egui::Rect) ->
     [
         EqNodeSpec {
             index: 0,
-            center: node_pos(rect, params.eq.low_cut_frequency.value(), 0.0),
-            color: colors.character,
-        },
-        EqNodeSpec {
-            index: 1,
             center: node_pos(
                 rect,
                 params.eq.low_shelf_frequency.value(),
                 params.eq.low_shelf_gain.value(),
             ),
+            color: colors.character,
+        },
+        EqNodeSpec {
+            index: 1,
+            center: node_pos(rect, params.eq.low_cut_frequency.value(), 0.0),
             color: Color32::from_rgb(220, 188, 78),
         },
         EqNodeSpec {
@@ -392,11 +392,11 @@ fn node_pos(rect: egui::Rect, frequency: f32, gain_db: f32) -> Pos2 {
 
 fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
-        0 => setter.begin_set_parameter(&params.eq.low_cut_frequency),
-        1 => {
+        0 => {
             setter.begin_set_parameter(&params.eq.low_shelf_frequency);
             setter.begin_set_parameter(&params.eq.low_shelf_gain);
         }
+        1 => setter.begin_set_parameter(&params.eq.low_cut_frequency),
         2 => {
             setter.begin_set_parameter(&params.eq.mid_frequency);
             setter.begin_set_parameter(&params.eq.mid_gain);
@@ -411,11 +411,11 @@ fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, ban
 
 fn end_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
-        0 => setter.end_set_parameter(&params.eq.low_cut_frequency),
-        1 => {
+        0 => {
             setter.end_set_parameter(&params.eq.low_shelf_frequency);
             setter.end_set_parameter(&params.eq.low_shelf_gain);
         }
+        1 => setter.end_set_parameter(&params.eq.low_cut_frequency),
         2 => {
             setter.end_set_parameter(&params.eq.mid_frequency);
             setter.end_set_parameter(&params.eq.mid_gain);
@@ -441,11 +441,11 @@ fn set_selected_band_from_pos(
     let gain_db = gain_from_y(y);
 
     match band {
-        0 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(20.0, 500.0)),
-        1 => {
+        0 => {
             setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(40.0, 500.0));
             setter.set_parameter(&params.eq.low_shelf_gain, gain_db);
         }
+        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(20.0, 500.0)),
         2 => {
             setter.set_parameter(&params.eq.mid_frequency, frequency.clamp(100.0, 8_000.0));
             setter.set_parameter(&params.eq.mid_gain, gain_db);
@@ -473,14 +473,14 @@ fn offset_selected_band_from_delta(
     scale: f32,
 ) {
     let current_frequency = match band {
-        0 => params.eq.low_cut_frequency.value(),
-        1 => params.eq.low_shelf_frequency.value(),
+        0 => params.eq.low_shelf_frequency.value(),
+        1 => params.eq.low_cut_frequency.value(),
         2 => params.eq.mid_frequency.value(),
         3 => params.eq.high_shelf_frequency.value(),
         _ => params.eq.high_cut_frequency.value(),
     };
     let current_gain = match band {
-        1 => params.eq.low_shelf_gain.value(),
+        0 => params.eq.low_shelf_gain.value(),
         2 => params.eq.mid_gain.value(),
         3 => params.eq.high_shelf_gain.value(),
         _ => 0.0,
@@ -494,11 +494,11 @@ fn offset_selected_band_from_delta(
         .clamp(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB);
 
     match band {
-        0 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(20.0, 500.0)),
-        1 => {
+        0 => {
             setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(40.0, 500.0));
             setter.set_parameter(&params.eq.low_shelf_gain, gain_db);
         }
+        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(20.0, 500.0)),
         2 => {
             setter.set_parameter(&params.eq.mid_frequency, frequency.clamp(100.0, 8_000.0));
             setter.set_parameter(&params.eq.mid_gain, gain_db);
@@ -519,12 +519,7 @@ fn offset_selected_band_from_delta(
 
 fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
-        0 => set_param(
-            setter,
-            &params.eq.low_cut_frequency,
-            params.eq.low_cut_frequency.default_plain_value(),
-        ),
-        1 => {
+        0 => {
             set_param(
                 setter,
                 &params.eq.low_shelf_frequency,
@@ -536,6 +531,11 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
                 params.eq.low_shelf_gain.default_plain_value(),
             );
         }
+        1 => set_param(
+            setter,
+            &params.eq.low_cut_frequency,
+            params.eq.low_cut_frequency.default_plain_value(),
+        ),
         2 => {
             set_param(
                 setter,
