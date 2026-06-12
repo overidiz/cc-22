@@ -30,9 +30,8 @@ use super::{
         KNOB_SIZE,
     },
     widgets::{
-        character_active, character_mode_label, colored_knob, diffusion_active,
-        diffusion_mode_label, mini_slider, movement_active, movement_mode_label, set_param,
-        texture_active, texture_mode_label,
+        character_active, colored_knob, diffusion_active, mini_slider, movement_active, set_param,
+        texture_active,
     },
 };
 
@@ -510,7 +509,7 @@ fn render_module_card(
                         state.drag_drop_slot = None;
                     }
 
-                    module_header(ui, spec, params, theme, hovered);
+                    module_header(ui, spec, theme, hovered);
                     render_module_content(ui, setter, spec, params, theme);
 
                     if hovered {
@@ -523,16 +522,10 @@ fn render_module_card(
     card_rect
 }
 
-fn module_header(
-    ui: &mut egui::Ui,
-    spec: &ModuleCardSpec<'_>,
-    params: &Cc22Params,
-    theme: Theme,
-    hovered: bool,
-) {
+fn module_header(ui: &mut egui::Ui, spec: &ModuleCardSpec<'_>, theme: Theme, hovered: bool) {
     let line = Rect::from_min_size(
         Pos2::new(ui.min_rect().left(), ui.cursor().min.y),
-        Vec2::new(ui.available_width(), 10.0),
+        Vec2::new(ui.available_width(), 18.0),
     );
     let line_alpha: u8 = if spec.active {
         38
@@ -551,32 +544,18 @@ fn module_header(
             line_alpha,
         ),
     );
-    ui.horizontal(|ui| {
-        mode_square(ui, spec.accent, spec.active, 5.0);
-        ui.add(
-            egui::Label::new(
-                RichText::new(selected_module_mode_label(spec.module, params).to_ascii_uppercase())
-                    .font(FontId::monospace(FONT_MODULE_TITLE))
-                    .strong()
-                    .color(if spec.active {
-                        theme.text_dark
-                    } else {
-                        theme.muted_dark
-                    }),
-            )
-            .sense(Sense::hover()),
-        );
-    });
-    ui.add_space(5.0);
-}
-
-fn selected_module_mode_label(module: ChainModule, params: &Cc22Params) -> &'static str {
-    match module {
-        ChainModule::Character => character_mode_label(params.character.mode.value()),
-        ChainModule::Movement => movement_mode_label(params.movement.mode.value()),
-        ChainModule::Diffusion => diffusion_mode_label(params.diffusion.mode.value()),
-        ChainModule::Texture => texture_mode_label(params.texture.mode.value()),
-    }
+    ui.painter().text(
+        line.center(),
+        egui::Align2::CENTER_CENTER,
+        spec.title,
+        FontId::monospace(FONT_MODULE_TITLE),
+        if spec.active {
+            theme.text_dark
+        } else {
+            theme.muted_dark
+        },
+    );
+    ui.add_space(22.0);
 }
 
 fn render_module_mode_list(
@@ -876,11 +855,6 @@ fn mode_list_row<T>(
         set_param(setter, bypass, false);
         set_param(setter, param, value);
     }
-}
-
-fn mode_square(ui: &mut egui::Ui, color: Color32, active: bool, size: f32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    mode_square_at(ui, rect.center(), color, active, size);
 }
 
 fn mode_square_at(ui: &mut egui::Ui, center: Pos2, color: Color32, active: bool, size: f32) {
