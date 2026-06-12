@@ -4,8 +4,8 @@ pub(crate) const CARD_HEIGHT: f32 = 296.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
 pub(crate) const KNOB_SIZE: f32 = 50.0;
 
-pub(crate) const BASE_WIDTH: f32 = 1040.0;
-pub(crate) const BASE_HEIGHT: f32 = 800.0;
+pub(crate) const BASE_WIDTH: f32 = 980.0;
+pub(crate) const BASE_HEIGHT: f32 = 720.0;
 pub(crate) const UI_SCALE_OPTIONS: &[u32] = &[50, 60, 70, 80, 90, 100, 120, 140, 170, 200];
 
 pub(crate) const FONT_MODULE_TITLE: f32 = 13.5;
