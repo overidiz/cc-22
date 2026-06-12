@@ -70,7 +70,7 @@ impl Plugin for Cc22 {
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
-    const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+    const SAMPLE_ACCURATE_AUTOMATION: bool = false;
 
     type SysExMessage = ();
     type BackgroundTask = ();
