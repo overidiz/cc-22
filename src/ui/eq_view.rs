@@ -512,13 +512,9 @@ fn eq_controls(
             );
             if let Some(gain) = selected_gain_param(params, *selected_eq_band) {
                 eq_param_knob(ui, setter, gain, "GAIN", "GAIN", band_color, theme);
-            } else {
-                eq_empty_slot(ui, "GAIN", theme);
             }
             if let Some(q) = selected_q_param(params, *selected_eq_band) {
-                eq_param_knob(ui, setter, q, "BW", "BW", band_color, theme);
-            } else {
-                eq_empty_slot(ui, "BW", theme);
+                eq_param_knob(ui, setter, q, "Q", "Q", band_color, theme);
             }
         });
     });
@@ -558,36 +554,6 @@ fn eq_param_knob(
                     .color(theme.muted_dark),
             );
             response.on_hover_text(format!("{}: {}", param.name(), value_string(param)));
-        });
-    });
-}
-
-fn eq_empty_slot(ui: &mut egui::Ui, label: &'static str, theme: Theme) {
-    ui.allocate_ui(Vec2::new(60.0, 70.0), |ui| {
-        ui.vertical_centered(|ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::splat(42.0), Sense::hover());
-            ui.painter().circle_filled(
-                rect.center(),
-                17.5,
-                Color32::from_rgba_premultiplied(210, 202, 190, 70),
-            );
-            ui.painter().circle_stroke(
-                rect.center(),
-                17.5,
-                Stroke::new(1.0, Color32::from_rgba_premultiplied(130, 120, 105, 70)),
-            );
-            ui.label(
-                RichText::new(label)
-                    .font(FontId::monospace(8.5))
-                    .strong()
-                    .color(theme.muted_dark.gamma_multiply(0.72)),
-            );
-            ui.label(
-                RichText::new("-")
-                    .font(FontId::monospace(7.0))
-                    .strong()
-                    .color(theme.muted_dark.gamma_multiply(0.72)),
-            );
         });
     });
 }
