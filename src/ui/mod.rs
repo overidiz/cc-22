@@ -19,6 +19,7 @@ mod theme;
 mod top_bar;
 mod widgets;
 
+use eq_view::reset_eq_to_defaults;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
@@ -83,6 +84,12 @@ pub fn create_editor(
                 let look = Look { colors, theme };
                 let now = ctx.input(|input| input.time);
                 ctx.request_repaint_after(Duration::from_millis(33));
+
+                if !state.eq_open_reset_done {
+                    reset_eq_to_defaults(setter, &params);
+                    state.selected_eq_band = 2;
+                    state.eq_open_reset_done = true;
+                }
 
                 let (target_w, target_h) = computed_size(state.ui_scale);
                 let (current_w, current_h) = editor_state.size();

@@ -109,7 +109,7 @@ fn eq_toolbar(
         ui.add_space(2.0);
 
         if toolbar_button(ui, "RESET", Vec2::new(45.0, 16.0), false, colors.eq, theme).clicked() {
-            reset_eq(setter, params);
+            reset_eq_to_defaults(setter, params);
         }
     });
 }
@@ -158,14 +158,10 @@ pub(crate) fn eq_canvas(
 
     let frequency_labels = [
         (20.0, "20"),
-        (50.0, "50"),
         (100.0, "100"),
-        (200.0, "200"),
         (500.0, "500"),
         (1_000.0, "1k"),
-        (2_000.0, "2k"),
         (5_000.0, "5k"),
-        (10_000.0, "10k"),
         (20_000.0, "20k"),
     ];
     for (frequency, label) in frequency_labels {
@@ -183,13 +179,7 @@ pub(crate) fn eq_canvas(
         );
     }
 
-    let gain_labels = [
-        (24.0, "+24"),
-        (12.0, "+12"),
-        (0.0, "0"),
-        (-12.0, "-12"),
-        (-24.0, "-24"),
-    ];
+    let gain_labels = [(18.0, "+18"), (0.0, "0"), (-18.0, "-18")];
     for (gain_db, label) in gain_labels {
         let y = y_from_gain_db(rect, gain_db);
         let is_zero = gain_db == 0.0;
@@ -231,15 +221,26 @@ pub(crate) fn eq_canvas(
         theme.muted
     };
     let zero_y = y_from_gain_db(rect, 0.0);
-    let mut fill = Vec::with_capacity(curve.len() + 2);
-    fill.extend(curve.iter().copied());
-    fill.push(Pos2::new(rect.right(), zero_y));
-    fill.push(Pos2::new(rect.left(), zero_y));
-    painter.add(egui::Shape::convex_polygon(
-        fill,
-        Color32::from_rgba_premultiplied(curve_color.r(), curve_color.g(), curve_color.b(), 24),
-        Stroke::NONE,
-    ));
+    if eq_active(params) {
+        for segment in curve.windows(2) {
+            let fill = [
+                segment[0],
+                segment[1],
+                Pos2::new(segment[1].x, zero_y),
+                Pos2::new(segment[0].x, zero_y),
+            ];
+            painter.add(egui::Shape::convex_polygon(
+                fill.to_vec(),
+                Color32::from_rgba_premultiplied(
+                    curve_color.r(),
+                    curve_color.g(),
+                    curve_color.b(),
+                    18,
+                ),
+                Stroke::NONE,
+            ));
+        }
+    }
     for segment in curve.windows(2) {
         painter.line_segment(
             [
@@ -342,13 +343,8 @@ pub(crate) fn eq_canvas(
             FontId::monospace(FONT_HINT),
             Color32::from_rgb(210, 196, 170),
         );
-        node_response.on_hover_text(format!(
-            "{}: drag to adjust, Shift+drag for fine, double-click to reset",
-            node.label
-        ));
     }
-
-    canvas_response.on_hover_text("Drag a band node to adjust real EQ parameters");
+    let _ = canvas_response;
 }
 
 #[derive(Clone, Copy)]
@@ -614,7 +610,7 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     }
 }
 
-fn reset_eq(setter: &ParamSetter<'_>, params: &Cc22Params) {
+pub(crate) fn reset_eq_to_defaults(setter: &ParamSetter<'_>, params: &Cc22Params) {
     set_param(
         setter,
         &params.eq.mode,
