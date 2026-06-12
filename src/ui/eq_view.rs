@@ -18,11 +18,13 @@ const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 144;
 const EQ_NODE_COUNT: usize = 5;
-const EQ_WORKBENCH_WIDTH: f32 = 925.0;
 const EQ_WORKBENCH_HEIGHT: f32 = 166.0;
-const EQ_CANVAS_WIDTH: f32 = 650.0;
 const EQ_CANVAS_HEIGHT: f32 = 112.0;
-const EQ_CONTROL_WIDTH: f32 = 245.0;
+const EQ_INSPECTOR_WIDTH: f32 = 260.0;
+const EQ_MIN_INSPECTOR_WIDTH: f32 = 230.0;
+const EQ_MIN_CANVAS_WIDTH: f32 = 360.0;
+const EQ_CONTENT_GAP: f32 = 12.0;
+const EQ_RIGHT_MARGIN: f32 = 10.0;
 const EQ_NODE_EDGE_INSET: f32 = 12.0;
 const EQ_GAIN_MIN_DB: f32 = -18.0;
 const EQ_GAIN_MAX_DB: f32 = 18.0;
@@ -37,8 +39,9 @@ pub(crate) fn eq_workbench(
     theme: Theme,
 ) {
     *selected_eq_band = (*selected_eq_band).min(EQ_NODE_COUNT - 1);
+    let workbench_width = (ui.available_width() - EQ_RIGHT_MARGIN).max(0.0);
     let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(EQ_WORKBENCH_WIDTH, EQ_WORKBENCH_HEIGHT),
+        Vec2::new(workbench_width, EQ_WORKBENCH_HEIGHT),
         Sense::hover(),
     );
     ui.scope_builder(
@@ -52,10 +55,8 @@ pub(crate) fn eq_workbench(
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(egui::Margin::same(6))
                 .show(ui, |ui| {
-                    ui.set_min_size(Vec2::new(
-                        EQ_WORKBENCH_WIDTH - 14.0,
-                        EQ_WORKBENCH_HEIGHT - 14.0,
-                    ));
+                    ui.set_width((workbench_width - 12.0).max(0.0));
+                    ui.set_min_height(EQ_WORKBENCH_HEIGHT - 14.0);
                     eq_header(
                         ui,
                         setter,
@@ -69,13 +70,43 @@ pub(crate) fn eq_workbench(
                     eq_separator(ui, theme);
                     ui.add_space(5.0);
                     ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        eq_canvas(ui, setter, params, selected_eq_band, colors, theme);
-                        eq_controls(ui, setter, params, selected_eq_band, colors, theme);
+                        let available_width = ui.available_width();
+                        let inspector_width = inspector_width_for(available_width);
+                        let canvas_width =
+                            (available_width - inspector_width - EQ_CONTENT_GAP - EQ_RIGHT_MARGIN)
+                                .max(0.0);
+                        ui.spacing_mut().item_spacing.x = EQ_CONTENT_GAP;
+                        eq_canvas(
+                            ui,
+                            setter,
+                            params,
+                            selected_eq_band,
+                            colors,
+                            theme,
+                            canvas_width,
+                        );
+                        eq_controls(
+                            ui,
+                            setter,
+                            params,
+                            selected_eq_band,
+                            colors,
+                            theme,
+                            inspector_width,
+                        );
                     });
                 });
         },
     );
+}
+
+fn inspector_width_for(available_width: f32) -> f32 {
+    let room_after_min_canvas = available_width - EQ_MIN_CANVAS_WIDTH - EQ_CONTENT_GAP;
+    let max_without_overflow = (available_width - EQ_CONTENT_GAP - EQ_RIGHT_MARGIN).max(0.0);
+    room_after_min_canvas
+        .min(EQ_INSPECTOR_WIDTH)
+        .max(EQ_MIN_INSPECTOR_WIDTH)
+        .min(max_without_overflow)
 }
 
 fn eq_header(
@@ -217,9 +248,10 @@ pub(crate) fn eq_canvas(
     selected_eq_band: &mut usize,
     colors: ModuleColors,
     theme: Theme,
+    canvas_width: f32,
 ) {
     let (rect, canvas_response) = ui.allocate_exact_size(
-        Vec2::new(EQ_CANVAS_WIDTH, EQ_CANVAS_HEIGHT),
+        Vec2::new(canvas_width, EQ_CANVAS_HEIGHT),
         Sense::click_and_drag(),
     );
     let painter = ui.painter();
@@ -445,8 +477,9 @@ fn eq_controls(
     selected_eq_band: &mut usize,
     colors: ModuleColors,
     theme: Theme,
+    inspector_width: f32,
 ) {
-    ui.allocate_ui(Vec2::new(EQ_CONTROL_WIDTH, EQ_CANVAS_HEIGHT), |ui| {
+    ui.allocate_ui(Vec2::new(inspector_width, EQ_CANVAS_HEIGHT), |ui| {
         ui.spacing_mut().item_spacing.y = 3.0;
         ui.label(
             RichText::new(format!(
