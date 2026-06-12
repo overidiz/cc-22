@@ -9,7 +9,7 @@ use crate::params::Cc22Params;
 use super::{
     meters::MeterReading,
     theme::{ModuleColors, Theme, FONT_HINT},
-    widgets::{eq_active, set_param},
+    widgets::{eq_active, handle_float_drag, paint_colored_knob, set_param, value_string},
 };
 
 const EQ_DISPLAY_SAMPLE_RATE: f32 = 48_000.0;
@@ -20,8 +20,9 @@ const EQ_CURVE_POINTS: usize = 144;
 const EQ_NODE_COUNT: usize = 6;
 const EQ_WORKBENCH_WIDTH: f32 = 690.0;
 const EQ_WORKBENCH_HEIGHT: f32 = 166.0;
-const EQ_CANVAS_WIDTH: f32 = 676.0;
-const EQ_CANVAS_HEIGHT: f32 = 128.0;
+const EQ_CANVAS_WIDTH: f32 = 372.0;
+const EQ_CANVAS_HEIGHT: f32 = 118.0;
+const EQ_CONTROL_WIDTH: f32 = 294.0;
 const EQ_NODE_EDGE_INSET: f32 = 12.0;
 const EQ_GAIN_MIN_DB: f32 = -18.0;
 const EQ_GAIN_MAX_DB: f32 = 18.0;
@@ -56,8 +57,14 @@ pub(crate) fn eq_workbench(
                         EQ_WORKBENCH_HEIGHT - 14.0,
                     ));
                     eq_header(ui, meter_reading, theme);
+                    ui.add_space(3.0);
+                    eq_separator(ui, theme);
                     ui.add_space(5.0);
-                    eq_canvas(ui, setter, params, selected_eq_band, colors, theme);
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        eq_canvas(ui, setter, params, selected_eq_band, colors, theme);
+                        eq_controls(ui, setter, params, selected_eq_band, colors, theme);
+                    });
                 });
         },
     );
@@ -81,6 +88,14 @@ fn eq_header(ui: &mut egui::Ui, meter_reading: MeterReading, theme: Theme) {
         ui.add_space(86.0);
         tiny_meter_pair(ui, meter_reading, theme);
     });
+}
+
+fn eq_separator(ui: &mut egui::Ui, theme: Theme) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().line_segment(
+        [rect.left_center(), rect.right_center()],
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.55)),
+    );
 }
 
 fn tiny_meter_pair(ui: &mut egui::Ui, meter_reading: MeterReading, theme: Theme) {
@@ -158,12 +173,15 @@ pub(crate) fn eq_canvas(
     }
 
     let frequency_labels = [
-        (10.0, "10"),
         (20.0, "20"),
+        (50.0, "50"),
         (100.0, "100"),
+        (200.0, "200"),
         (500.0, "500"),
         (1_000.0, "1k"),
+        (2_000.0, "2k"),
         (5_000.0, "5k"),
+        (10_000.0, "10k"),
         (20_000.0, "20k"),
     ];
     for (frequency, label) in frequency_labels {
@@ -217,6 +235,8 @@ pub(crate) fn eq_canvas(
 
     let eq_response = EqDisplayResponse::from_params(params, eq_active(params));
     let mut curve = Vec::with_capacity(EQ_CURVE_POINTS);
+    let mut fill = Vec::with_capacity(EQ_CURVE_POINTS + 2);
+    fill.push(Pos2::new(rect.left(), y_from_gain_db(rect, 0.0)));
     for index in 0..EQ_CURVE_POINTS {
         let normalized = index as f32 / (EQ_CURVE_POINTS - 1) as f32;
         let frequency = frequency_from_x(normalized);
@@ -226,12 +246,21 @@ pub(crate) fn eq_canvas(
             y_from_gain_db(rect, gain_db),
         ));
     }
+    fill.extend(curve.iter().copied());
+    fill.push(Pos2::new(rect.right(), y_from_gain_db(rect, 0.0)));
 
     let curve_color = if eq_active(params) {
         Color32::from_rgb(255, 139, 42)
     } else {
         theme.muted
     };
+    if eq_active(params) {
+        painter.add(egui::Shape::convex_polygon(
+            fill,
+            Color32::from_rgba_premultiplied(255, 140, 50, 16),
+            Stroke::NONE,
+        ));
+    }
     painter.add(egui::Shape::line(
         curve,
         Stroke::new(if eq_active(params) { 1.7 } else { 1.25 }, curve_color),
@@ -332,6 +361,247 @@ pub(crate) fn eq_canvas(
     let _ = canvas_response;
 }
 
+fn eq_controls(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    params: &Cc22Params,
+    selected_eq_band: &mut usize,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    ui.allocate_ui(Vec2::new(EQ_CONTROL_WIDTH, EQ_CANVAS_HEIGHT), |ui| {
+        ui.spacing_mut().item_spacing.y = 3.0;
+        eq_band_tabs(ui, selected_eq_band, colors, theme);
+        ui.add_space(1.0);
+        ui.label(
+            RichText::new(format!(
+                "BAND {}  -  {}",
+                *selected_eq_band + 1,
+                eq_band_shape_name(*selected_eq_band)
+            ))
+            .font(FontId::monospace(10.5))
+            .strong()
+            .color(theme.text_dark),
+        );
+        ui.label(
+            RichText::new(eq_band_value_text(params, *selected_eq_band))
+                .font(FontId::monospace(9.0))
+                .strong()
+                .color(theme.muted_dark),
+        );
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let band_color = eq_band_color(*selected_eq_band, colors);
+            eq_param_knob(
+                ui,
+                setter,
+                selected_frequency_param(params, *selected_eq_band),
+                "FREQ",
+                "FREQ",
+                band_color,
+                theme,
+            );
+            if let Some(gain) = selected_gain_param(params, *selected_eq_band) {
+                eq_param_knob(ui, setter, gain, "GAIN", "GAIN", band_color, theme);
+            } else {
+                eq_empty_slot(ui, "GAIN", theme);
+            }
+            if let Some(q) = selected_q_param(params, *selected_eq_band) {
+                eq_param_knob(ui, setter, q, "BW", "BW", band_color, theme);
+            } else {
+                eq_empty_slot(ui, "BW", theme);
+            }
+        });
+    });
+}
+
+fn eq_band_tabs(
+    ui: &mut egui::Ui,
+    selected_eq_band: &mut usize,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let tab_width = (EQ_CONTROL_WIDTH - 10.0) / EQ_NODE_COUNT as f32;
+        for band in 0..EQ_NODE_COUNT {
+            let color = eq_band_color(band, colors);
+            let selected = band == *selected_eq_band;
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(tab_width, 20.0), Sense::click());
+            if response.clicked() {
+                *selected_eq_band = band;
+            }
+            let fill = if selected {
+                color
+            } else if response.hovered() {
+                Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 82)
+            } else {
+                Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 52)
+            };
+            ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(4),
+                Stroke::new(
+                    if selected { 1.4 } else { 1.0 },
+                    theme
+                        .card_edge
+                        .gamma_multiply(if selected { 0.7 } else { 0.35 }),
+                ),
+                StrokeKind::Inside,
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{}", band + 1),
+                FontId::monospace(11.0),
+                if selected {
+                    Color32::WHITE
+                } else {
+                    theme.text_dark.gamma_multiply(0.72)
+                },
+            );
+        }
+    });
+}
+
+fn eq_param_knob(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    param: &FloatParam,
+    label: &'static str,
+    sublabel: &'static str,
+    accent: Color32,
+    theme: Theme,
+) {
+    ui.allocate_ui(Vec2::new(60.0, 70.0), |ui| {
+        ui.vertical_centered(|ui| {
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::splat(42.0), Sense::click_and_drag());
+            handle_float_drag(ui, setter, param, &response);
+            paint_colored_knob(
+                ui,
+                rect,
+                param.unmodulated_normalized_value(),
+                accent,
+                theme,
+            );
+            ui.label(
+                RichText::new(label)
+                    .font(FontId::monospace(8.5))
+                    .strong()
+                    .color(theme.text_dark),
+            );
+            ui.label(
+                RichText::new(sublabel)
+                    .font(FontId::monospace(7.0))
+                    .strong()
+                    .color(theme.muted_dark),
+            );
+            response.on_hover_text(format!("{}: {}", param.name(), value_string(param)));
+        });
+    });
+}
+
+fn eq_empty_slot(ui: &mut egui::Ui, label: &'static str, theme: Theme) {
+    ui.allocate_ui(Vec2::new(60.0, 70.0), |ui| {
+        ui.vertical_centered(|ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(42.0), Sense::hover());
+            ui.painter().circle_filled(
+                rect.center(),
+                17.5,
+                Color32::from_rgba_premultiplied(210, 202, 190, 70),
+            );
+            ui.painter().circle_stroke(
+                rect.center(),
+                17.5,
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(130, 120, 105, 70)),
+            );
+            ui.label(
+                RichText::new(label)
+                    .font(FontId::monospace(8.5))
+                    .strong()
+                    .color(theme.muted_dark.gamma_multiply(0.72)),
+            );
+            ui.label(
+                RichText::new("-")
+                    .font(FontId::monospace(7.0))
+                    .strong()
+                    .color(theme.muted_dark.gamma_multiply(0.72)),
+            );
+        });
+    });
+}
+
+fn eq_band_shape_name(band: usize) -> &'static str {
+    match band {
+        0 => "LOW SHELF",
+        1 => "LOW CUT",
+        2 => "PEAK",
+        3 => "PEAK WIDTH",
+        4 => "HIGH SHELF",
+        _ => "HIGH CUT",
+    }
+}
+
+fn eq_band_value_text(params: &Cc22Params, band: usize) -> String {
+    let freq = selected_frequency_param(params, band).value();
+    let gain = selected_gain_param(params, band)
+        .map(|param| format!(" / {:+.1} dB", param.value()))
+        .unwrap_or_default();
+    let q = selected_q_param(params, band)
+        .map(|param| format!(" / Q {:.2}", param.value()))
+        .unwrap_or_default();
+    format!("{}{}{}", format_frequency(freq), gain, q)
+}
+
+fn format_frequency(frequency: f32) -> String {
+    if frequency >= 1_000.0 {
+        format!("{:.2} kHz", frequency / 1_000.0)
+    } else {
+        format!("{:.0} Hz", frequency)
+    }
+}
+
+fn selected_frequency_param(params: &Cc22Params, band: usize) -> &FloatParam {
+    match band {
+        0 => &params.eq.low_shelf_frequency,
+        1 => &params.eq.low_cut_frequency,
+        2 | 3 => &params.eq.mid_frequency,
+        4 => &params.eq.high_shelf_frequency,
+        _ => &params.eq.high_cut_frequency,
+    }
+}
+
+fn selected_gain_param(params: &Cc22Params, band: usize) -> Option<&FloatParam> {
+    match band {
+        0 => Some(&params.eq.low_shelf_gain),
+        2 => Some(&params.eq.mid_gain),
+        4 => Some(&params.eq.high_shelf_gain),
+        _ => None,
+    }
+}
+
+fn selected_q_param(params: &Cc22Params, band: usize) -> Option<&FloatParam> {
+    match band {
+        2 | 3 => Some(&params.eq.mid_q),
+        _ => None,
+    }
+}
+
+fn eq_band_color(band: usize, colors: ModuleColors) -> Color32 {
+    match band {
+        0 => Color32::from_rgb(255, 90, 55),
+        1 => Color32::from_rgb(255, 150, 60),
+        2 => Color32::from_rgb(255, 175, 65),
+        3 => Color32::from_rgb(255, 210, 70),
+        4 => Color32::from_rgb(100, 210, 160),
+        _ => colors.texture,
+    }
+}
+
 #[derive(Clone, Copy)]
 struct EqNodeSpec {
     index: usize,
@@ -352,12 +622,12 @@ fn eq_node_specs(
                 params.eq.low_shelf_frequency.value(),
                 params.eq.low_shelf_gain.value(),
             ),
-            color: colors.character,
+            color: eq_band_color(0, colors),
         },
         EqNodeSpec {
             index: 1,
             center: node_pos(rect, params.eq.low_cut_frequency.value(), 0.0),
-            color: Color32::from_rgb(220, 188, 78),
+            color: eq_band_color(1, colors),
         },
         EqNodeSpec {
             index: 2,
@@ -366,7 +636,7 @@ fn eq_node_specs(
                 params.eq.mid_frequency.value(),
                 params.eq.mid_gain.value(),
             ),
-            color: colors.eq,
+            color: eq_band_color(2, colors),
         },
         EqNodeSpec {
             index: 3,
@@ -375,7 +645,7 @@ fn eq_node_specs(
                 mid_q_node_frequency(params.eq.mid_frequency.value()),
                 q_to_visual_gain(params.eq.mid_q.value()),
             ),
-            color: Color32::from_rgb(194, 157, 52),
+            color: eq_band_color(3, colors),
         },
         EqNodeSpec {
             index: 4,
@@ -384,12 +654,12 @@ fn eq_node_specs(
                 params.eq.high_shelf_frequency.value(),
                 params.eq.high_shelf_gain.value(),
             ),
-            color: colors.diffusion,
+            color: eq_band_color(4, colors),
         },
         EqNodeSpec {
             index: 5,
             center: node_pos(rect, params.eq.high_cut_frequency.value(), 0.0),
-            color: colors.texture,
+            color: eq_band_color(5, colors),
         },
     ]
 }
