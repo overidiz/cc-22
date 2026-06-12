@@ -119,14 +119,16 @@ fn eq_header(
     theme: Theme,
 ) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
+        ui.spacing_mut().item_spacing.x = 8.0;
         ui.label(
             RichText::new("EQUALIZER")
                 .font(FontId::monospace(13.0))
                 .strong()
                 .color(theme.text_dark),
         );
-        if eq_toolbar_button(ui, "ON", eq_active(params), colors.eq, theme).clicked() {
+        ui.add_space(6.0);
+        let active = eq_active(params);
+        if eq_toggle_button(ui, active, colors.eq, theme).clicked() {
             if eq_active(params) {
                 set_param(setter, &params.eq.bypass, true);
             } else {
@@ -134,30 +136,89 @@ fn eq_header(
                 set_param(setter, &params.eq.bypass, false);
             }
         }
-        for band in 0..EQ_NODE_COUNT {
-            let selected = band == *selected_eq_band;
-            if eq_toolbar_button(
-                ui,
-                eq_band_tab_label(band),
-                selected,
-                eq_band_color(band, colors),
-                theme,
-            )
-            .clicked()
-            {
-                *selected_eq_band = band;
+        eq_toolbar_divider(ui, theme);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for band in 0..EQ_NODE_COUNT {
+                let selected = band == *selected_eq_band;
+                if eq_band_tab_button(
+                    ui,
+                    eq_band_tab_label(band),
+                    selected,
+                    eq_band_color(band, colors),
+                    theme,
+                )
+                .clicked()
+                {
+                    *selected_eq_band = band;
+                }
             }
-        }
-        if eq_toolbar_button(ui, "RESET", false, colors.master, theme).clicked() {
+        });
+        eq_toolbar_divider(ui, theme);
+        if eq_reset_button(ui, colors.master, theme).clicked() {
             reset_eq_to_defaults(setter, params);
             *selected_eq_band = 0;
         }
-        ui.add_space(26.0);
-        tiny_meter_pair(ui, meter_reading, theme);
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            tiny_meter_pair(ui, meter_reading, theme);
+        });
     });
 }
 
-fn eq_toolbar_button(
+fn eq_toggle_button(
+    ui: &mut egui::Ui,
+    active: bool,
+    accent: Color32,
+    theme: Theme,
+) -> egui::Response {
+    let label = if active { "ON" } else { "OFF" };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(42.0, 18.0), Sense::click());
+    let fill = if active {
+        accent
+    } else if response.hovered() {
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 44)
+    } else {
+        Color32::from_rgb(238, 232, 221)
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(8),
+        Stroke::new(
+            1.0,
+            if active {
+                accent.gamma_multiply(0.75)
+            } else {
+                theme.card_edge
+            },
+        ),
+        StrokeKind::Inside,
+    );
+    let dot_center = Pos2::new(rect.left() + 8.0, rect.center().y);
+    ui.painter().circle_filled(
+        dot_center,
+        2.5,
+        if active {
+            Color32::WHITE
+        } else {
+            theme.muted_dark
+        },
+    );
+    ui.painter().text(
+        Pos2::new(rect.center().x + 4.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        label,
+        FontId::monospace(8.2),
+        if active {
+            Color32::WHITE
+        } else {
+            theme.text_dark.gamma_multiply(0.72)
+        },
+    );
+    response
+}
+
+fn eq_band_tab_button(
     ui: &mut egui::Ui,
     label: &'static str,
     active: bool,
@@ -196,6 +257,38 @@ fn eq_toolbar_button(
         },
     );
     response
+}
+
+fn eq_reset_button(ui: &mut egui::Ui, accent: Color32, theme: Theme) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(54.0, 18.0), Sense::click());
+    let fill = if response.hovered() {
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 34)
+    } else {
+        Color32::from_rgb(244, 239, 229)
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(4),
+        Stroke::new(1.0, theme.card_edge),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "RESET",
+        FontId::monospace(8.0),
+        theme.muted_dark,
+    );
+    response
+}
+
+fn eq_toolbar_divider(ui: &mut egui::Ui, theme: Theme) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 16.0), Sense::hover());
+    ui.painter().line_segment(
+        [rect.center_top(), rect.center_bottom()],
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.72)),
+    );
 }
 
 fn eq_separator(ui: &mut egui::Ui, theme: Theme) {
