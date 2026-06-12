@@ -7,8 +7,7 @@ use nih_plug_egui::egui::{
 use crate::{dsp::eq::EqMode, params::Cc22Params};
 
 use super::{
-    meters::MeterReading,
-    theme::{ModuleColors, Theme, FONT_HINT},
+    theme::{ModuleColors, Theme},
     widgets::{eq_active, handle_float_drag, paint_colored_knob, set_param, value_string},
 };
 
@@ -33,7 +32,6 @@ pub(crate) fn eq_workbench(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
-    meter_reading: MeterReading,
     selected_eq_band: &mut usize,
     colors: ModuleColors,
     theme: Theme,
@@ -57,15 +55,7 @@ pub(crate) fn eq_workbench(
                 .show(ui, |ui| {
                     ui.set_width((workbench_width - 12.0).max(0.0));
                     ui.set_min_height(EQ_WORKBENCH_HEIGHT - 14.0);
-                    eq_header(
-                        ui,
-                        setter,
-                        params,
-                        meter_reading,
-                        selected_eq_band,
-                        colors,
-                        theme,
-                    );
+                    eq_header(ui, setter, params, selected_eq_band, colors, theme);
                     ui.add_space(3.0);
                     eq_separator(ui, theme);
                     ui.add_space(5.0);
@@ -113,7 +103,6 @@ fn eq_header(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
-    meter_reading: MeterReading,
     selected_eq_band: &mut usize,
     colors: ModuleColors,
     theme: Theme,
@@ -159,9 +148,6 @@ fn eq_header(
             reset_eq_to_defaults(setter, params);
             *selected_eq_band = 0;
         }
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            tiny_meter_pair(ui, meter_reading, theme);
-        });
     });
 }
 
@@ -297,41 +283,6 @@ fn eq_separator(ui: &mut egui::Ui, theme: Theme) {
         [rect.left_center(), rect.right_center()],
         Stroke::new(1.0, theme.card_edge.gamma_multiply(0.55)),
     );
-}
-
-fn tiny_meter_pair(ui: &mut egui::Ui, meter_reading: MeterReading, theme: Theme) {
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 1.0;
-        tiny_meter(ui, "IN", meter_reading.input.level(), theme);
-        tiny_meter(ui, "OUT", meter_reading.output.level(), theme);
-    });
-}
-
-fn tiny_meter(ui: &mut egui::Ui, label: &'static str, level: f32, theme: Theme) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
-        ui.label(
-            RichText::new(label)
-                .font(FontId::monospace(FONT_HINT))
-                .strong()
-                .color(theme.muted_dark),
-        );
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(86.0, 4.0), Sense::hover());
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(1),
-            Color32::from_rgb(222, 216, 204),
-        );
-        let fill = egui::Rect::from_min_max(
-            rect.left_top(),
-            Pos2::new(
-                rect.left() + rect.width() * level.clamp(0.0, 1.0),
-                rect.bottom(),
-            ),
-        );
-        ui.painter()
-            .rect_filled(fill, CornerRadius::same(1), Color32::from_rgb(239, 132, 47));
-    });
 }
 
 pub(crate) fn eq_canvas(

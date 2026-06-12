@@ -242,7 +242,6 @@ pub(crate) fn center_modules(
             ui,
             setter,
             params,
-            meter_reading,
             &mut state.selected_eq_band,
             colors,
             theme,
