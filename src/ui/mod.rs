@@ -13,7 +13,6 @@ mod master_strip;
 mod meters;
 mod module_card;
 mod preset_bar;
-mod settings;
 mod signal_flow;
 mod theme;
 mod top_bar;
@@ -23,46 +22,11 @@ use eq_view::reset_eq_to_defaults;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
-use theme::{Look, ModuleColors, Theme, BASE_HEIGHT, BASE_WIDTH, UI_SCALE_OPTIONS};
+use theme::{Look, ModuleColors, Theme, BASE_HEIGHT, BASE_WIDTH};
 use top_bar::top_bar;
 
-fn computed_size(scale: u32) -> (u32, u32) {
-    let w = BASE_WIDTH * scale as f32 / 100.0;
-    let h = BASE_HEIGHT * scale as f32 / 100.0;
-    (w.round() as u32, h.round() as u32)
-}
-
-fn scale_from_size(width: u32) -> u32 {
-    let raw = width as f32 / BASE_WIDTH * 100.0;
-    let rounded = raw.round() as u32;
-
-    UI_SCALE_OPTIONS
-        .iter()
-        .min_by_key(|&&opt| {
-            let a = opt as i32 - rounded as i32;
-            a.abs()
-        })
-        .copied()
-        .unwrap_or(100)
-}
-
-fn should_request_size(
-    state: &mut UiState,
-    current_size: (u32, u32),
-    target_size: (u32, u32),
-    force: bool,
-) -> bool {
-    if target_size == current_size {
-        state.last_requested_size = None;
-        return false;
-    }
-
-    if force || state.last_requested_size != Some(target_size) {
-        state.last_requested_size = Some(target_size);
-        return true;
-    }
-
-    false
+fn fixed_editor_size() -> (u32, u32) {
+    (BASE_WIDTH.round() as u32, BASE_HEIGHT.round() as u32)
 }
 
 pub fn create_editor(
@@ -71,15 +35,11 @@ pub fn create_editor(
     _async_executor: AsyncExecutor<Cc22>,
 ) -> Option<Box<dyn Editor>> {
     let editor_state = params.editor_state.clone();
-    let initial_size = editor_state.size();
-    let initial_scale = scale_from_size(initial_size.0);
+    editor_state.set_requested_size(fixed_editor_size());
 
     create_egui_editor(
         editor_state.clone(),
-        UiState {
-            ui_scale: initial_scale,
-            ..UiState::with_random_seed(0xCC22_2026)
-        },
+        UiState::with_random_seed(0xCC22_2026),
         move |ctx, _state| {
             let theme = Theme::default();
             let mut style = (*ctx.style()).clone();
@@ -96,7 +56,6 @@ pub fn create_editor(
             ctx.set_style(style);
         },
         {
-            let editor_state = editor_state.clone();
             move |ctx, setter, state| {
                 let theme = Theme::default();
                 let colors = ModuleColors::default();
@@ -108,13 +67,6 @@ pub fn create_editor(
                     reset_eq_to_defaults(setter, &params);
                     state.selected_eq_band = 0;
                     state.eq_open_reset_done = true;
-                }
-
-                let target_size = computed_size(state.ui_scale);
-                let current_size = editor_state.size();
-
-                if should_request_size(state, current_size, target_size, false) {
-                    editor_state.set_requested_size(target_size);
                 }
 
                 CentralPanel::default().show(ctx, |ui| {
@@ -131,19 +83,6 @@ pub fn create_editor(
                             });
                         });
                 });
-
-                let mut scale_copy = state.ui_scale;
-                let mut open_copy = state.settings_open;
-                settings::settings_panel(ctx, &mut scale_copy, &mut open_copy, |_| {});
-                if scale_copy != state.ui_scale {
-                    let target_size = computed_size(scale_copy);
-                    let current_size = editor_state.size();
-                    if should_request_size(state, current_size, target_size, true) {
-                        editor_state.set_requested_size(target_size);
-                    }
-                }
-                state.ui_scale = scale_copy;
-                state.settings_open = open_copy;
             }
         },
     )

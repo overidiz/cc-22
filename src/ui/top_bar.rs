@@ -86,12 +86,6 @@ pub(crate) fn top_bar(
                         {
                             randomize_controls(setter, state, params);
                         }
-                        if compact_button(ui, "SETTINGS", theme, colors.eq)
-                            .on_hover_text("Open settings")
-                            .clicked()
-                        {
-                            state.settings_open = !state.settings_open;
-                        }
 
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             global_bypass_button(ui, setter, &params.global_bypass, theme);

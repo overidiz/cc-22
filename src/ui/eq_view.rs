@@ -4,7 +4,7 @@ use nih_plug_egui::egui::{
     UiBuilder, Vec2,
 };
 
-use crate::params::Cc22Params;
+use crate::{dsp::eq::EqMode, params::Cc22Params};
 
 use super::{
     meters::MeterReading,
@@ -17,12 +17,12 @@ const EQ_DISPLAY_MIN_HZ: f32 = 10.0;
 const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 144;
-const EQ_NODE_COUNT: usize = 6;
-const EQ_WORKBENCH_WIDTH: f32 = 690.0;
+const EQ_NODE_COUNT: usize = 5;
+const EQ_WORKBENCH_WIDTH: f32 = 925.0;
 const EQ_WORKBENCH_HEIGHT: f32 = 166.0;
-const EQ_CANVAS_WIDTH: f32 = 372.0;
-const EQ_CANVAS_HEIGHT: f32 = 118.0;
-const EQ_CONTROL_WIDTH: f32 = 294.0;
+const EQ_CANVAS_WIDTH: f32 = 650.0;
+const EQ_CANVAS_HEIGHT: f32 = 112.0;
+const EQ_CONTROL_WIDTH: f32 = 245.0;
 const EQ_NODE_EDGE_INSET: f32 = 12.0;
 const EQ_GAIN_MIN_DB: f32 = -18.0;
 const EQ_GAIN_MAX_DB: f32 = 18.0;
@@ -56,7 +56,15 @@ pub(crate) fn eq_workbench(
                         EQ_WORKBENCH_WIDTH - 14.0,
                         EQ_WORKBENCH_HEIGHT - 14.0,
                     ));
-                    eq_header(ui, meter_reading, theme);
+                    eq_header(
+                        ui,
+                        setter,
+                        params,
+                        meter_reading,
+                        selected_eq_band,
+                        colors,
+                        theme,
+                    );
                     ui.add_space(3.0);
                     eq_separator(ui, theme);
                     ui.add_space(5.0);
@@ -70,24 +78,93 @@ pub(crate) fn eq_workbench(
     );
 }
 
-fn eq_header(ui: &mut egui::Ui, meter_reading: MeterReading, theme: Theme) {
+fn eq_header(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    params: &Cc22Params,
+    meter_reading: MeterReading,
+    selected_eq_band: &mut usize,
+    colors: ModuleColors,
+    theme: Theme,
+) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 7.0;
+        ui.spacing_mut().item_spacing.x = 5.0;
         ui.label(
             RichText::new("EQUALIZER")
                 .font(FontId::monospace(13.0))
                 .strong()
                 .color(theme.text_dark),
         );
-        ui.label(
-            RichText::new("6-BAND")
-                .font(FontId::monospace(FONT_HINT))
-                .strong()
-                .color(theme.muted_dark),
-        );
-        ui.add_space(86.0);
+        if eq_toolbar_button(ui, "ON", eq_active(params), colors.eq, theme).clicked() {
+            if eq_active(params) {
+                set_param(setter, &params.eq.bypass, true);
+            } else {
+                set_param(setter, &params.eq.mode, EqMode::On);
+                set_param(setter, &params.eq.bypass, false);
+            }
+        }
+        for band in 0..EQ_NODE_COUNT {
+            let selected = band == *selected_eq_band;
+            if eq_toolbar_button(
+                ui,
+                eq_band_tab_label(band),
+                selected,
+                eq_band_color(band, colors),
+                theme,
+            )
+            .clicked()
+            {
+                *selected_eq_band = band;
+            }
+        }
+        if eq_toolbar_button(ui, "RESET", false, colors.master, theme).clicked() {
+            reset_eq_to_defaults(setter, params);
+            *selected_eq_band = 0;
+        }
+        ui.add_space(26.0);
         tiny_meter_pair(ui, meter_reading, theme);
     });
+}
+
+fn eq_toolbar_button(
+    ui: &mut egui::Ui,
+    label: &'static str,
+    active: bool,
+    accent: Color32,
+    theme: Theme,
+) -> egui::Response {
+    let width = match label.len() {
+        0..=2 => 30.0,
+        3..=4 => 44.0,
+        _ => 54.0,
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 18.0), Sense::click());
+    let fill = if active {
+        accent
+    } else if response.hovered() {
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 58)
+    } else {
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 28)
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(4),
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.42)),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        FontId::monospace(8.5),
+        if active {
+            Color32::WHITE
+        } else {
+            theme.text_dark.gamma_multiply(0.78)
+        },
+    );
+    response
 }
 
 fn eq_separator(ui: &mut egui::Ui, theme: Theme) {
@@ -371,12 +448,10 @@ fn eq_controls(
 ) {
     ui.allocate_ui(Vec2::new(EQ_CONTROL_WIDTH, EQ_CANVAS_HEIGHT), |ui| {
         ui.spacing_mut().item_spacing.y = 3.0;
-        eq_band_tabs(ui, selected_eq_band, colors, theme);
-        ui.add_space(1.0);
         ui.label(
             RichText::new(format!(
-                "BAND {}  -  {}",
-                *selected_eq_band + 1,
+                "{}  -  {}",
+                eq_band_tab_label(*selected_eq_band),
                 eq_band_shape_name(*selected_eq_band)
             ))
             .font(FontId::monospace(10.5))
@@ -413,57 +488,6 @@ fn eq_controls(
                 eq_empty_slot(ui, "BW", theme);
             }
         });
-    });
-}
-
-fn eq_band_tabs(
-    ui: &mut egui::Ui,
-    selected_eq_band: &mut usize,
-    colors: ModuleColors,
-    theme: Theme,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let tab_width = (EQ_CONTROL_WIDTH - 10.0) / EQ_NODE_COUNT as f32;
-        for band in 0..EQ_NODE_COUNT {
-            let color = eq_band_color(band, colors);
-            let selected = band == *selected_eq_band;
-            let (rect, response) =
-                ui.allocate_exact_size(Vec2::new(tab_width, 20.0), Sense::click());
-            if response.clicked() {
-                *selected_eq_band = band;
-            }
-            let fill = if selected {
-                color
-            } else if response.hovered() {
-                Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 82)
-            } else {
-                Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 52)
-            };
-            ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
-            ui.painter().rect_stroke(
-                rect,
-                CornerRadius::same(4),
-                Stroke::new(
-                    if selected { 1.4 } else { 1.0 },
-                    theme
-                        .card_edge
-                        .gamma_multiply(if selected { 0.7 } else { 0.35 }),
-                ),
-                StrokeKind::Inside,
-            );
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                format!("{}", band + 1),
-                FontId::monospace(11.0),
-                if selected {
-                    Color32::WHITE
-                } else {
-                    theme.text_dark.gamma_multiply(0.72)
-                },
-            );
-        }
     });
 }
 
@@ -537,12 +561,21 @@ fn eq_empty_slot(ui: &mut egui::Ui, label: &'static str, theme: Theme) {
 
 fn eq_band_shape_name(band: usize) -> &'static str {
     match band {
-        0 => "LOW SHELF",
-        1 => "LOW CUT",
+        0 => "LOW CUT",
+        1 => "LOW SHELF",
         2 => "PEAK",
-        3 => "PEAK WIDTH",
-        4 => "HIGH SHELF",
+        3 => "HIGH SHELF",
         _ => "HIGH CUT",
+    }
+}
+
+fn eq_band_tab_label(band: usize) -> &'static str {
+    match band {
+        0 => "LCUT",
+        1 => "LOW",
+        2 => "MID",
+        3 => "HIGH",
+        _ => "HCUT",
     }
 }
 
@@ -567,26 +600,26 @@ fn format_frequency(frequency: f32) -> String {
 
 fn selected_frequency_param(params: &Cc22Params, band: usize) -> &FloatParam {
     match band {
-        0 => &params.eq.low_shelf_frequency,
-        1 => &params.eq.low_cut_frequency,
-        2 | 3 => &params.eq.mid_frequency,
-        4 => &params.eq.high_shelf_frequency,
+        0 => &params.eq.low_cut_frequency,
+        1 => &params.eq.low_shelf_frequency,
+        2 => &params.eq.mid_frequency,
+        3 => &params.eq.high_shelf_frequency,
         _ => &params.eq.high_cut_frequency,
     }
 }
 
 fn selected_gain_param(params: &Cc22Params, band: usize) -> Option<&FloatParam> {
     match band {
-        0 => Some(&params.eq.low_shelf_gain),
+        1 => Some(&params.eq.low_shelf_gain),
         2 => Some(&params.eq.mid_gain),
-        4 => Some(&params.eq.high_shelf_gain),
+        3 => Some(&params.eq.high_shelf_gain),
         _ => None,
     }
 }
 
 fn selected_q_param(params: &Cc22Params, band: usize) -> Option<&FloatParam> {
     match band {
-        2 | 3 => Some(&params.eq.mid_q),
+        2 => Some(&params.eq.mid_q),
         _ => None,
     }
 }
@@ -596,8 +629,7 @@ fn eq_band_color(band: usize, colors: ModuleColors) -> Color32 {
         0 => Color32::from_rgb(255, 90, 55),
         1 => Color32::from_rgb(255, 150, 60),
         2 => Color32::from_rgb(255, 175, 65),
-        3 => Color32::from_rgb(255, 210, 70),
-        4 => Color32::from_rgb(100, 210, 160),
+        3 => Color32::from_rgb(100, 210, 160),
         _ => colors.texture,
     }
 }
@@ -617,16 +649,16 @@ fn eq_node_specs(
     [
         EqNodeSpec {
             index: 0,
+            center: node_pos(rect, params.eq.low_cut_frequency.value(), 0.0),
+            color: eq_band_color(0, colors),
+        },
+        EqNodeSpec {
+            index: 1,
             center: node_pos(
                 rect,
                 params.eq.low_shelf_frequency.value(),
                 params.eq.low_shelf_gain.value(),
             ),
-            color: eq_band_color(0, colors),
-        },
-        EqNodeSpec {
-            index: 1,
-            center: node_pos(rect, params.eq.low_cut_frequency.value(), 0.0),
             color: eq_band_color(1, colors),
         },
         EqNodeSpec {
@@ -642,24 +674,15 @@ fn eq_node_specs(
             index: 3,
             center: node_pos(
                 rect,
-                mid_q_node_frequency(params.eq.mid_frequency.value()),
-                q_to_visual_gain(params.eq.mid_q.value()),
+                params.eq.high_shelf_frequency.value(),
+                params.eq.high_shelf_gain.value(),
             ),
             color: eq_band_color(3, colors),
         },
         EqNodeSpec {
             index: 4,
-            center: node_pos(
-                rect,
-                params.eq.high_shelf_frequency.value(),
-                params.eq.high_shelf_gain.value(),
-            ),
-            color: eq_band_color(4, colors),
-        },
-        EqNodeSpec {
-            index: 5,
             center: node_pos(rect, params.eq.high_cut_frequency.value(), 0.0),
-            color: eq_band_color(5, colors),
+            color: eq_band_color(4, colors),
         },
     ]
 }
@@ -681,40 +704,18 @@ fn node_pos(rect: egui::Rect, frequency: f32, gain_db: f32) -> Pos2 {
     )
 }
 
-fn mid_q_node_frequency(mid_frequency: f32) -> f32 {
-    (mid_frequency * 1.55).clamp(100.0, 8_000.0)
-}
-
-fn q_to_visual_gain(q: f32) -> f32 {
-    (q.clamp(0.1, 10.0).log10() * 12.0).clamp(-12.0, 12.0)
-}
-
-fn q_from_visual_gain(gain_db: f32) -> f32 {
-    10.0_f32
-        .powf((gain_db.clamp(-12.0, 12.0)) / 12.0)
-        .clamp(0.1, 10.0)
-}
-
-fn q_from_y(y: f32) -> f32 {
-    q_from_visual_gain(gain_from_y(y).clamp(-12.0, 12.0))
-}
-
 fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
-        0 => {
+        0 => setter.begin_set_parameter(&params.eq.low_cut_frequency),
+        1 => {
             setter.begin_set_parameter(&params.eq.low_shelf_frequency);
             setter.begin_set_parameter(&params.eq.low_shelf_gain);
         }
-        1 => setter.begin_set_parameter(&params.eq.low_cut_frequency),
         2 => {
             setter.begin_set_parameter(&params.eq.mid_frequency);
             setter.begin_set_parameter(&params.eq.mid_gain);
         }
         3 => {
-            setter.begin_set_parameter(&params.eq.mid_frequency);
-            setter.begin_set_parameter(&params.eq.mid_q);
-        }
-        4 => {
             setter.begin_set_parameter(&params.eq.high_shelf_frequency);
             setter.begin_set_parameter(&params.eq.high_shelf_gain);
         }
@@ -724,20 +725,16 @@ fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, ban
 
 fn end_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
-        0 => {
+        0 => setter.end_set_parameter(&params.eq.low_cut_frequency),
+        1 => {
             setter.end_set_parameter(&params.eq.low_shelf_frequency);
             setter.end_set_parameter(&params.eq.low_shelf_gain);
         }
-        1 => setter.end_set_parameter(&params.eq.low_cut_frequency),
         2 => {
             setter.end_set_parameter(&params.eq.mid_frequency);
             setter.end_set_parameter(&params.eq.mid_gain);
         }
         3 => {
-            setter.end_set_parameter(&params.eq.mid_frequency);
-            setter.end_set_parameter(&params.eq.mid_q);
-        }
-        4 => {
             setter.end_set_parameter(&params.eq.high_shelf_frequency);
             setter.end_set_parameter(&params.eq.high_shelf_gain);
         }
@@ -758,23 +755,16 @@ fn set_selected_band_from_pos(
     let gain_db = gain_from_y(y);
 
     match band {
-        0 => {
+        0 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(10.0, 500.0)),
+        1 => {
             setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(10.0, 500.0));
             setter.set_parameter(&params.eq.low_shelf_gain, gain_db);
         }
-        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(10.0, 500.0)),
         2 => {
             setter.set_parameter(&params.eq.mid_frequency, frequency.clamp(100.0, 8_000.0));
             setter.set_parameter(&params.eq.mid_gain, gain_db);
         }
         3 => {
-            setter.set_parameter(
-                &params.eq.mid_frequency,
-                (frequency / 1.55).clamp(100.0, 8_000.0),
-            );
-            setter.set_parameter(&params.eq.mid_q, q_from_y(y));
-        }
-        4 => {
             setter.set_parameter(
                 &params.eq.high_shelf_frequency,
                 frequency.clamp(1_000.0, 16_000.0),
@@ -797,18 +787,16 @@ fn offset_selected_band_from_delta(
     scale: f32,
 ) {
     let current_frequency = match band {
-        0 => params.eq.low_shelf_frequency.value(),
-        1 => params.eq.low_cut_frequency.value(),
+        0 => params.eq.low_cut_frequency.value(),
+        1 => params.eq.low_shelf_frequency.value(),
         2 => params.eq.mid_frequency.value(),
-        3 => mid_q_node_frequency(params.eq.mid_frequency.value()),
-        4 => params.eq.high_shelf_frequency.value(),
+        3 => params.eq.high_shelf_frequency.value(),
         _ => params.eq.high_cut_frequency.value(),
     };
     let current_gain = match band {
-        0 => params.eq.low_shelf_gain.value(),
+        1 => params.eq.low_shelf_gain.value(),
         2 => params.eq.mid_gain.value(),
-        3 => q_to_visual_gain(params.eq.mid_q.value()),
-        4 => params.eq.high_shelf_gain.value(),
+        3 => params.eq.high_shelf_gain.value(),
         _ => 0.0,
     };
 
@@ -820,23 +808,16 @@ fn offset_selected_band_from_delta(
         .clamp(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB);
 
     match band {
-        0 => {
+        0 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(10.0, 500.0)),
+        1 => {
             setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(10.0, 500.0));
             setter.set_parameter(&params.eq.low_shelf_gain, gain_db);
         }
-        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(10.0, 500.0)),
         2 => {
             setter.set_parameter(&params.eq.mid_frequency, frequency.clamp(100.0, 8_000.0));
             setter.set_parameter(&params.eq.mid_gain, gain_db);
         }
         3 => {
-            setter.set_parameter(
-                &params.eq.mid_frequency,
-                (frequency / 1.55).clamp(100.0, 8_000.0),
-            );
-            setter.set_parameter(&params.eq.mid_q, q_from_visual_gain(gain_db));
-        }
-        4 => {
             setter.set_parameter(
                 &params.eq.high_shelf_frequency,
                 frequency.clamp(1_000.0, 16_000.0),
@@ -863,18 +844,6 @@ fn scroll_eq_band_width(
     match band {
         0 => set_param(
             setter,
-            &params.eq.low_shelf_frequency,
-            scroll_frequency(
-                params.eq.low_shelf_frequency.value(),
-                scroll_y,
-                factor,
-                10.0,
-                500.0,
-                false,
-            ),
-        ),
-        1 => set_param(
-            setter,
             &params.eq.low_cut_frequency,
             scroll_frequency(
                 params.eq.low_cut_frequency.value(),
@@ -885,7 +854,19 @@ fn scroll_eq_band_width(
                 false,
             ),
         ),
-        2 | 3 => {
+        1 => set_param(
+            setter,
+            &params.eq.low_shelf_frequency,
+            scroll_frequency(
+                params.eq.low_shelf_frequency.value(),
+                scroll_y,
+                factor,
+                10.0,
+                500.0,
+                false,
+            ),
+        ),
+        2 => {
             let q = if scroll_y > 0.0 {
                 params.eq.mid_q.value() * factor
             } else {
@@ -893,7 +874,7 @@ fn scroll_eq_band_width(
             };
             set_param(setter, &params.eq.mid_q, q.clamp(0.1, 10.0));
         }
-        4 => set_param(
+        3 => set_param(
             setter,
             &params.eq.high_shelf_frequency,
             scroll_frequency(
@@ -940,7 +921,12 @@ fn scroll_frequency(
 
 fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
-        0 => {
+        0 => set_param(
+            setter,
+            &params.eq.low_cut_frequency,
+            params.eq.low_cut_frequency.default_plain_value(),
+        ),
+        1 => {
             set_param(
                 setter,
                 &params.eq.low_shelf_frequency,
@@ -952,11 +938,6 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
                 params.eq.low_shelf_gain.default_plain_value(),
             );
         }
-        1 => set_param(
-            setter,
-            &params.eq.low_cut_frequency,
-            params.eq.low_cut_frequency.default_plain_value(),
-        ),
         2 => {
             set_param(
                 setter,
@@ -968,15 +949,13 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
                 &params.eq.mid_gain,
                 params.eq.mid_gain.default_plain_value(),
             );
-        }
-        3 => {
             set_param(
                 setter,
                 &params.eq.mid_q,
                 params.eq.mid_q.default_plain_value(),
             );
         }
-        4 => {
+        3 => {
             set_param(
                 setter,
                 &params.eq.high_shelf_frequency,

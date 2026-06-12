@@ -10,9 +10,6 @@ impl Default for UiState {
         Self {
             selected_preset: 0,
             random_seed: 0,
-            ui_scale: 100,
-            last_requested_size: None,
-            settings_open: false,
             selected_eq_band: 0,
             eq_open_reset_done: false,
             drag_source: None,
@@ -31,9 +28,6 @@ impl Default for UiState {
 pub(crate) struct UiState {
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
-    pub(crate) ui_scale: u32,
-    pub(crate) last_requested_size: Option<(u32, u32)>,
-    pub(crate) settings_open: bool,
     pub(crate) selected_eq_band: usize,
     pub(crate) eq_open_reset_done: bool,
     pub(crate) drag_source: Option<usize>,
