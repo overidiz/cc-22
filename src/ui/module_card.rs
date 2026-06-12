@@ -224,31 +224,35 @@ pub(crate) fn center_modules(
         }
     }
 
-    // ── EQ → OUT label ─────────────────────────────────────────────────
-    ui.add_space(2.0);
-    if card_rects[3].is_positive() {
-        let label_rect = egui::Rect::from_center_size(
-            Pos2::new(
-                card_rects[3].right() + 30.0,
-                card_rects[0].center().y + 24.0,
-            ),
-            Vec2::new(60.0, 14.0),
-        );
-        ui.painter().text(
-            label_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "\u{2192} EQ \u{2192} OUT",
-            FontId::monospace(FONT_SECONDARY),
-            theme.muted_dark,
-        );
-    }
-
-    // ── bottom row: EQ + Master ────────────────────────────────────────
-    ui.add_space(1.0);
-    let bottom_row_width = 690.0 + ui.spacing().item_spacing.x + 220.0;
+    ui.add_space(8.0);
     ui.horizontal_top(|ui| {
-        center_fixed_width_row(ui, bottom_row_width);
-        eq_workbench(ui, setter, params, colors, theme);
+        align_row_start(ui, row_start);
+        ui.label(
+            RichText::new("MODULES -> EQ -> OUT")
+                .font(FontId::monospace(FONT_SECONDARY))
+                .strong()
+                .color(theme.muted_dark),
+        );
+    });
+
+    // EQ row: fixed editing strip directly below the modules, aligned to the module flow.
+    ui.add_space(4.0);
+    ui.horizontal_top(|ui| {
+        align_row_start(ui, row_start);
+        eq_workbench(
+            ui,
+            setter,
+            params,
+            &mut state.selected_eq_band,
+            colors,
+            theme,
+        );
+    });
+
+    // Master/output row: smaller final stage, visually downstream from the EQ.
+    ui.add_space(8.0);
+    ui.horizontal_top(|ui| {
+        align_row_start(ui, row_start + 170.0);
         master_strip(ui, setter, params, meter_reading, colors.master, theme);
     });
 }
@@ -317,6 +321,13 @@ fn center_fixed_width_row(ui: &mut egui::Ui, target_width: f32) {
     let extra = ui.available_width() - target_width;
     if extra > 0.0 {
         ui.add_space(extra * 0.5);
+    }
+}
+
+fn align_row_start(ui: &mut egui::Ui, x: f32) {
+    let offset = x - ui.cursor().min.x;
+    if offset > 0.0 {
+        ui.add_space(offset);
     }
 }
 

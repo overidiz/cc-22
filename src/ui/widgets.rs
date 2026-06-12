@@ -369,53 +369,6 @@ pub(crate) fn paint_arc(
         .add(egui::Shape::line(points, Stroke::new(width, color)));
 }
 
-pub(crate) fn draw_eq_icon(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
-    let points = [
-        Pos2::new(rect.left() + 8.0, rect.bottom() - 14.0),
-        Pos2::new(rect.left() + 35.0, rect.bottom() - 20.0),
-        Pos2::new(rect.left() + 63.0, rect.top() + 15.0),
-        Pos2::new(rect.left() + 92.0, rect.top() + 19.0),
-        Pos2::new(rect.right() - 8.0, rect.bottom() - 15.0),
-    ];
-    ui.painter()
-        .add(egui::Shape::line(points.to_vec(), Stroke::new(2.0, accent)));
-}
-
-pub(crate) fn mode_selector<R>(
-    ui: &mut egui::Ui,
-    id: &'static str,
-    selected_text: &'static str,
-    accent: Color32,
-    theme: Theme,
-    add_options: impl FnOnce(&mut egui::Ui) -> R,
-) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("MODE")
-                .font(FontId::monospace(FONT_CONTROL_LABEL))
-                .color(theme.muted),
-        );
-        egui::ComboBox::from_id_salt(id)
-            .selected_text(RichText::new(selected_text).color(accent))
-            .width(92.0)
-            .show_ui(ui, add_options);
-    });
-}
-
-pub(crate) fn eq_mode_selector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<EqMode>,
-    accent: Color32,
-    theme: Theme,
-) {
-    let current = param.value();
-    mode_selector(ui, "eq-mode", eq_mode_label(current), accent, theme, |ui| {
-        enum_option(ui, setter, param, current, EqMode::Off, "Off");
-        enum_option(ui, setter, param, current, EqMode::On, "On");
-    });
-}
-
 pub(crate) fn enum_option<T>(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -584,12 +537,5 @@ pub(crate) fn texture_mode_label(mode: TextureMode) -> &'static str {
         TextureMode::Cassette => "Cassette",
         TextureMode::Broken => "Broken",
         TextureMode::Interference => "Interference",
-    }
-}
-
-pub(crate) fn eq_mode_label(mode: EqMode) -> &'static str {
-    match mode {
-        EqMode::Off => "Off",
-        EqMode::On => "On",
     }
 }

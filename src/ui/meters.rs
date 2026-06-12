@@ -12,6 +12,7 @@ impl Default for UiState {
             random_seed: 0,
             ui_scale: 100,
             settings_open: false,
+            selected_eq_band: 2,
             drag_source: None,
             drag_drop_slot: None,
             input_meter: MeterBallistics::default(),
@@ -30,6 +31,7 @@ pub(crate) struct UiState {
     pub(crate) random_seed: u32,
     pub(crate) ui_scale: u32,
     pub(crate) settings_open: bool,
+    pub(crate) selected_eq_band: usize,
     pub(crate) drag_source: Option<usize>,
     pub(crate) drag_drop_slot: Option<usize>,
     pub(crate) input_meter: MeterBallistics,
@@ -124,7 +126,7 @@ pub(crate) fn level_meter(
                 .font(FontId::monospace(9.0))
                 .color(theme.muted),
         );
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 62.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 28.0), Sense::hover());
         ui.painter()
             .rect_filled(rect, CornerRadius::same(5), Color32::from_rgb(10, 11, 13));
         ui.painter().rect_stroke(
