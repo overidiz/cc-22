@@ -31,8 +31,8 @@ use super::{
     },
     widgets::{
         character_active, character_mode_label, colored_knob, diffusion_active,
-        diffusion_mode_label, enum_option, mini_slider, movement_active, movement_mode_label,
-        set_param, texture_active, texture_mode_label,
+        diffusion_mode_label, mini_slider, movement_active, movement_mode_label, set_param,
+        texture_active, texture_mode_label,
     },
 };
 
@@ -510,8 +510,7 @@ fn render_module_card(
                         state.drag_drop_slot = None;
                     }
 
-                    module_header(ui, spec, setter, params, theme, hovered);
-                    ui.add_space(8.0);
+                    module_header(ui, spec, params, theme, hovered);
                     render_module_content(ui, setter, spec, params, theme);
 
                     if hovered {
@@ -527,70 +526,24 @@ fn render_module_card(
 fn module_header(
     ui: &mut egui::Ui,
     spec: &ModuleCardSpec<'_>,
-    setter: &ParamSetter<'_>,
     params: &Cc22Params,
     theme: Theme,
     hovered: bool,
 ) {
-    ui.horizontal(|ui| {
-        let led_color = if spec.active {
-            spec.accent
-        } else if hovered {
-            spec.accent.gamma_multiply(0.6)
-        } else {
-            theme.muted_dark
-        };
-        let (led_rect, led_response) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::click());
-        ui.painter()
-            .circle_filled(led_rect.center(), 4.0, led_color);
-        ui.painter()
-            .circle_stroke(led_rect.center(), 4.7, Stroke::new(1.0, Color32::BLACK));
-        if led_response
-            .on_hover_text("Click LED to enable/bypass")
-            .clicked()
-        {
-            set_param(setter, spec.bypass, !spec.bypass.value());
-        }
-
-        if ui
-            .add(
-                egui::Label::new(
-                    RichText::new(spec.title)
-                        .font(FontId::monospace(FONT_MODULE_TITLE))
-                        .strong()
-                        .color(if spec.active {
-                            Color32::WHITE
-                        } else {
-                            theme.text_dark
-                        }),
-                )
-                .sense(Sense::click()),
-            )
-            .on_hover_text("Click module name to enable/bypass")
-            .clicked()
-        {
-            set_param(setter, spec.bypass, !spec.bypass.value());
-        }
-
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            header_mode_selector(ui, setter, spec.module, params, spec.accent);
-        });
-    });
-    ui.add_space(2.0);
     let line = Rect::from_min_size(
         Pos2::new(ui.min_rect().left(), ui.cursor().min.y),
-        Vec2::new(ui.available_width(), 1.0),
+        Vec2::new(ui.available_width(), 10.0),
     );
     let line_alpha: u8 = if spec.active {
-        95
+        38
     } else if hovered {
-        50
+        24
     } else {
-        28
+        16
     };
     ui.painter().rect_filled(
         line,
-        CornerRadius::same(1),
+        CornerRadius::same(3),
         Color32::from_rgba_premultiplied(
             spec.accent.r(),
             spec.accent.g(),
@@ -598,147 +551,351 @@ fn module_header(
             line_alpha,
         ),
     );
-    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        mode_square(ui, spec.accent, spec.active, 5.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(selected_module_mode_label(spec.module, params).to_ascii_uppercase())
+                    .font(FontId::monospace(FONT_MODULE_TITLE))
+                    .strong()
+                    .color(if spec.active {
+                        theme.text_dark
+                    } else {
+                        theme.muted_dark
+                    }),
+            )
+            .sense(Sense::hover()),
+        );
+    });
+    ui.add_space(5.0);
 }
 
-fn header_mode_selector(
+fn selected_module_mode_label(module: ChainModule, params: &Cc22Params) -> &'static str {
+    match module {
+        ChainModule::Character => character_mode_label(params.character.mode.value()),
+        ChainModule::Movement => movement_mode_label(params.movement.mode.value()),
+        ChainModule::Diffusion => diffusion_mode_label(params.diffusion.mode.value()),
+        ChainModule::Texture => texture_mode_label(params.texture.mode.value()),
+    }
+}
+
+fn render_module_mode_list(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    module: ChainModule,
+    spec: &ModuleCardSpec<'_>,
     params: &Cc22Params,
-    accent: Color32,
+    theme: Theme,
 ) {
-    let (id, selected) = match module {
-        ChainModule::Character => (
-            "character-mode-header",
-            character_mode_label(params.character.mode.value()),
-        ),
-        ChainModule::Movement => (
-            "movement-mode-header",
-            movement_mode_label(params.movement.mode.value()),
-        ),
-        ChainModule::Diffusion => (
-            "diffusion-mode-header",
-            diffusion_mode_label(params.diffusion.mode.value()),
-        ),
-        ChainModule::Texture => (
-            "texture-mode-header",
-            texture_mode_label(params.texture.mode.value()),
-        ),
-    };
-
-    egui::ComboBox::from_id_salt(id)
-        .selected_text(RichText::new(selected).color(accent))
-        .width(88.0)
-        .show_ui(ui, |ui| match module {
-            ChainModule::Character => {
-                let current = params.character.mode.value();
-                let param = &params.character.mode;
-                enum_option(ui, setter, param, current, CharacterMode::Clean, "Clean");
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    CharacterMode::Saturation,
-                    "Saturation",
-                );
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    CharacterMode::Cassette,
-                    "Cassette",
-                );
-                enum_option(ui, setter, param, current, CharacterMode::Drive, "Drive");
-                enum_option(ui, setter, param, current, CharacterMode::Sweet, "Sweet");
-                enum_option(ui, setter, param, current, CharacterMode::Fuzz, "Fuzz");
-                enum_option(ui, setter, param, current, CharacterMode::Howl, "Howl");
-                enum_option(ui, setter, param, current, CharacterMode::Swell, "Swell");
-            }
-            ChainModule::Movement => {
-                let current = params.movement.mode.value();
-                let param = &params.movement.mode;
-                enum_option(ui, setter, param, current, MovementMode::Off, "Off");
-                enum_option(ui, setter, param, current, MovementMode::Chorus, "Chorus");
-                enum_option(ui, setter, param, current, MovementMode::Vibrato, "Vibrato");
-                enum_option(ui, setter, param, current, MovementMode::Tremolo, "Tremolo");
-                enum_option(ui, setter, param, current, MovementMode::Doubler, "Doubler");
-                enum_option(ui, setter, param, current, MovementMode::Phaser, "Phaser");
-                enum_option(ui, setter, param, current, MovementMode::Pitch, "Pitch");
-            }
-            ChainModule::Diffusion => {
-                let current = params.diffusion.mode.value();
-                let param = &params.diffusion.mode;
-                enum_option(ui, setter, param, current, DiffusionMode::Off, "Off");
-                enum_option(ui, setter, param, current, DiffusionMode::Delay, "Delay");
-                enum_option(ui, setter, param, current, DiffusionMode::Slap, "Slap");
-                enum_option(ui, setter, param, current, DiffusionMode::Reverb, "Reverb");
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    DiffusionMode::Cascade,
-                    "Cascade",
-                );
-                enum_option(ui, setter, param, current, DiffusionMode::Reels, "Reels");
-                enum_option(ui, setter, param, current, DiffusionMode::Space, "Space");
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    DiffusionMode::Collage,
-                    "Collage",
-                );
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    DiffusionMode::Reverse,
-                    "Reverse",
-                );
-            }
-            ChainModule::Texture => {
-                let current = params.texture.mode.value();
-                let param = &params.texture.mode;
-                enum_option(ui, setter, param, current, TextureMode::Off, "Off");
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    TextureMode::WowFlutter,
-                    "WowFlutter",
-                );
-                enum_option(ui, setter, param, current, TextureMode::Noise, "Noise");
-                enum_option(ui, setter, param, current, TextureMode::Tape, "Tape");
-                enum_option(ui, setter, param, current, TextureMode::Filter, "Filter");
-                enum_option(ui, setter, param, current, TextureMode::Squash, "Squash");
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    TextureMode::Cassette,
-                    "Cassette",
-                );
-                enum_option(ui, setter, param, current, TextureMode::Broken, "Broken");
-                enum_option(
-                    ui,
-                    setter,
-                    param,
-                    current,
-                    TextureMode::Interference,
-                    "Interference",
-                );
-            }
-        });
+    match spec.module {
+        ChainModule::Character => {
+            let current = params.character.mode.value();
+            mode_list_row(
+                ui,
+                setter,
+                &params.character.mode,
+                spec.bypass,
+                current,
+                CharacterMode::Drive,
+                "DRIVE",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.character.mode,
+                spec.bypass,
+                current,
+                CharacterMode::Sweet,
+                "SWEET",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.character.mode,
+                spec.bypass,
+                current,
+                CharacterMode::Fuzz,
+                "FUZZ",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.character.mode,
+                spec.bypass,
+                current,
+                CharacterMode::Howl,
+                "HOWL",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.character.mode,
+                spec.bypass,
+                current,
+                CharacterMode::Swell,
+                "SWELL",
+                spec.accent,
+                theme,
+            );
+        }
+        ChainModule::Movement => {
+            let current = params.movement.mode.value();
+            mode_list_row(
+                ui,
+                setter,
+                &params.movement.mode,
+                spec.bypass,
+                current,
+                MovementMode::Doubler,
+                "DOUBLER",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.movement.mode,
+                spec.bypass,
+                current,
+                MovementMode::Vibrato,
+                "VIBRATO",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.movement.mode,
+                spec.bypass,
+                current,
+                MovementMode::Phaser,
+                "PHASER",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.movement.mode,
+                spec.bypass,
+                current,
+                MovementMode::Tremolo,
+                "TREMOLO",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.movement.mode,
+                spec.bypass,
+                current,
+                MovementMode::Pitch,
+                "PITCH",
+                spec.accent,
+                theme,
+            );
+        }
+        ChainModule::Diffusion => {
+            let current = params.diffusion.mode.value();
+            mode_list_row(
+                ui,
+                setter,
+                &params.diffusion.mode,
+                spec.bypass,
+                current,
+                DiffusionMode::Cascade,
+                "CASCADE",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.diffusion.mode,
+                spec.bypass,
+                current,
+                DiffusionMode::Reels,
+                "REELS",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.diffusion.mode,
+                spec.bypass,
+                current,
+                DiffusionMode::Space,
+                "SPACE",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.diffusion.mode,
+                spec.bypass,
+                current,
+                DiffusionMode::Collage,
+                "COLLAGE",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.diffusion.mode,
+                spec.bypass,
+                current,
+                DiffusionMode::Reverse,
+                "REVERSE",
+                spec.accent,
+                theme,
+            );
+        }
+        ChainModule::Texture => {
+            let current = params.texture.mode.value();
+            mode_list_row(
+                ui,
+                setter,
+                &params.texture.mode,
+                spec.bypass,
+                current,
+                TextureMode::Filter,
+                "FILTER",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.texture.mode,
+                spec.bypass,
+                current,
+                TextureMode::Squash,
+                "SQUASH",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.texture.mode,
+                spec.bypass,
+                current,
+                TextureMode::Cassette,
+                "CASSETTE",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.texture.mode,
+                spec.bypass,
+                current,
+                TextureMode::Broken,
+                "BROKEN",
+                spec.accent,
+                theme,
+            );
+            mode_list_row(
+                ui,
+                setter,
+                &params.texture.mode,
+                spec.bypass,
+                current,
+                TextureMode::Interference,
+                "INTERFERENCE",
+                spec.accent,
+                theme,
+            );
+        }
+    }
 }
 
+fn mode_list_row<T>(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    param: &EnumParam<T>,
+    bypass: &BoolParam,
+    current: T,
+    value: T,
+    label: &'static str,
+    accent: Color32,
+    theme: Theme,
+) where
+    T: Enum + Copy + PartialEq,
+{
+    let selected = current == value && !bypass.value();
+    let row_height = 18.0;
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
+
+    if response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(3),
+            Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 18),
+        );
+    }
+
+    let square_center = Pos2::new(rect.left() + 7.0, rect.center().y);
+    mode_square_at(ui, square_center, accent, selected, 4.0);
+    ui.painter().text(
+        Pos2::new(rect.left() + 17.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        FontId::monospace(FONT_SECONDARY),
+        if selected {
+            theme.text_dark
+        } else {
+            theme.muted_dark
+        },
+    );
+
+    if response.clicked() {
+        set_param(setter, bypass, false);
+        set_param(setter, param, value);
+    }
+}
+
+fn mode_square(ui: &mut egui::Ui, color: Color32, active: bool, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    mode_square_at(ui, rect.center(), color, active, size);
+}
+
+fn mode_square_at(ui: &mut egui::Ui, center: Pos2, color: Color32, active: bool, size: f32) {
+    let rect = Rect::from_center_size(center, Vec2::splat(size));
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(1),
+        Color32::from_rgba_premultiplied(
+            color.r(),
+            color.g(),
+            color.b(),
+            if active { 255 } else { 110 },
+        ),
+    );
+    if active {
+        ui.painter().rect_stroke(
+            rect.expand(1.5),
+            CornerRadius::same(2),
+            Stroke::new(0.9, color.gamma_multiply(0.55)),
+            StrokeKind::Outside,
+        );
+    }
+}
+
+#[allow(unreachable_code)]
 fn render_module_content(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -746,6 +903,9 @@ fn render_module_content(
     params: &Cc22Params,
     theme: Theme,
 ) {
+    render_module_mode_list(ui, setter, spec, params, theme);
+    return;
+
     match spec.module {
         ChainModule::Character => {
             let mode = params.character.mode.value();

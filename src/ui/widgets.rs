@@ -369,6 +369,7 @@ pub(crate) fn paint_arc(
         .add(egui::Shape::line(points, Stroke::new(width, color)));
 }
 
+#[allow(dead_code)]
 pub(crate) fn enum_option<T>(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
