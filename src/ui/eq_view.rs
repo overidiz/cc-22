@@ -7,7 +7,7 @@ use nih_plug_egui::egui::{
 use crate::params::Cc22Params;
 
 use super::{
-    theme::{ModuleColors, Theme},
+    theme::{ModuleColors, Theme, FONT_CONTROL_LABEL, FONT_HINT, FONT_SECONDARY, FONT_VALUE_LABEL},
     widgets::{colored_knob, draw_eq_icon, eq_active, eq_mode_selector, value_string},
 };
 
@@ -25,7 +25,7 @@ pub(crate) fn eq_workbench(
     theme: Theme,
 ) {
     let eq_on = eq_active(params);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(690.0, 166.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(690.0, 150.0), Sense::hover());
     ui.scope_builder(
         UiBuilder::new()
             .max_rect(rect)
@@ -35,9 +35,9 @@ pub(crate) fn eq_workbench(
                 .fill(theme.paper)
                 .stroke(Stroke::new(1.0, theme.card_edge))
                 .corner_radius(CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(10))
+                .inner_margin(egui::Margin::same(7))
                 .show(ui, |ui| {
-                    ui.set_min_size(Vec2::new(670.0, 146.0));
+                    ui.set_min_size(Vec2::new(676.0, 136.0));
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
@@ -49,7 +49,7 @@ pub(crate) fn eq_workbench(
                                 );
                                 ui.label(
                                     RichText::new(if eq_on { "5-BAND  ON" } else { "5-BAND  OFF" })
-                                        .font(FontId::monospace(9.0))
+                                        .font(FontId::monospace(FONT_SECONDARY))
                                         .strong()
                                         .color(theme.muted_dark),
                                 );
@@ -65,17 +65,17 @@ pub(crate) fn eq_workbench(
                                     );
                                 });
                             });
-                            ui.add_space(3.0);
+                            ui.add_space(1.0);
                             eq_canvas(ui, params, colors, theme);
                         });
 
-                        ui.add_space(10.0);
+                        ui.add_space(8.0);
                         ui.vertical(|ui| {
                             band_tabs(ui, colors, theme);
-                            ui.add_space(5.0);
+                            ui.add_space(3.0);
                             ui.label(
                                 RichText::new("BAND 3  PEAK")
-                                    .font(FontId::monospace(11.0))
+                                    .font(FontId::monospace(FONT_SECONDARY))
                                     .strong()
                                     .color(theme.text_dark),
                             );
@@ -86,10 +86,10 @@ pub(crate) fn eq_workbench(
                                     value_string(&params.eq.mid_gain),
                                     value_string(&params.eq.mid_q)
                                 ))
-                                .font(FontId::monospace(9.0))
+                                .font(FontId::monospace(FONT_VALUE_LABEL))
                                 .color(theme.muted_dark),
                             );
-                            ui.add_space(4.0);
+                            ui.add_space(2.0);
                             ui.horizontal(|ui| {
                                 colored_knob(
                                     ui,
@@ -98,7 +98,7 @@ pub(crate) fn eq_workbench(
                                     "FREQ",
                                     colors.eq,
                                     theme,
-                                    43.0,
+                                    34.0,
                                 );
                                 colored_knob(
                                     ui,
@@ -107,7 +107,7 @@ pub(crate) fn eq_workbench(
                                     "GAIN",
                                     colors.eq,
                                     theme,
-                                    43.0,
+                                    34.0,
                                 );
                                 colored_knob(
                                     ui,
@@ -116,7 +116,7 @@ pub(crate) fn eq_workbench(
                                     "Q",
                                     colors.eq,
                                     theme,
-                                    43.0,
+                                    34.0,
                                 );
                             });
                         });
@@ -132,7 +132,7 @@ pub(crate) fn eq_canvas(
     colors: ModuleColors,
     theme: Theme,
 ) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(430.0, 114.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(430.0, 101.0), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(
         rect,
@@ -238,7 +238,7 @@ pub(crate) fn eq_canvas(
             center + Vec2::new(0.0, -17.0),
             egui::Align2::CENTER_CENTER,
             label,
-            FontId::monospace(8.0),
+            FontId::monospace(FONT_HINT),
             theme.muted_dark,
         );
     }
@@ -246,6 +246,7 @@ pub(crate) fn eq_canvas(
 
 pub(crate) fn band_tabs(ui: &mut egui::Ui, colors: ModuleColors, theme: Theme) {
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
         let band_colors = [
             colors.character,
             Color32::from_rgb(220, 188, 78),
@@ -256,28 +257,33 @@ pub(crate) fn band_tabs(ui: &mut egui::Ui, colors: ModuleColors, theme: Theme) {
         let labels = ["LCUT", "LOW", "MID", "HIGH", "HCUT"];
         for (index, (label, color)) in labels.into_iter().zip(band_colors).enumerate() {
             let selected = index == 2;
-            ui.add_enabled(
-                false,
-                egui::Button::new(
-                    RichText::new(label)
-                        .font(FontId::monospace(8.0))
-                        .strong()
-                        .color(if selected {
-                            Color32::WHITE
-                        } else {
-                            theme.text_dark
-                        }),
-                )
-                .fill(if selected {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(38.0, 18.0), Sense::hover());
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(6),
+                if selected {
                     color
                 } else {
                     Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 82)
-                })
-                .stroke(Stroke::new(1.0, theme.card_edge))
-                .corner_radius(CornerRadius::same(6))
-                .min_size(Vec2::new(42.0, 20.0)),
-            )
-            .on_hover_text("Placeholder: band selection is visual only; Mid controls are active");
+                },
+            );
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0, theme.card_edge),
+                StrokeKind::Inside,
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                FontId::monospace(FONT_CONTROL_LABEL),
+                if selected {
+                    Color32::WHITE
+                } else {
+                    theme.text_dark
+                },
+            );
         }
     });
 }

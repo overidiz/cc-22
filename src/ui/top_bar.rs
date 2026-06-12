@@ -1,17 +1,16 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui::{self, Align, CornerRadius, FontId, RichText};
+use nih_plug_egui::egui::{self, Align, CornerRadius, FontId, RichText, Stroke, Vec2};
 
 use crate::params::Cc22Params;
 
 use super::{
     meters::UiState,
-    preset_bar::{next_preset, preset_selector, previous_preset, randomize_controls},
+    preset_bar::{next_preset, preset_selector_with_id, previous_preset, randomize_controls},
     theme::{ModuleColors, Theme},
-    widgets::{
-        brand_mark, colored_knob, compact_button, disabled_compact_button, global_bypass_button,
-        rounded_panel,
-    },
+    widgets::{brand_mark, colored_knob, compact_button, global_bypass_button},
 };
+
+const TOP_BAR_HEIGHT: f32 = 86.0;
 
 pub(crate) fn top_bar(
     ui: &mut egui::Ui,
@@ -21,32 +20,41 @@ pub(crate) fn top_bar(
     colors: ModuleColors,
     theme: Theme,
 ) {
-    rounded_panel(
-        ui,
-        theme.paper_alt,
-        theme.text_dark,
-        CornerRadius::same(18),
-        |ui| {
-            ui.horizontal(|ui| {
+    let rect = ui.available_rect_before_wrap();
+    let shadow_rect = egui::Rect::from_min_size(
+        rect.min + Vec2::new(4.0, 5.0),
+        Vec2::new(rect.width().min(1_100.0), TOP_BAR_HEIGHT - 20.0),
+    );
+    ui.painter()
+        .rect_filled(shadow_rect, CornerRadius::same(16), theme.shadow);
+
+    egui::Frame::new()
+        .fill(theme.paper_alt)
+        .stroke(Stroke::new(1.0, theme.text_dark))
+        .corner_radius(CornerRadius::same(16))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_min_height(TOP_BAR_HEIGHT - 16.0);
+            ui.horizontal_centered(|ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         brand_mark(ui, colors, theme);
                         ui.label(
                             RichText::new("CC-22")
-                                .font(FontId::proportional(29.0))
+                                .font(FontId::proportional(24.0))
                                 .strong()
                                 .color(theme.text_dark),
                         );
                     });
                     ui.label(
                         RichText::new("MODULAR COLOR PROCESSOR")
-                            .font(FontId::monospace(10.0))
+                            .font(FontId::monospace(8.5))
                             .color(theme.muted_dark),
                     );
                 });
 
-                ui.add_space(18.0);
-                preset_selector(ui, setter, state, params, theme);
+                ui.add_space(14.0);
+                preset_selector_with_id(ui, setter, state, params, theme, "preset-selector", 280.0);
 
                 if compact_button(ui, "PREV", theme, colors.master).clicked() {
                     previous_preset(setter, state, params);
@@ -54,15 +62,13 @@ pub(crate) fn top_bar(
                 if compact_button(ui, "NEXT", theme, colors.master).clicked() {
                     next_preset(setter, state, params);
                 }
-                let _ = disabled_compact_button(ui, "SAVE", theme)
-                    .on_hover_text("Placeholder: preset saving is handled by the host for now");
                 if compact_button(ui, "RND", theme, colors.texture)
                     .on_hover_text("Randomize musical control values")
                     .clicked()
                 {
                     randomize_controls(setter, state, params);
                 }
-                if compact_button(ui, "SET", theme, colors.eq)
+                if compact_button(ui, "SETTINGS", theme, colors.eq)
                     .on_hover_text("Open settings")
                     .clicked()
                 {
@@ -78,10 +84,9 @@ pub(crate) fn top_bar(
                         "DRY/WET",
                         colors.master,
                         theme,
-                        52.0,
+                        38.0,
                     );
                 });
             });
-        },
-    );
+        });
 }

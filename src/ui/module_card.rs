@@ -23,15 +23,16 @@ use super::{
     signal_flow::{
         card_shadow, compute_drop_slot, drag_handle, drop_indicator_x, final_index_from_drop_slot,
         paint_drop_indicator, paint_floating_card, position_badge, signal_flow_arrow,
-        signal_flow_label,
+        signal_flow_band,
     },
-    theme::{Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, KNOB_SIZE},
+    theme::{
+        Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, FONT_MODULE_TITLE, FONT_SECONDARY,
+        KNOB_SIZE,
+    },
     widgets::{
-        character_active, character_mode_label, character_mode_selector, colored_knob,
-        diffusion_active, diffusion_mode_label, diffusion_mode_selector, draw_curve_icon,
-        draw_lfo_icon, draw_noise_icon, draw_reflection_icon, mini_slider, movement_active,
-        movement_mode_label, movement_mode_selector, set_param, texture_active, texture_mode_label,
-        texture_mode_selector, toggle_button,
+        character_active, character_mode_label, colored_knob, diffusion_active,
+        diffusion_mode_label, enum_option, mini_slider, movement_active, movement_mode_label,
+        set_param, texture_active, texture_mode_label,
     },
 };
 
@@ -64,8 +65,14 @@ pub(crate) fn center_modules(
     let card_specs: [ModuleCardSpec<'_>; 4] = chain_order.map(|m| module_spec(m, params, colors));
 
     // ── compute card layout ──────────────────────────────────────────
+    ui.horizontal_top(|ui| {
+        center_fixed_width_row(ui, module_row_width);
+        signal_flow_band(ui, module_row_width, state.drag_source.is_some(), theme);
+    });
+    ui.add_space(6.0);
+
     let mut card_rects: [Rect; 4] = [Rect::NOTHING; 4];
-    let row_start = ui.cursor().min.x;
+    let row_start = ui.cursor().min.x + ((ui.available_width() - module_row_width).max(0.0) * 0.5);
     let gaps = ui.spacing().item_spacing.x;
     for pos in 0..4 {
         let x = row_start + pos as f32 * (CARD_WIDTH + gaps);
@@ -103,19 +110,6 @@ pub(crate) fn center_modules(
     }
 
     // ── section header ─────────────────────────────────────────────────
-    let label_text = if state.drag_source.is_some() {
-        "SIGNAL FLOW \u{2014} DROP TO REORDER"
-    } else {
-        "SIGNAL FLOW \u{2014} DRAG TO REORDER"
-    };
-    signal_flow_label(
-        ui,
-        ui.cursor().min.y - 2.0,
-        module_row_width,
-        label_text,
-        theme.muted,
-    );
-
     // ── render cards ───────────────────────────────────────────────────
     ui.horizontal_top(|ui| {
         center_fixed_width_row(ui, module_row_width);
@@ -159,7 +153,6 @@ pub(crate) fn center_modules(
                     ui,
                     setter,
                     theme,
-                    now,
                     spec,
                     pos + 1,
                     hovered,
@@ -232,7 +225,7 @@ pub(crate) fn center_modules(
     }
 
     // ── EQ → OUT label ─────────────────────────────────────────────────
-    ui.add_space(4.0);
+    ui.add_space(2.0);
     if card_rects[3].is_positive() {
         let label_rect = egui::Rect::from_center_size(
             Pos2::new(
@@ -245,13 +238,13 @@ pub(crate) fn center_modules(
             label_rect.center(),
             egui::Align2::CENTER_CENTER,
             "\u{2192} EQ \u{2192} OUT",
-            FontId::monospace(7.5),
-            theme.muted,
+            FontId::monospace(FONT_SECONDARY),
+            theme.muted_dark,
         );
     }
 
     // ── bottom row: EQ + Master ────────────────────────────────────────
-    ui.add_space(2.0);
+    ui.add_space(1.0);
     let bottom_row_width = 690.0 + ui.spacing().item_spacing.x + 220.0;
     ui.horizontal_top(|ui| {
         center_fixed_width_row(ui, bottom_row_width);
@@ -425,7 +418,6 @@ fn render_module_card(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     theme: Theme,
-    now: f64,
     spec: &ModuleCardSpec<'_>,
     position_num: usize,
     hovered: bool,
@@ -483,7 +475,7 @@ fn render_module_card(
 
                     position_badge(
                         ui,
-                        Pos2::new(card_rect.left() + 16.0, card_rect.top() + 12.0),
+                        Pos2::new(card_rect.right() - 20.0, card_rect.bottom() - 24.0),
                         position_num,
                         spec.accent,
                     );
@@ -506,63 +498,9 @@ fn render_module_card(
                         state.drag_drop_slot = None;
                     }
 
-                    let header_rect = Rect::from_min_size(
-                        ui.available_rect_before_wrap().min,
-                        Vec2::new(ui.available_width(), 26.0),
-                    );
-                    let header_accent = if spec.active {
-                        spec.accent
-                    } else if hovered {
-                        spec.accent.gamma_multiply(0.5)
-                    } else {
-                        theme.card_edge
-                    };
-                    ui.painter()
-                        .rect_filled(header_rect, CornerRadius::same(7), header_accent);
-                    let cap_rect = Rect::from_min_size(
-                        ui.available_rect_before_wrap().min,
-                        Vec2::new(ui.available_width(), 3.0),
-                    );
-                    let cap_accent = if spec.active {
-                        spec.accent
-                    } else if hovered {
-                        spec.accent.gamma_multiply(0.4)
-                    } else {
-                        theme.card_edge
-                    };
-                    ui.painter()
-                        .rect_filled(cap_rect, CornerRadius::same(3), cap_accent);
-                    ui.add_space(7.0);
-
-                    module_header(
-                        ui,
-                        spec.title,
-                        spec.accent,
-                        spec.active,
-                        spec.bypass,
-                        setter,
-                        theme,
-                        hovered,
-                    );
-                    ui.add_space(4.0);
+                    module_header(ui, spec, setter, params, theme, hovered);
+                    ui.add_space(8.0);
                     render_module_content(ui, setter, spec, params, theme);
-
-                    let icon_rect = Rect::from_min_size(
-                        Pos2::new(card_rect.right() - 52.0, card_rect.top() + 13.0),
-                        Vec2::new(40.0, 32.0),
-                    );
-                    let icon_accent = if spec.active {
-                        spec.accent
-                    } else {
-                        theme.muted
-                    };
-                    match spec.title {
-                        "CHARACTER" => draw_curve_icon(ui, icon_rect, icon_accent),
-                        "MOVEMENT" => draw_lfo_icon(ui, icon_rect, icon_accent, now),
-                        "DIFFUSION" => draw_reflection_icon(ui, icon_rect, icon_accent),
-                        "TEXTURE" => draw_noise_icon(ui, icon_rect, icon_accent),
-                        _ => {}
-                    }
 
                     if hovered {
                         handle_resp.on_hover_text("\u{2194} Drag handle to reorder");
@@ -576,35 +514,39 @@ fn render_module_card(
 
 fn module_header(
     ui: &mut egui::Ui,
-    title: &'static str,
-    accent: Color32,
-    active: bool,
-    bypass: &BoolParam,
+    spec: &ModuleCardSpec<'_>,
     setter: &ParamSetter<'_>,
+    params: &Cc22Params,
     theme: Theme,
     hovered: bool,
 ) {
     ui.horizontal(|ui| {
-        let led_color = if active {
-            accent
+        let led_color = if spec.active {
+            spec.accent
         } else if hovered {
-            accent.gamma_multiply(0.6)
+            spec.accent.gamma_multiply(0.6)
         } else {
             theme.muted_dark
         };
-        let (led_rect, _) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::hover());
+        let (led_rect, led_response) = ui.allocate_exact_size(Vec2::splat(9.0), Sense::click());
         ui.painter()
             .circle_filled(led_rect.center(), 4.0, led_color);
         ui.painter()
             .circle_stroke(led_rect.center(), 4.7, Stroke::new(1.0, Color32::BLACK));
+        if led_response
+            .on_hover_text("Click LED to enable/bypass")
+            .clicked()
+        {
+            set_param(setter, spec.bypass, !spec.bypass.value());
+        }
 
         if ui
             .add(
                 egui::Label::new(
-                    RichText::new(title)
-                        .font(FontId::monospace(13.0))
+                    RichText::new(spec.title)
+                        .font(FontId::monospace(FONT_MODULE_TITLE))
                         .strong()
-                        .color(if active {
+                        .color(if spec.active {
                             Color32::WHITE
                         } else {
                             theme.text_dark
@@ -615,11 +557,11 @@ fn module_header(
             .on_hover_text("Click module name to enable/bypass")
             .clicked()
         {
-            set_param(setter, bypass, !bypass.value());
+            set_param(setter, spec.bypass, !spec.bypass.value());
         }
 
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            toggle_button(ui, setter, bypass, active, accent, theme);
+            header_mode_selector(ui, setter, spec.module, params, spec.accent);
         });
     });
     ui.add_space(2.0);
@@ -627,7 +569,7 @@ fn module_header(
         Pos2::new(ui.min_rect().left(), ui.cursor().min.y),
         Vec2::new(ui.available_width(), 1.0),
     );
-    let line_alpha: u8 = if active {
+    let line_alpha: u8 = if spec.active {
         95
     } else if hovered {
         50
@@ -637,9 +579,152 @@ fn module_header(
     ui.painter().rect_filled(
         line,
         CornerRadius::same(1),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), line_alpha),
+        Color32::from_rgba_premultiplied(
+            spec.accent.r(),
+            spec.accent.g(),
+            spec.accent.b(),
+            line_alpha,
+        ),
     );
     ui.add_space(4.0);
+}
+
+fn header_mode_selector(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    module: ChainModule,
+    params: &Cc22Params,
+    accent: Color32,
+) {
+    let (id, selected) = match module {
+        ChainModule::Character => (
+            "character-mode-header",
+            character_mode_label(params.character.mode.value()),
+        ),
+        ChainModule::Movement => (
+            "movement-mode-header",
+            movement_mode_label(params.movement.mode.value()),
+        ),
+        ChainModule::Diffusion => (
+            "diffusion-mode-header",
+            diffusion_mode_label(params.diffusion.mode.value()),
+        ),
+        ChainModule::Texture => (
+            "texture-mode-header",
+            texture_mode_label(params.texture.mode.value()),
+        ),
+    };
+
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(RichText::new(selected).color(accent))
+        .width(88.0)
+        .show_ui(ui, |ui| match module {
+            ChainModule::Character => {
+                let current = params.character.mode.value();
+                let param = &params.character.mode;
+                enum_option(ui, setter, param, current, CharacterMode::Clean, "Clean");
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    CharacterMode::Saturation,
+                    "Saturation",
+                );
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    CharacterMode::Cassette,
+                    "Cassette",
+                );
+                enum_option(ui, setter, param, current, CharacterMode::Drive, "Drive");
+                enum_option(ui, setter, param, current, CharacterMode::Sweet, "Sweet");
+                enum_option(ui, setter, param, current, CharacterMode::Fuzz, "Fuzz");
+                enum_option(ui, setter, param, current, CharacterMode::Howl, "Howl");
+                enum_option(ui, setter, param, current, CharacterMode::Swell, "Swell");
+            }
+            ChainModule::Movement => {
+                let current = params.movement.mode.value();
+                let param = &params.movement.mode;
+                enum_option(ui, setter, param, current, MovementMode::Off, "Off");
+                enum_option(ui, setter, param, current, MovementMode::Chorus, "Chorus");
+                enum_option(ui, setter, param, current, MovementMode::Vibrato, "Vibrato");
+                enum_option(ui, setter, param, current, MovementMode::Tremolo, "Tremolo");
+                enum_option(ui, setter, param, current, MovementMode::Doubler, "Doubler");
+                enum_option(ui, setter, param, current, MovementMode::Phaser, "Phaser");
+                enum_option(ui, setter, param, current, MovementMode::Pitch, "Pitch");
+            }
+            ChainModule::Diffusion => {
+                let current = params.diffusion.mode.value();
+                let param = &params.diffusion.mode;
+                enum_option(ui, setter, param, current, DiffusionMode::Off, "Off");
+                enum_option(ui, setter, param, current, DiffusionMode::Delay, "Delay");
+                enum_option(ui, setter, param, current, DiffusionMode::Slap, "Slap");
+                enum_option(ui, setter, param, current, DiffusionMode::Reverb, "Reverb");
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    DiffusionMode::Cascade,
+                    "Cascade",
+                );
+                enum_option(ui, setter, param, current, DiffusionMode::Reels, "Reels");
+                enum_option(ui, setter, param, current, DiffusionMode::Space, "Space");
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    DiffusionMode::Collage,
+                    "Collage",
+                );
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    DiffusionMode::Reverse,
+                    "Reverse",
+                );
+            }
+            ChainModule::Texture => {
+                let current = params.texture.mode.value();
+                let param = &params.texture.mode;
+                enum_option(ui, setter, param, current, TextureMode::Off, "Off");
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    TextureMode::WowFlutter,
+                    "WowFlutter",
+                );
+                enum_option(ui, setter, param, current, TextureMode::Noise, "Noise");
+                enum_option(ui, setter, param, current, TextureMode::Tape, "Tape");
+                enum_option(ui, setter, param, current, TextureMode::Filter, "Filter");
+                enum_option(ui, setter, param, current, TextureMode::Squash, "Squash");
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    TextureMode::Cassette,
+                    "Cassette",
+                );
+                enum_option(ui, setter, param, current, TextureMode::Broken, "Broken");
+                enum_option(
+                    ui,
+                    setter,
+                    param,
+                    current,
+                    TextureMode::Interference,
+                    "Interference",
+                );
+            }
+        });
 }
 
 fn render_module_content(
@@ -696,25 +781,14 @@ fn render_module_content(
                 );
             });
             ui.add_space(2.0);
-            mini_slider(ui, setter, &params.character.mix, "MIX", spec.accent, theme);
-            ui.add_space(2.0);
-            module_mode_summary(
+            secondary_slider_pair(
                 ui,
-                character_mode_label(params.character.mode.value()),
-                &[
-                    "Clean",
-                    "Saturation",
-                    "Cassette",
-                    "Drive",
-                    "Sweet",
-                    "Fuzz",
-                    "Howl",
-                    "Swell",
-                ],
+                setter,
+                (&params.character.mix, "MIX", None),
+                (&params.character.output_trim, "OUTPUT", None),
                 spec.accent,
                 theme,
             );
-            character_mode_selector(ui, setter, &params.character.mode, spec.accent, theme);
         }
         ChainModule::Movement => {
             let mode = params.movement.mode.value();
@@ -742,39 +816,33 @@ fn render_module_content(
             });
             ui.add_space(2.0);
             match mode {
-                MovementMode::Phaser => slider_with_tip(
+                MovementMode::Phaser => secondary_slider_pair(
                     ui,
                     setter,
-                    &params.movement.feedback,
-                    "FEEDBACK",
+                    (&params.movement.feedback, "FEEDBACK", None),
+                    (&params.movement.mix, "MIX", None),
                     spec.accent,
                     theme,
-                    None,
                 ),
                 MovementMode::Tremolo => {
-                    let _ = shape_selector(ui, setter, &params.movement.shape, spec.accent, theme);
+                    secondary_shape_and_slider(
+                        ui,
+                        setter,
+                        &params.movement.shape,
+                        (&params.movement.mix, "MIX", None),
+                        spec.accent,
+                        theme,
+                    );
                 }
-                _ => slider_with_tip(
+                _ => secondary_slider_pair(
                     ui,
                     setter,
-                    &params.movement.mix,
-                    "MIX",
+                    (&params.movement.mix, "MIX", None),
+                    (&params.movement.tone, "TONE", None),
                     spec.accent,
                     theme,
-                    None,
                 ),
             };
-            ui.add_space(2.0);
-            module_mode_summary(
-                ui,
-                movement_mode_label(params.movement.mode.value()),
-                &[
-                    "Off", "Chorus", "Vibrato", "Tremolo", "Doubler", "Phaser", "Pitch",
-                ],
-                spec.accent,
-                theme,
-            );
-            movement_mode_selector(ui, setter, &params.movement.mode, spec.accent, theme);
         }
         ChainModule::Diffusion => {
             let mode = params.diffusion.mode.value();
@@ -801,19 +869,14 @@ fn render_module_content(
                 );
             });
             ui.add_space(2.0);
-            mini_slider(ui, setter, &params.diffusion.mix, "MIX", spec.accent, theme);
-            ui.add_space(2.0);
-            module_mode_summary(
+            secondary_slider_pair(
                 ui,
-                diffusion_mode_label(params.diffusion.mode.value()),
-                &[
-                    "Off", "Delay", "Slap", "Reverb", "Cascade", "Reels", "Space", "Collage",
-                    "Reverse",
-                ],
+                setter,
+                (&params.diffusion.mix, "MIX", None),
+                (&params.diffusion.width, "WIDTH", None),
                 spec.accent,
                 theme,
             );
-            diffusion_mode_selector(ui, setter, &params.diffusion.mode, spec.accent, theme);
         }
         ChainModule::Texture => {
             let mode = params.texture.mode.value();
@@ -840,26 +903,14 @@ fn render_module_content(
                 );
             });
             ui.add_space(2.0);
-            mini_slider(ui, setter, &params.texture.mix, "MIX", spec.accent, theme);
-            ui.add_space(2.0);
-            module_mode_summary(
+            secondary_slider_pair(
                 ui,
-                texture_mode_label(params.texture.mode.value()),
-                &[
-                    "Off",
-                    "WowFlutter",
-                    "Noise",
-                    "Tape",
-                    "Filter",
-                    "Squash",
-                    "Cassette",
-                    "Broken",
-                    "Interference",
-                ],
+                setter,
+                (&params.texture.mix, "MIX", None),
+                (&params.texture.stereo_spread, "SPREAD", None),
                 spec.accent,
                 theme,
             );
-            texture_mode_selector(ui, setter, &params.texture.mode, spec.accent, theme);
         }
     }
 }
@@ -898,6 +949,42 @@ fn slider_with_tip(
     if let Some(tip) = tip {
         response.on_hover_text(tip);
     }
+}
+
+fn secondary_slider_pair(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    first: (&FloatParam, &'static str, Option<&'static str>),
+    second: (&FloatParam, &'static str, Option<&'static str>),
+    accent: Color32,
+    theme: Theme,
+) {
+    ui.horizontal(|ui| {
+        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+            slider_with_tip(ui, setter, first.0, first.1, accent, theme, first.2);
+        });
+        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+            slider_with_tip(ui, setter, second.0, second.1, accent, theme, second.2);
+        });
+    });
+}
+
+fn secondary_shape_and_slider(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    shape: &EnumParam<LfoShape>,
+    slider: (&FloatParam, &'static str, Option<&'static str>),
+    accent: Color32,
+    theme: Theme,
+) {
+    ui.horizontal(|ui| {
+        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+            let _ = shape_selector(ui, setter, shape, accent, theme);
+        });
+        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+            slider_with_tip(ui, setter, slider.0, slider.1, accent, theme, slider.2);
+        });
+    });
 }
 
 fn movement_first_control<'a>(mode: MovementMode, params: &'a Cc22Params) -> FloatControlSpec<'a> {
@@ -1059,13 +1146,13 @@ fn shape_selector(
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("SHAPE")
-                    .font(FontId::monospace(9.0))
+                    .font(FontId::monospace(super::theme::FONT_CONTROL_LABEL))
                     .color(theme.muted),
             );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(lfo_shape_label(param.value()))
-                        .font(FontId::monospace(8.0))
+                        .font(FontId::monospace(super::theme::FONT_VALUE_LABEL))
                         .color(theme.muted),
                 );
             });
@@ -1112,51 +1199,5 @@ fn lfo_shape_label(shape: LfoShape) -> &'static str {
         LfoShape::Sine => "Sine",
         LfoShape::Triangle => "Triangle",
         LfoShape::SquareSmooth => "Square",
-    }
-}
-
-fn module_mode_summary(
-    ui: &mut egui::Ui,
-    active_label: &'static str,
-    modes: &[&'static str],
-    accent: Color32,
-    theme: Theme,
-) {
-    ui.add_space(1.0);
-    let (bar_rect, _) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 14.0), Sense::hover());
-    ui.painter().rect_filled(
-        bar_rect,
-        CornerRadius::same(4),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 62),
-    );
-    ui.painter().text(
-        bar_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        active_label,
-        FontId::monospace(8.5),
-        theme.text_dark,
-    );
-    ui.add_space(3.0);
-    for mode in modes.iter().take(5) {
-        ui.horizontal(|ui| {
-            let selected = *mode == active_label;
-            let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
-            ui.painter().circle_filled(
-                dot_rect.center(),
-                if selected { 2.4 } else { 1.6 },
-                if selected { accent } else { theme.muted },
-            );
-            ui.label(
-                RichText::new(*mode)
-                    .font(FontId::monospace(7.5))
-                    .strong()
-                    .color(if selected {
-                        theme.text_dark
-                    } else {
-                        theme.muted
-                    }),
-            );
-        });
     }
 }

@@ -12,7 +12,9 @@ use crate::{
     params::Cc22Params,
 };
 
-use super::theme::{ModuleColors, Theme};
+use super::theme::{
+    ModuleColors, Theme, FONT_CONTROL_LABEL, FONT_HINT, FONT_SECONDARY, FONT_VALUE_LABEL,
+};
 
 pub(crate) fn brand_mark(ui: &mut egui::Ui, colors: ModuleColors, theme: Theme) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(33.0, 24.0), Sense::hover());
@@ -55,26 +57,6 @@ pub(crate) fn brand_orb(ui: &mut egui::Ui, colors: ModuleColors) {
     );
 }
 
-pub(crate) fn disabled_nav_button(
-    ui: &mut egui::Ui,
-    label: &'static str,
-    theme: Theme,
-) -> egui::Response {
-    ui.add_enabled(
-        false,
-        egui::Button::new(
-            RichText::new(label)
-                .font(FontId::monospace(10.0))
-                .strong()
-                .color(theme.muted),
-        )
-        .fill(theme.card_dim)
-        .stroke(Stroke::new(1.0, theme.card_edge))
-        .corner_radius(CornerRadius::same(7))
-        .min_size(Vec2::new(if label == "INIT" { 36.0 } else { 26.0 }, 18.0)),
-    )
-}
-
 pub(crate) fn small_strip_knob(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -113,43 +95,13 @@ pub(crate) fn small_strip_knob(
         );
         ui.label(
             RichText::new(label)
-                .font(FontId::monospace(7.5))
+                .font(FontId::monospace(FONT_HINT))
                 .strong()
                 .color(Color32::from_rgb(245, 237, 218)),
         );
         response.on_hover_text(format!("{}: {}", param.name(), value_string(param)));
         let _ = theme;
     });
-}
-
-pub(crate) fn disabled_mini_control(
-    ui: &mut egui::Ui,
-    label: &'static str,
-    value: &'static str,
-    theme: Theme,
-) -> egui::Response {
-    ui.vertical(|ui| {
-        ui.label(
-            RichText::new(label)
-                .font(FontId::monospace(8.0))
-                .strong()
-                .color(theme.muted_dark),
-        );
-        ui.add_enabled(
-            false,
-            egui::Button::new(
-                RichText::new(value)
-                    .font(FontId::monospace(9.0))
-                    .strong()
-                    .color(theme.muted),
-            )
-            .fill(theme.card_dim)
-            .stroke(Stroke::new(1.0, theme.card_edge))
-            .corner_radius(CornerRadius::same(7))
-            .min_size(Vec2::new(88.0, 22.0)),
-        )
-    })
-    .inner
 }
 
 pub(crate) fn colored_knob(
@@ -165,7 +117,7 @@ pub(crate) fn colored_knob(
         ui.vertical_centered(|ui| {
             ui.label(
                 RichText::new(label)
-                    .font(FontId::monospace(9.0))
+                    .font(FontId::monospace(FONT_CONTROL_LABEL))
                     .strong()
                     .color(theme.text_light),
             );
@@ -186,7 +138,7 @@ pub(crate) fn colored_knob(
             };
             ui.label(
                 RichText::new(value_string(param))
-                    .font(FontId::monospace(8.5))
+                    .font(FontId::monospace(FONT_VALUE_LABEL))
                     .color(value_color),
             );
             response.on_hover_text(format!("{}: {}", param.name(), value_string(param)))
@@ -208,13 +160,13 @@ pub(crate) fn mini_slider(
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(label)
-                    .font(FontId::monospace(9.0))
+                    .font(FontId::monospace(FONT_CONTROL_LABEL))
                     .color(theme.muted),
             );
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(value_string(param))
-                        .font(FontId::monospace(8.0))
+                        .font(FontId::monospace(FONT_VALUE_LABEL))
                         .color(theme.muted),
                 );
             });
@@ -417,60 +369,6 @@ pub(crate) fn paint_arc(
         .add(egui::Shape::line(points, Stroke::new(width, color)));
 }
 
-pub(crate) fn draw_curve_icon(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
-    let mut points = Vec::with_capacity(24);
-    for index in 0..24 {
-        let x = index as f32 / 23.0;
-        let y = 0.5 - ((x * 5.0 - 2.5).tanh() * 0.36);
-        points.push(Pos2::new(
-            rect.left() + 10.0 + x * (rect.width() - 20.0),
-            rect.top() + y * rect.height(),
-        ));
-    }
-    ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(2.0, accent)));
-}
-
-pub(crate) fn draw_lfo_icon(ui: &mut egui::Ui, rect: Rect, accent: Color32, now: f64) {
-    let phase = (now as f32 * 0.35).fract();
-    let mut points = Vec::with_capacity(32);
-    for index in 0..32 {
-        let x = index as f32 / 31.0;
-        let y = 0.5 + (((x + phase) * core::f32::consts::TAU * 2.0).sin() * 0.25);
-        points.push(Pos2::new(
-            rect.left() + 8.0 + x * (rect.width() - 16.0),
-            rect.top() + y * rect.height(),
-        ));
-    }
-    ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(2.0, accent)));
-}
-
-pub(crate) fn draw_reflection_icon(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
-    for index in 0..5 {
-        let x = rect.left() + 12.0 + index as f32 * 23.0;
-        let alpha = 210_u8.saturating_sub(index as u8 * 32);
-        ui.painter().line_segment(
-            [
-                Pos2::new(x, rect.top() + 12.0),
-                Pos2::new(x + 16.0, rect.bottom() - 12.0),
-            ],
-            Stroke::new(
-                2.0,
-                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), alpha),
-            ),
-        );
-    }
-}
-
-pub(crate) fn draw_noise_icon(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
-    for index in 0..22 {
-        let x = rect.left() + 8.0 + index as f32 * ((rect.width() - 16.0) / 21.0);
-        let y = rect.center().y + (((index * 17 % 11) as f32 - 5.0) * 2.2);
-        ui.painter().circle_filled(Pos2::new(x, y), 1.7, accent);
-    }
-}
-
 pub(crate) fn draw_eq_icon(ui: &mut egui::Ui, rect: Rect, accent: Color32) {
     let points = [
         Pos2::new(rect.left() + 8.0, rect.bottom() - 14.0),
@@ -494,7 +392,7 @@ pub(crate) fn mode_selector<R>(
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("MODE")
-                .font(FontId::monospace(9.0))
+                .font(FontId::monospace(FONT_CONTROL_LABEL))
                 .color(theme.muted),
         );
         egui::ComboBox::from_id_salt(id)
@@ -502,171 +400,6 @@ pub(crate) fn mode_selector<R>(
             .width(92.0)
             .show_ui(ui, add_options);
     });
-}
-
-pub(crate) fn character_mode_selector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<CharacterMode>,
-    accent: Color32,
-    theme: Theme,
-) {
-    let current = param.value();
-    mode_selector(
-        ui,
-        "character-mode",
-        character_mode_label(current),
-        accent,
-        theme,
-        |ui| {
-            enum_option(ui, setter, param, current, CharacterMode::Clean, "Clean");
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                CharacterMode::Saturation,
-                "Saturation",
-            );
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                CharacterMode::Cassette,
-                "Cassette",
-            );
-            enum_option(ui, setter, param, current, CharacterMode::Drive, "Drive");
-            enum_option(ui, setter, param, current, CharacterMode::Sweet, "Sweet");
-            enum_option(ui, setter, param, current, CharacterMode::Fuzz, "Fuzz");
-            enum_option(ui, setter, param, current, CharacterMode::Howl, "Howl");
-            enum_option(ui, setter, param, current, CharacterMode::Swell, "Swell");
-        },
-    );
-}
-
-pub(crate) fn movement_mode_selector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<MovementMode>,
-    accent: Color32,
-    theme: Theme,
-) {
-    let current = param.value();
-    mode_selector(
-        ui,
-        "movement-mode",
-        movement_mode_label(current),
-        accent,
-        theme,
-        |ui| {
-            enum_option(ui, setter, param, current, MovementMode::Off, "Off");
-            enum_option(ui, setter, param, current, MovementMode::Chorus, "Chorus");
-            enum_option(ui, setter, param, current, MovementMode::Vibrato, "Vibrato");
-            enum_option(ui, setter, param, current, MovementMode::Tremolo, "Tremolo");
-            enum_option(ui, setter, param, current, MovementMode::Doubler, "Doubler");
-            enum_option(ui, setter, param, current, MovementMode::Phaser, "Phaser");
-            enum_option(ui, setter, param, current, MovementMode::Pitch, "Pitch");
-        },
-    );
-}
-
-pub(crate) fn diffusion_mode_selector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<DiffusionMode>,
-    accent: Color32,
-    theme: Theme,
-) {
-    let current = param.value();
-    mode_selector(
-        ui,
-        "diffusion-mode",
-        diffusion_mode_label(current),
-        accent,
-        theme,
-        |ui| {
-            enum_option(ui, setter, param, current, DiffusionMode::Off, "Off");
-            enum_option(ui, setter, param, current, DiffusionMode::Delay, "Delay");
-            enum_option(ui, setter, param, current, DiffusionMode::Slap, "Slap");
-            enum_option(ui, setter, param, current, DiffusionMode::Reverb, "Reverb");
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                DiffusionMode::Cascade,
-                "Cascade",
-            );
-            enum_option(ui, setter, param, current, DiffusionMode::Reels, "Reels");
-            enum_option(ui, setter, param, current, DiffusionMode::Space, "Space");
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                DiffusionMode::Collage,
-                "Collage",
-            );
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                DiffusionMode::Reverse,
-                "Reverse",
-            );
-        },
-    );
-}
-
-pub(crate) fn texture_mode_selector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<TextureMode>,
-    accent: Color32,
-    theme: Theme,
-) {
-    let current = param.value();
-    mode_selector(
-        ui,
-        "texture-mode",
-        texture_mode_label(current),
-        accent,
-        theme,
-        |ui| {
-            enum_option(ui, setter, param, current, TextureMode::Off, "Off");
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                TextureMode::WowFlutter,
-                "WowFlutter",
-            );
-            enum_option(ui, setter, param, current, TextureMode::Noise, "Noise");
-            enum_option(ui, setter, param, current, TextureMode::Tape, "Tape");
-            enum_option(ui, setter, param, current, TextureMode::Filter, "Filter");
-            enum_option(ui, setter, param, current, TextureMode::Squash, "Squash");
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                TextureMode::Cassette,
-                "Cassette",
-            );
-            enum_option(ui, setter, param, current, TextureMode::Broken, "Broken");
-            enum_option(
-                ui,
-                setter,
-                param,
-                current,
-                TextureMode::Interference,
-                "Interference",
-            );
-        },
-    );
 }
 
 pub(crate) fn eq_mode_selector(
@@ -699,36 +432,6 @@ pub(crate) fn enum_option<T>(
     }
 }
 
-pub(crate) fn toggle_button(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &BoolParam,
-    active: bool,
-    accent: Color32,
-    theme: Theme,
-) -> egui::Response {
-    let label = if param.value() { "OFF" } else { "ON" };
-    let fill = if active { accent } else { theme.card_edge };
-    let response = ui.add(
-        egui::Button::new(
-            RichText::new(label)
-                .font(FontId::monospace(9.0))
-                .strong()
-                .color(if active { theme.text_dark } else { theme.muted }),
-        )
-        .fill(fill)
-        .stroke(Stroke::new(1.0, fill))
-        .corner_radius(CornerRadius::same(8))
-        .min_size(Vec2::new(34.0, 20.0)),
-    );
-
-    if response.clicked() {
-        set_param(setter, param, !param.value());
-    }
-
-    response.on_hover_text("Enable/bypass module")
-}
-
 pub(crate) fn global_bypass_button(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -739,7 +442,7 @@ pub(crate) fn global_bypass_button(
     let response = ui.add(
         egui::Button::new(
             RichText::new(if bypassed { "BYPASSED" } else { "GLOBAL ON" })
-                .font(FontId::monospace(10.0))
+                .font(FontId::monospace(FONT_SECONDARY))
                 .strong(),
         )
         .fill(if bypassed { theme.warning } else { theme.paper })
@@ -761,32 +464,12 @@ pub(crate) fn compact_button(
     ui.add(
         egui::Button::new(
             RichText::new(label)
-                .font(FontId::monospace(10.0))
+                .font(FontId::monospace(FONT_SECONDARY))
                 .strong()
                 .color(theme.text_dark),
         )
         .fill(theme.paper)
         .stroke(Stroke::new(1.0, accent))
-        .corner_radius(CornerRadius::same(9))
-        .min_size(Vec2::new(48.0, 30.0)),
-    )
-}
-
-pub(crate) fn disabled_compact_button(
-    ui: &mut egui::Ui,
-    label: &'static str,
-    theme: Theme,
-) -> egui::Response {
-    ui.add_enabled(
-        false,
-        egui::Button::new(
-            RichText::new(label)
-                .font(FontId::monospace(10.0))
-                .strong()
-                .color(theme.muted),
-        )
-        .fill(theme.card_dim)
-        .stroke(Stroke::new(1.0, theme.card_edge))
         .corner_radius(CornerRadius::same(9))
         .min_size(Vec2::new(48.0, 30.0)),
     )

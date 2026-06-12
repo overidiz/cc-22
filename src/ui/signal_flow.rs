@@ -2,6 +2,8 @@ use nih_plug_egui::egui::{
     self, Align2, Color32, CornerRadius, FontId, Pos2, Stroke, StrokeKind, Vec2,
 };
 
+use super::theme::{Theme, FONT_HINT, FONT_SECTION};
+
 // ── shadows & lift ──────────────────────────────────────────────────────
 
 pub(crate) fn card_shadow(
@@ -70,16 +72,36 @@ pub(crate) fn signal_flow_arrow(
 
 // ── flow label ──────────────────────────────────────────────────────────
 
-pub(crate) fn signal_flow_label(ui: &mut egui::Ui, y: f32, width: f32, text: &str, color: Color32) {
-    let rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(width, 18.0));
-    let label_rect =
-        egui::Rect::from_center_size(Pos2::new(rect.center().x, y), Vec2::new(220.0, 15.0));
+pub(crate) fn signal_flow_band(ui: &mut egui::Ui, width: f32, dragging: bool, theme: Theme) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(8), theme.paper_alt);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(8),
+        Stroke::new(1.0, Color32::from_rgba_premultiplied(70, 64, 55, 110)),
+        StrokeKind::Inside,
+    );
+
     ui.painter().text(
-        label_rect.center(),
-        Align2::CENTER_CENTER,
-        text,
-        FontId::monospace(8.0),
-        color,
+        Pos2::new(rect.left() + 12.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        "SIGNAL FLOW",
+        FontId::monospace(FONT_SECTION),
+        theme.text_dark,
+    );
+
+    let instruction = if dragging {
+        "DROP MODULE TO REORDER"
+    } else {
+        "DRAG MODULES TO REORDER"
+    };
+    ui.painter().text(
+        Pos2::new(rect.right() - 12.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        instruction,
+        FontId::monospace(FONT_HINT),
+        theme.muted_dark,
     );
 }
 

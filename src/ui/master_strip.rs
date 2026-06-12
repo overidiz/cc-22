@@ -19,7 +19,7 @@ pub(crate) fn master_strip(
     accent: Color32,
     theme: Theme,
 ) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(220.0, 166.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(220.0, 150.0), Sense::hover());
     ui.scope_builder(
         UiBuilder::new()
             .max_rect(rect)
@@ -29,9 +29,9 @@ pub(crate) fn master_strip(
                 .fill(Color32::from_rgb(32, 27, 22))
                 .stroke(Stroke::new(1.0, Color32::from_rgb(74, 64, 54)))
                 .corner_radius(CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(10))
+                .inner_margin(egui::Margin::same(7))
                 .show(ui, |ui| {
-                    ui.set_min_size(Vec2::new(200.0, 146.0));
+                    ui.set_min_size(Vec2::new(206.0, 136.0));
                     ui.horizontal(|ui| {
                         ui.vertical_centered(|ui| {
                             ui.set_width(58.0);

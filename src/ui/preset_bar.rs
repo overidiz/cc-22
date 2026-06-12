@@ -9,8 +9,7 @@ use super::{
     meters::UiState,
     theme::{ModuleColors, Theme},
     widgets::{
-        brand_orb, disabled_mini_control, disabled_nav_button, global_bypass_button, rounded_panel,
-        set_float_normalized, small_strip_knob,
+        brand_orb, global_bypass_button, rounded_panel, set_float_normalized, small_strip_knob,
     },
 };
 
@@ -58,17 +57,7 @@ pub(crate) fn bottom_macro_row(
                                                 .color(colors.eq),
                                         );
                                     });
-                                    ui.add_space(10.0);
-                                    disabled_nav_button(ui, "<", theme).on_hover_text(
-                                        "Placeholder: use the preset controls in the top bar",
-                                    );
-                                    disabled_nav_button(ui, "INIT", theme).on_hover_text(
-                                        "Placeholder: init/reset preset is not wired yet",
-                                    );
-                                    disabled_nav_button(ui, ">", theme).on_hover_text(
-                                        "Placeholder: use the preset controls in the top bar",
-                                    );
-                                    ui.add_space(12.0);
+                                    ui.add_space(18.0);
                                     small_strip_knob(
                                         ui,
                                         setter,
@@ -128,31 +117,10 @@ pub(crate) fn bottom_macro_row(
                         );
                         global_bypass_button(ui, setter, &params.global_bypass, theme);
                     });
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        disabled_mini_control(ui, "FILTER", "Tilt", theme)
-                            .on_hover_text("Placeholder: no Filter macro parameter exists yet");
-                        disabled_mini_control(ui, "OS", "2x", theme)
-                            .on_hover_text("Placeholder: oversampling control is not implemented");
-                        disabled_mini_control(ui, "HQ", "Eco", theme)
-                            .on_hover_text("Placeholder: quality mode control is not implemented");
-                        disabled_mini_control(ui, "M/S", "Off", theme)
-                            .on_hover_text("Placeholder: mid/side control is not implemented");
-                    });
                 });
             });
         },
     );
-}
-
-pub(crate) fn preset_selector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    state: &mut UiState,
-    params: &Cc22Params,
-    theme: Theme,
-) {
-    preset_selector_with_id(ui, setter, state, params, theme, "preset-selector", 220.0);
 }
 
 pub(crate) fn preset_selector_with_id(

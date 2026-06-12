@@ -61,7 +61,7 @@ pub struct Cc22Params {
 impl Default for Cc22Params {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(980, 720),
+            editor_state: EguiState::from_size(1040, 800),
             input_gain: gain_param("Input Gain"),
             character: CharacterParams::default(),
             movement: MovementParams::default(),
