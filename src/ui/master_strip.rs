@@ -12,8 +12,6 @@ use super::{
 };
 
 const MASTER_STRIP_HEIGHT: f32 = 78.0;
-const MASTER_RIGHT_MARGIN: f32 = 10.0;
-
 pub(crate) fn master_strip(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -21,8 +19,9 @@ pub(crate) fn master_strip(
     meter_reading: MeterReading,
     accent: Color32,
     theme: Theme,
+    available_width: f32,
 ) {
-    let strip_width = (ui.available_width() - MASTER_RIGHT_MARGIN).max(0.0);
+    let strip_width = available_width.max(0.0);
     let (rect, _) =
         ui.allocate_exact_size(Vec2::new(strip_width, MASTER_STRIP_HEIGHT), Sense::hover());
     ui.scope_builder(
@@ -30,6 +29,7 @@ pub(crate) fn master_strip(
             .max_rect(rect)
             .layout(egui::Layout::top_down(Align::Min)),
         |ui| {
+            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
             egui::Frame::new()
                 .fill(Color32::from_rgb(38, 32, 26))
                 .stroke(Stroke::new(1.0, Color32::from_rgb(78, 68, 58)))

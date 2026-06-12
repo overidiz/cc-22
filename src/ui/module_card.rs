@@ -224,36 +224,38 @@ pub(crate) fn center_modules(
     }
 
     ui.add_space(8.0);
-    ui.horizontal_top(|ui| {
-        align_row_start(ui, row_start);
-        ui.label(
-            RichText::new("MODULES -> EQ -> OUT")
-                .font(FontId::monospace(FONT_SECONDARY))
-                .strong()
-                .color(theme.muted_dark),
-        );
-    });
+    ui.label(
+        RichText::new("MODULES -> EQ -> OUT")
+            .font(FontId::monospace(FONT_SECONDARY))
+            .strong()
+            .color(theme.muted_dark),
+    );
 
-    // EQ row: fixed editing strip directly below the modules, aligned to the module flow.
+    // EQ row: use the real container width, not the centered module row width.
     ui.add_space(4.0);
-    ui.horizontal_top(|ui| {
-        align_row_start(ui, row_start);
-        eq_workbench(
-            ui,
-            setter,
-            params,
-            &mut state.selected_eq_band,
-            colors,
-            theme,
-        );
-    });
+    let eq_width = ui.available_width();
+    eq_workbench(
+        ui,
+        setter,
+        params,
+        &mut state.selected_eq_band,
+        colors,
+        theme,
+        eq_width,
+    );
 
-    // Master/output row: smaller final stage, visually downstream from the EQ.
+    // Master/output row: same container width as the EQ, with internal clipping.
     ui.add_space(8.0);
-    ui.horizontal_top(|ui| {
-        align_row_start(ui, row_start);
-        master_strip(ui, setter, params, meter_reading, colors.master, theme);
-    });
+    let master_width = ui.available_width();
+    master_strip(
+        ui,
+        setter,
+        params,
+        meter_reading,
+        colors.master,
+        theme,
+        master_width,
+    );
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -320,13 +322,6 @@ fn center_fixed_width_row(ui: &mut egui::Ui, target_width: f32) {
     let extra = ui.available_width() - target_width;
     if extra > 0.0 {
         ui.add_space(extra * 0.5);
-    }
-}
-
-fn align_row_start(ui: &mut egui::Ui, x: f32) {
-    let offset = x - ui.cursor().min.x;
-    if offset > 0.0 {
-        ui.add_space(offset);
     }
 }
 

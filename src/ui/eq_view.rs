@@ -35,9 +35,10 @@ pub(crate) fn eq_workbench(
     selected_eq_band: &mut usize,
     colors: ModuleColors,
     theme: Theme,
+    available_width: f32,
 ) {
     *selected_eq_band = (*selected_eq_band).min(EQ_NODE_COUNT - 1);
-    let workbench_width = (ui.available_width() - EQ_RIGHT_MARGIN).max(0.0);
+    let workbench_width = available_width.max(0.0);
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(workbench_width, EQ_WORKBENCH_HEIGHT),
         Sense::hover(),
@@ -47,6 +48,7 @@ pub(crate) fn eq_workbench(
             .max_rect(rect)
             .layout(egui::Layout::top_down(Align::Min)),
         |ui| {
+            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
             egui::Frame::new()
                 .fill(theme.paper)
                 .stroke(Stroke::new(1.0, theme.card_edge))
