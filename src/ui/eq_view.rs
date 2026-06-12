@@ -17,6 +17,7 @@ const EQ_DISPLAY_MIN_HZ: f32 = 20.0;
 const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 144;
+const EQ_NODE_COUNT: usize = 6;
 const EQ_WORKBENCH_WIDTH: f32 = 690.0;
 const EQ_WORKBENCH_HEIGHT: f32 = 166.0;
 const EQ_CANVAS_WIDTH: f32 = 676.0;
@@ -34,7 +35,7 @@ pub(crate) fn eq_workbench(
     colors: ModuleColors,
     theme: Theme,
 ) {
-    *selected_eq_band = (*selected_eq_band).min(4);
+    *selected_eq_band = (*selected_eq_band).min(EQ_NODE_COUNT - 1);
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(EQ_WORKBENCH_WIDTH, EQ_WORKBENCH_HEIGHT),
         Sense::hover(),
@@ -72,7 +73,7 @@ fn eq_header(ui: &mut egui::Ui, meter_reading: MeterReading, theme: Theme) {
                 .color(theme.text_dark),
         );
         ui.label(
-            RichText::new("5-BAND")
+            RichText::new("6-BAND")
                 .font(FontId::monospace(FONT_HINT))
                 .strong()
                 .color(theme.muted_dark),
@@ -331,7 +332,11 @@ struct EqNodeSpec {
     color: Color32,
 }
 
-fn eq_node_specs(params: &Cc22Params, colors: ModuleColors, rect: egui::Rect) -> [EqNodeSpec; 5] {
+fn eq_node_specs(
+    params: &Cc22Params,
+    colors: ModuleColors,
+    rect: egui::Rect,
+) -> [EqNodeSpec; EQ_NODE_COUNT] {
     [
         EqNodeSpec {
             index: 0,
@@ -360,13 +365,22 @@ fn eq_node_specs(params: &Cc22Params, colors: ModuleColors, rect: egui::Rect) ->
             index: 3,
             center: node_pos(
                 rect,
+                mid_q_node_frequency(params.eq.mid_frequency.value()),
+                q_to_visual_gain(params.eq.mid_q.value()),
+            ),
+            color: Color32::from_rgb(194, 157, 52),
+        },
+        EqNodeSpec {
+            index: 4,
+            center: node_pos(
+                rect,
                 params.eq.high_shelf_frequency.value(),
                 params.eq.high_shelf_gain.value(),
             ),
             color: colors.diffusion,
         },
         EqNodeSpec {
-            index: 4,
+            index: 5,
             center: node_pos(rect, params.eq.high_cut_frequency.value(), 0.0),
             color: colors.texture,
         },
@@ -390,6 +404,24 @@ fn node_pos(rect: egui::Rect, frequency: f32, gain_db: f32) -> Pos2 {
     )
 }
 
+fn mid_q_node_frequency(mid_frequency: f32) -> f32 {
+    (mid_frequency * 1.55).clamp(100.0, 8_000.0)
+}
+
+fn q_to_visual_gain(q: f32) -> f32 {
+    (q.clamp(0.1, 10.0).log10() * 12.0).clamp(-12.0, 12.0)
+}
+
+fn q_from_visual_gain(gain_db: f32) -> f32 {
+    10.0_f32
+        .powf((gain_db.clamp(-12.0, 12.0)) / 12.0)
+        .clamp(0.1, 10.0)
+}
+
+fn q_from_y(y: f32) -> f32 {
+    q_from_visual_gain(gain_from_y(y).clamp(-12.0, 12.0))
+}
+
 fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
     match band {
         0 => {
@@ -402,6 +434,10 @@ fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, ban
             setter.begin_set_parameter(&params.eq.mid_gain);
         }
         3 => {
+            setter.begin_set_parameter(&params.eq.mid_frequency);
+            setter.begin_set_parameter(&params.eq.mid_q);
+        }
+        4 => {
             setter.begin_set_parameter(&params.eq.high_shelf_frequency);
             setter.begin_set_parameter(&params.eq.high_shelf_gain);
         }
@@ -421,6 +457,10 @@ fn end_selected_band_setter(setter: &ParamSetter<'_>, params: &Cc22Params, band:
             setter.end_set_parameter(&params.eq.mid_gain);
         }
         3 => {
+            setter.end_set_parameter(&params.eq.mid_frequency);
+            setter.end_set_parameter(&params.eq.mid_q);
+        }
+        4 => {
             setter.end_set_parameter(&params.eq.high_shelf_frequency);
             setter.end_set_parameter(&params.eq.high_shelf_gain);
         }
@@ -452,6 +492,13 @@ fn set_selected_band_from_pos(
         }
         3 => {
             setter.set_parameter(
+                &params.eq.mid_frequency,
+                (frequency / 1.55).clamp(100.0, 8_000.0),
+            );
+            setter.set_parameter(&params.eq.mid_q, q_from_y(y));
+        }
+        4 => {
+            setter.set_parameter(
                 &params.eq.high_shelf_frequency,
                 frequency.clamp(1_000.0, 16_000.0),
             );
@@ -476,13 +523,15 @@ fn offset_selected_band_from_delta(
         0 => params.eq.low_shelf_frequency.value(),
         1 => params.eq.low_cut_frequency.value(),
         2 => params.eq.mid_frequency.value(),
-        3 => params.eq.high_shelf_frequency.value(),
+        3 => mid_q_node_frequency(params.eq.mid_frequency.value()),
+        4 => params.eq.high_shelf_frequency.value(),
         _ => params.eq.high_cut_frequency.value(),
     };
     let current_gain = match band {
         0 => params.eq.low_shelf_gain.value(),
         2 => params.eq.mid_gain.value(),
-        3 => params.eq.high_shelf_gain.value(),
+        3 => q_to_visual_gain(params.eq.mid_q.value()),
+        4 => params.eq.high_shelf_gain.value(),
         _ => 0.0,
     };
 
@@ -504,6 +553,13 @@ fn offset_selected_band_from_delta(
             setter.set_parameter(&params.eq.mid_gain, gain_db);
         }
         3 => {
+            setter.set_parameter(
+                &params.eq.mid_frequency,
+                (frequency / 1.55).clamp(100.0, 8_000.0),
+            );
+            setter.set_parameter(&params.eq.mid_q, q_from_visual_gain(gain_db));
+        }
+        4 => {
             setter.set_parameter(
                 &params.eq.high_shelf_frequency,
                 frequency.clamp(1_000.0, 16_000.0),
@@ -547,13 +603,15 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
                 &params.eq.mid_gain,
                 params.eq.mid_gain.default_plain_value(),
             );
+        }
+        3 => {
             set_param(
                 setter,
                 &params.eq.mid_q,
                 params.eq.mid_q.default_plain_value(),
             );
         }
-        3 => {
+        4 => {
             set_param(
                 setter,
                 &params.eq.high_shelf_frequency,
