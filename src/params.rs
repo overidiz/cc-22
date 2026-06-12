@@ -521,9 +521,9 @@ impl Default for EqParams {
         Self {
             mode: EnumParam::new("EQ Mode", EqMode::On),
             bypass: module_bypass_param("EQ Bypass"),
-            low_cut_frequency: frequency_param("Low Cut Frequency", 20.0, 20.0, 500.0, 80.0),
+            low_cut_frequency: frequency_param("Low Cut Frequency", 10.0, 10.0, 500.0, 80.0),
             low_shelf_gain: eq_gain_param("Low Shelf Gain"),
-            low_shelf_frequency: frequency_param("Low Shelf Frequency", 120.0, 40.0, 500.0, 80.0),
+            low_shelf_frequency: frequency_param("Low Shelf Frequency", 120.0, 10.0, 500.0, 80.0),
             mid_gain: eq_gain_param("Mid Gain"),
             mid_frequency: frequency_param("Mid Frequency", 1_000.0, 100.0, 8_000.0, 80.0),
             mid_q: FloatParam::new(

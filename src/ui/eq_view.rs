@@ -13,7 +13,7 @@ use super::{
 };
 
 const EQ_DISPLAY_SAMPLE_RATE: f32 = 48_000.0;
-const EQ_DISPLAY_MIN_HZ: f32 = 20.0;
+const EQ_DISPLAY_MIN_HZ: f32 = 10.0;
 const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 144;
@@ -158,6 +158,7 @@ pub(crate) fn eq_canvas(
     }
 
     let frequency_labels = [
+        (10.0, "10"),
         (20.0, "20"),
         (100.0, "100"),
         (500.0, "500"),
@@ -251,6 +252,12 @@ pub(crate) fn eq_canvas(
         );
         if node_response.clicked() {
             *selected_eq_band = node.index;
+        }
+        let (scroll_y, fine_scroll) =
+            ui.input(|input| (input.raw_scroll_delta.y, input.modifiers.shift));
+        if node_response.hovered() && scroll_y.abs() > 0.0 {
+            *selected_eq_band = node.index;
+            scroll_eq_band_width(setter, params, node.index, scroll_y, fine_scroll);
         }
         if node_response.double_clicked() {
             *selected_eq_band = node.index;
@@ -482,10 +489,10 @@ fn set_selected_band_from_pos(
 
     match band {
         0 => {
-            setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(40.0, 500.0));
+            setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(10.0, 500.0));
             setter.set_parameter(&params.eq.low_shelf_gain, gain_db);
         }
-        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(20.0, 500.0)),
+        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(10.0, 500.0)),
         2 => {
             setter.set_parameter(&params.eq.mid_frequency, frequency.clamp(100.0, 8_000.0));
             setter.set_parameter(&params.eq.mid_gain, gain_db);
@@ -544,10 +551,10 @@ fn offset_selected_band_from_delta(
 
     match band {
         0 => {
-            setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(40.0, 500.0));
+            setter.set_parameter(&params.eq.low_shelf_frequency, frequency.clamp(10.0, 500.0));
             setter.set_parameter(&params.eq.low_shelf_gain, gain_db);
         }
-        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(20.0, 500.0)),
+        1 => setter.set_parameter(&params.eq.low_cut_frequency, frequency.clamp(10.0, 500.0)),
         2 => {
             setter.set_parameter(&params.eq.mid_frequency, frequency.clamp(100.0, 8_000.0));
             setter.set_parameter(&params.eq.mid_gain, gain_db);
@@ -571,6 +578,94 @@ fn offset_selected_band_from_delta(
             frequency.clamp(2_000.0, 20_000.0),
         ),
     }
+}
+
+fn scroll_eq_band_width(
+    setter: &ParamSetter<'_>,
+    params: &Cc22Params,
+    band: usize,
+    scroll_y: f32,
+    fine: bool,
+) {
+    let amount = scroll_y.abs() * if fine { 0.000_45 } else { 0.001_8 };
+    let factor = amount.exp().clamp(1.001, 1.35);
+
+    match band {
+        0 => set_param(
+            setter,
+            &params.eq.low_shelf_frequency,
+            scroll_frequency(
+                params.eq.low_shelf_frequency.value(),
+                scroll_y,
+                factor,
+                10.0,
+                500.0,
+                false,
+            ),
+        ),
+        1 => set_param(
+            setter,
+            &params.eq.low_cut_frequency,
+            scroll_frequency(
+                params.eq.low_cut_frequency.value(),
+                scroll_y,
+                factor,
+                10.0,
+                500.0,
+                false,
+            ),
+        ),
+        2 | 3 => {
+            let q = if scroll_y > 0.0 {
+                params.eq.mid_q.value() * factor
+            } else {
+                params.eq.mid_q.value() / factor
+            };
+            set_param(setter, &params.eq.mid_q, q.clamp(0.1, 10.0));
+        }
+        4 => set_param(
+            setter,
+            &params.eq.high_shelf_frequency,
+            scroll_frequency(
+                params.eq.high_shelf_frequency.value(),
+                scroll_y,
+                factor,
+                1_000.0,
+                16_000.0,
+                true,
+            ),
+        ),
+        _ => set_param(
+            setter,
+            &params.eq.high_cut_frequency,
+            scroll_frequency(
+                params.eq.high_cut_frequency.value(),
+                scroll_y,
+                factor,
+                2_000.0,
+                20_000.0,
+                true,
+            ),
+        ),
+    }
+}
+
+fn scroll_frequency(
+    current: f32,
+    scroll_y: f32,
+    factor: f32,
+    min: f32,
+    max: f32,
+    high_side: bool,
+) -> f32 {
+    let closes_band = scroll_y > 0.0;
+    let should_raise = if high_side { !closes_band } else { closes_band };
+    if should_raise {
+        current * factor
+    } else {
+        current / factor
+    }
+    .clamp(min, max)
 }
 
 fn reset_eq_band(setter: &ParamSetter<'_>, params: &Cc22Params, band: usize) {
