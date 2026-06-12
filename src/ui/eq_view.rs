@@ -25,7 +25,7 @@ const EQ_MIN_INSPECTOR_WIDTH: f32 = 230.0;
 const EQ_MIN_CANVAS_WIDTH: f32 = 360.0;
 const EQ_CONTENT_GAP: f32 = 12.0;
 const EQ_RIGHT_MARGIN: f32 = 10.0;
-const EQ_NODE_EDGE_INSET: f32 = 12.0;
+const EQ_NODE_EDGE_INSET: f32 = 16.0;
 const EQ_GAIN_MIN_DB: f32 = -18.0;
 const EQ_GAIN_MAX_DB: f32 = 18.0;
 
@@ -266,6 +266,10 @@ pub(crate) fn eq_canvas(
         Stroke::new(1.0, Color32::from_rgb(218, 211, 199)),
         StrokeKind::Outside,
     );
+    let plot_rect = egui::Rect::from_min_max(
+        rect.min + Vec2::new(13.0, 8.0),
+        rect.max - Vec2::new(13.0, 18.0),
+    );
 
     for octave in 1..=10 {
         for multiple in 2..10 {
@@ -273,10 +277,13 @@ pub(crate) fn eq_canvas(
             if !(EQ_DISPLAY_MIN_HZ..=EQ_DISPLAY_MAX_HZ).contains(&frequency) {
                 continue;
             }
-            let x = rect.left() + rect.width() * x_from_frequency(frequency);
+            let x = plot_rect.left() + plot_rect.width() * x_from_frequency(frequency);
             painter.line_segment(
-                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(0.45, Color32::from_rgb(235, 229, 219)),
+                [
+                    Pos2::new(x, plot_rect.top()),
+                    Pos2::new(x, plot_rect.bottom()),
+                ],
+                Stroke::new(0.45, Color32::from_rgb(237, 232, 224)),
             );
         }
     }
@@ -294,17 +301,27 @@ pub(crate) fn eq_canvas(
         (20_000.0, "20k"),
     ];
     for (frequency, label) in frequency_labels {
-        let x = rect.left() + rect.width() * x_from_frequency(frequency);
+        let x = plot_rect.left() + plot_rect.width() * x_from_frequency(frequency);
         painter.line_segment(
-            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-            Stroke::new(0.65, Color32::from_rgb(220, 212, 200)),
+            [
+                Pos2::new(x, plot_rect.top()),
+                Pos2::new(x, plot_rect.bottom()),
+            ],
+            Stroke::new(0.7, Color32::from_rgb(222, 214, 203)),
         );
+        let align = if frequency <= 20.0 {
+            egui::Align2::LEFT_CENTER
+        } else if frequency >= 20_000.0 {
+            egui::Align2::RIGHT_CENTER
+        } else {
+            egui::Align2::CENTER_CENTER
+        };
         painter.text(
-            Pos2::new(x, rect.bottom() - 6.0),
-            egui::Align2::CENTER_CENTER,
+            Pos2::new(x, rect.bottom() - 7.0),
+            align,
             label,
-            FontId::monospace(FONT_HINT),
-            Color32::from_rgb(141, 132, 120),
+            FontId::monospace(8.2),
+            Color32::from_rgb(124, 116, 106),
         );
     }
 
@@ -320,43 +337,42 @@ pub(crate) fn eq_canvas(
         (-12.0, "-12"),
     ];
     for (gain_db, label) in gain_labels {
-        let y = y_from_gain_db(rect, gain_db);
+        let y = y_from_gain_db(plot_rect, gain_db);
         let is_zero = gain_db == 0.0;
         painter.line_segment(
-            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            [
+                Pos2::new(plot_rect.left(), y),
+                Pos2::new(plot_rect.right(), y),
+            ],
             Stroke::new(
-                if is_zero { 1.0 } else { 0.45 },
+                if is_zero { 1.2 } else { 0.45 },
                 if is_zero {
-                    Color32::from_rgb(206, 196, 182)
+                    Color32::from_rgb(194, 184, 170)
                 } else {
-                    Color32::from_rgb(232, 226, 216)
+                    Color32::from_rgb(234, 228, 219)
                 },
             ),
         );
         painter.text(
-            Pos2::new(rect.right() - 6.0, y),
+            Pos2::new(plot_rect.right() - 4.0, y),
             egui::Align2::RIGHT_CENTER,
             label,
-            FontId::monospace(FONT_HINT),
-            Color32::from_rgb(141, 132, 120),
+            FontId::monospace(7.6),
+            Color32::from_rgb(136, 127, 116),
         );
     }
 
     let eq_response = EqDisplayResponse::from_params(params, eq_active(params));
     let mut curve = Vec::with_capacity(EQ_CURVE_POINTS);
-    let mut fill = Vec::with_capacity(EQ_CURVE_POINTS + 2);
-    fill.push(Pos2::new(rect.left(), y_from_gain_db(rect, 0.0)));
     for index in 0..EQ_CURVE_POINTS {
         let normalized = index as f32 / (EQ_CURVE_POINTS - 1) as f32;
         let frequency = frequency_from_x(normalized);
         let gain_db = eq_response.gain_db_at(frequency);
         curve.push(Pos2::new(
-            rect.left() + rect.width() * normalized,
-            y_from_gain_db(rect, gain_db),
+            plot_rect.left() + plot_rect.width() * normalized,
+            y_from_gain_db(plot_rect, gain_db),
         ));
     }
-    fill.extend(curve.iter().copied());
-    fill.push(Pos2::new(rect.right(), y_from_gain_db(rect, 0.0)));
 
     let curve_color = if eq_active(params) {
         Color32::from_rgb(255, 139, 42)
@@ -364,18 +380,26 @@ pub(crate) fn eq_canvas(
         theme.muted
     };
     if eq_active(params) {
-        painter.add(egui::Shape::convex_polygon(
-            fill,
-            Color32::from_rgba_premultiplied(255, 140, 50, 16),
-            Stroke::NONE,
-        ));
+        let fill_color = Color32::from_rgba_premultiplied(255, 140, 50, 12);
+        for segment in curve.windows(2) {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    segment[0],
+                    segment[1],
+                    Pos2::new(segment[1].x, plot_rect.bottom()),
+                    Pos2::new(segment[0].x, plot_rect.bottom()),
+                ],
+                fill_color,
+                Stroke::NONE,
+            ));
+        }
     }
     painter.add(egui::Shape::line(
         curve,
-        Stroke::new(if eq_active(params) { 1.7 } else { 1.25 }, curve_color),
+        Stroke::new(if eq_active(params) { 2.35 } else { 1.45 }, curve_color),
     ));
 
-    let node_specs = eq_node_specs(params, colors, rect);
+    let node_specs = eq_node_specs(params, colors, plot_rect);
     for node in node_specs {
         let hit_radius = if node.index == *selected_eq_band {
             13.0
@@ -421,11 +445,11 @@ pub(crate) fn eq_canvas(
         let hovered = node_response.hovered();
         let selected = node.index == *selected_eq_band;
         let glow_radius = if selected {
-            14.0
+            18.0
         } else if hovered {
-            12.0
+            14.0
         } else {
-            9.0
+            9.5
         };
         painter.circle_filled(
             node.center,
@@ -434,13 +458,39 @@ pub(crate) fn eq_canvas(
                 node.color.r(),
                 node.color.g(),
                 node.color.b(),
-                if hovered || selected { 62 } else { 22 },
+                if selected {
+                    78
+                } else if hovered {
+                    56
+                } else {
+                    20
+                },
             ),
         );
+        if selected {
+            painter.circle_stroke(
+                node.center,
+                14.5,
+                Stroke::new(2.2, Color32::from_rgba_premultiplied(255, 255, 255, 185)),
+            );
+            painter.circle_stroke(
+                node.center,
+                17.0,
+                Stroke::new(
+                    1.1,
+                    Color32::from_rgba_premultiplied(
+                        node.color.r(),
+                        node.color.g(),
+                        node.color.b(),
+                        160,
+                    ),
+                ),
+            );
+        }
         painter.circle_filled(
             node.center,
             if selected {
-                7.2
+                8.8
             } else if hovered {
                 6.4
             } else {
@@ -451,21 +501,44 @@ pub(crate) fn eq_canvas(
         painter.circle_stroke(
             node.center,
             if selected {
-                9.8
+                11.0
             } else if hovered {
                 8.5
             } else {
                 7.0
             },
-            Stroke::new(1.5, Color32::from_rgb(250, 247, 240)),
+            Stroke::new(
+                if selected { 2.0 } else { 1.5 },
+                Color32::from_rgb(250, 247, 240),
+            ),
         );
-        painter.text(
-            node.center + Vec2::new(0.0, -14.0),
-            egui::Align2::CENTER_CENTER,
-            format!("{}", node.index + 1),
-            FontId::monospace(FONT_HINT),
-            Color32::from_rgb(98, 90, 82),
-        );
+        if hovered || selected {
+            let label = eq_node_label(node.index);
+            let label_size = Vec2::new(34.0, 13.0);
+            let label_pos = Pos2::new(
+                node.center.x.clamp(
+                    rect.left() + label_size.x * 0.5,
+                    rect.right() - label_size.x * 0.5,
+                ),
+                (node.center.y - 18.0).clamp(
+                    rect.top() + label_size.y * 0.5,
+                    rect.bottom() - label_size.y * 0.5,
+                ),
+            );
+            let label_rect = egui::Rect::from_center_size(label_pos, label_size);
+            painter.rect_filled(
+                label_rect,
+                CornerRadius::same(4),
+                Color32::from_rgba_premultiplied(38, 33, 28, 205),
+            );
+            painter.text(
+                label_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                FontId::monospace(8.0),
+                Color32::from_rgb(248, 241, 226),
+            );
+        }
     }
     let _ = canvas_response;
 }
@@ -575,6 +648,16 @@ fn eq_band_tab_label(band: usize) -> &'static str {
         2 => "MID",
         3 => "HIGH",
         _ => "HCUT",
+    }
+}
+
+fn eq_node_label(band: usize) -> &'static str {
+    match band {
+        0 => "LC",
+        1 => "LS",
+        2 => "MID",
+        3 => "HS",
+        _ => "HC",
     }
 }
 
