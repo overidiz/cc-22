@@ -57,6 +57,12 @@ pub(crate) struct MeterSnapshot {
     pub(crate) clipped: bool,
 }
 
+impl MeterSnapshot {
+    pub(crate) fn level(self) -> f32 {
+        self.level
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct MeterBallistics {
     level: f32,
