@@ -15,7 +15,8 @@ use crate::{
     },
     meters::Meters,
     params::{
-        Cc22Params, CharacterParams, DiffusionParams, EqParams, MovementParams, TextureParams,
+        Cc22Params, CharacterParams, DiffusionParams, EqParamRefs, EqParams, MovementParams,
+        TextureParams,
     },
 };
 use nih_plug::prelude::{BoolParam, EnumParam, FloatParam};
@@ -248,6 +249,42 @@ fn eq_modes_handle_standard_test_signals() {
             assert_audio_sane(&format!("eq/{mode_id}/{}", signal.name()), &audio);
         }
     }
+}
+
+#[test]
+fn default_post_eq_does_not_cut_sub_100hz() {
+    let params = EqParams::default();
+    params.reset_smoothers();
+
+    for band in 0..5 {
+        assert!(
+            !params.band_enabled(band).value(),
+            "default POST EQ band {} should be disabled",
+            band + 1
+        );
+        assert_eq!(
+            params.band_type(band).value(),
+            EqBandType::Off,
+            "default POST EQ band {} should be Off",
+            band + 1
+        );
+    }
+
+    let mut eq = Eq::default();
+    eq.prepare(TEST_SAMPLE_RATE);
+    eq.reset();
+
+    let original = low_frequency_sine(40.0, TEST_BLOCK_SAMPLES * 2, TEST_SAMPLE_RATE);
+    let mut audio = original.clone();
+    with_stereo_buffer(&mut audio, |buffer| {
+        eq.process_block(buffer, &params);
+    });
+
+    assert_audio_sane("eq/default/40hz", &audio);
+    assert!(
+        max_abs_difference(&audio, &original) < 0.000_001,
+        "default POST EQ should preserve 40 Hz"
+    );
 }
 
 #[test]
@@ -1001,4 +1038,14 @@ fn float_param(name: &'static str, value: f32) -> FloatParam {
             max: 100.0,
         },
     )
+}
+
+fn low_frequency_sine(frequency: f32, samples: usize, sample_rate: f32) -> [Vec<f32>; 2] {
+    let channel = (0..samples)
+        .map(|index| {
+            let phase = core::f32::consts::TAU * frequency * index as f32 / sample_rate;
+            phase.sin() * 0.1
+        })
+        .collect::<Vec<_>>();
+    [channel.clone(), channel]
 }
