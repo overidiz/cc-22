@@ -36,6 +36,7 @@ use super::{
 };
 
 const LIFT_AMOUNT: f32 = 3.0;
+const POST_MODULE_GAP: f32 = 4.0;
 
 struct ModuleCardSpec<'a> {
     title: &'static str,
@@ -225,37 +226,44 @@ pub(crate) fn center_modules(
 
     ui.add_space(8.0);
     ui.label(
-        RichText::new("MODULES -> EQ -> OUT")
+        RichText::new("MODULES -> EQ -> MASTER/OUT")
             .font(FontId::monospace(FONT_SECONDARY))
             .strong()
             .color(theme.muted_dark),
     );
 
-    // EQ row: use the real container width, not the centered module row width.
+    // Keep the post-module tools inside the same centered lane as the module cards.
     ui.add_space(4.0);
-    let eq_width = ui.available_width();
-    eq_workbench(
-        ui,
-        setter,
-        params,
-        &mut state.selected_eq_band,
-        colors,
-        theme,
-        eq_width,
-    );
+    let post_module_width = module_row_width
+        .min(ui.available_width())
+        .max(0.0)
+        .floor();
+    ui.horizontal_top(|ui| {
+        center_fixed_width_row(ui, post_module_width);
+        ui.vertical(|ui| {
+            ui.set_width(post_module_width);
+            eq_workbench(
+                ui,
+                setter,
+                params,
+                &mut state.selected_eq_band,
+                colors,
+                theme,
+                post_module_width,
+            );
 
-    // Master/output row: same container width as the EQ, with internal clipping.
-    ui.add_space(8.0);
-    let master_width = ui.available_width();
-    master_strip(
-        ui,
-        setter,
-        params,
-        meter_reading,
-        colors.master,
-        theme,
-        master_width,
-    );
+            ui.add_space(POST_MODULE_GAP);
+            master_strip(
+                ui,
+                setter,
+                params,
+                meter_reading,
+                colors.master,
+                theme,
+                post_module_width,
+            );
+        });
+    });
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────

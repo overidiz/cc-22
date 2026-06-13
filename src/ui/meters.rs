@@ -121,52 +121,71 @@ pub(crate) fn level_meter(
     ui.vertical_centered(|ui| {
         ui.label(
             RichText::new(label)
-                .font(FontId::monospace(9.0))
-                .color(theme.muted),
+                .font(FontId::monospace(8.5))
+                .strong()
+                .color(theme.muted_dark),
         );
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 28.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 26.0), Sense::hover());
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(5), Color32::from_rgb(10, 11, 13));
+            .rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(44, 39, 33));
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(5),
-            Stroke::new(1.0, theme.card_edge),
+            CornerRadius::same(6),
+            Stroke::new(1.0, Color32::from_rgb(112, 103, 88)),
             StrokeKind::Outside,
         );
+        for tick in 1..4 {
+            let y = rect.bottom() - rect.height() * tick as f32 / 4.0;
+            ui.painter().line_segment(
+                [
+                    Pos2::new(rect.left() + 4.0, y),
+                    Pos2::new(rect.right() - 4.0, y),
+                ],
+                Stroke::new(0.7, Color32::from_rgba_premultiplied(246, 239, 226, 72)),
+            );
+        }
 
-        let fill_height = rect.height() * reading.level;
+        let fill_bounds = rect.shrink2(Vec2::new(4.0, 4.0));
+        let fill_height = fill_bounds.height() * reading.level;
         let fill_rect = egui::Rect::from_min_max(
-            Pos2::new(rect.left() + 3.0, rect.bottom() - fill_height + 3.0),
-            Pos2::new(rect.right() - 3.0, rect.bottom() - 3.0),
+            Pos2::new(fill_bounds.left(), fill_bounds.bottom() - fill_height),
+            fill_bounds.right_bottom(),
         );
-        ui.painter().rect_filled(
-            fill_rect,
-            CornerRadius::same(3),
-            if reading.clipped {
-                theme.warning
-            } else {
-                accent
-            },
-        );
+        if fill_height > 0.5 {
+            ui.painter().rect_filled(
+                fill_rect,
+                CornerRadius::same(3),
+                if reading.clipped {
+                    theme.warning
+                } else {
+                    accent
+                },
+            );
+        }
     });
 }
 
 pub(crate) fn clip_indicator(ui: &mut egui::Ui, label: &'static str, clipped: bool, theme: Theme) {
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
         ui.painter().circle_filled(
             rect.center(),
-            4.5,
+            4.0,
             if clipped {
                 theme.warning
             } else {
-                theme.card_edge
+                Color32::from_rgb(156, 147, 132)
             },
         );
         ui.label(
             RichText::new(label)
-                .font(FontId::monospace(9.0))
-                .color(if clipped { theme.warning } else { theme.muted }),
+                .font(FontId::monospace(8.5))
+                .strong()
+                .color(if clipped {
+                    theme.warning
+                } else {
+                    theme.muted_dark
+                }),
         );
     });
 }

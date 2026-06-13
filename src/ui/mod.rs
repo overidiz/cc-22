@@ -76,9 +76,9 @@ pub fn create_editor(
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
                                 top_bar(ui, setter, state, &params, colors, theme);
-                                ui.add_space(4.0);
+                                ui.add_space(2.0);
                                 center_modules(ui, setter, state, &params, &meters, now, look);
-                                ui.add_space(4.0);
+                                ui.add_space(2.0);
                                 bottom_macro_row(ui, setter, state, &params, colors, theme);
                             });
                         });

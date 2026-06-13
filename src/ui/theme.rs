@@ -1,6 +1,6 @@
 use nih_plug_egui::egui::Color32;
 
-pub(crate) const CARD_HEIGHT: f32 = 250.0;
+pub(crate) const CARD_HEIGHT: f32 = 235.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
 pub(crate) const KNOB_SIZE: f32 = 50.0;
 

@@ -17,13 +17,14 @@ const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 144;
 const EQ_NODE_COUNT: usize = 5;
-const EQ_WORKBENCH_HEIGHT: f32 = 166.0;
-const EQ_CANVAS_HEIGHT: f32 = 112.0;
-const EQ_INSPECTOR_WIDTH: f32 = 260.0;
-const EQ_MIN_INSPECTOR_WIDTH: f32 = 230.0;
-const EQ_MIN_CANVAS_WIDTH: f32 = 360.0;
-const EQ_CONTENT_GAP: f32 = 12.0;
-const EQ_RIGHT_MARGIN: f32 = 10.0;
+const EQ_WORKBENCH_HEIGHT: f32 = 130.0;
+const EQ_CANVAS_HEIGHT: f32 = 78.0;
+const EQ_TARGET_INSPECTOR_WIDTH: f32 = 178.0;
+const EQ_MIN_INSPECTOR_WIDTH: f32 = 168.0;
+const EQ_MAX_INSPECTOR_WIDTH: f32 = 184.0;
+const EQ_CONTENT_GAP: f32 = 8.0;
+const EQ_INNER_PADDING: i8 = 8;
+const EQ_MIN_CANVAS_RATIO: f32 = 0.60;
 const EQ_NODE_EDGE_INSET: f32 = 16.0;
 const EQ_GAIN_MIN_DB: f32 = -18.0;
 const EQ_GAIN_MAX_DB: f32 = 18.0;
@@ -53,20 +54,21 @@ pub(crate) fn eq_workbench(
                 .fill(theme.paper)
                 .stroke(Stroke::new(1.0, theme.card_edge))
                 .corner_radius(CornerRadius::same(8))
-                .inner_margin(egui::Margin::same(6))
+                .inner_margin(egui::Margin::same(EQ_INNER_PADDING))
                 .show(ui, |ui| {
-                    ui.set_width((workbench_width - 12.0).max(0.0));
-                    ui.set_min_height(EQ_WORKBENCH_HEIGHT - 14.0);
+                    let content_width =
+                        (workbench_width - f32::from(EQ_INNER_PADDING) * 2.0).max(0.0);
+                    ui.set_width(content_width);
+                    ui.set_min_height(EQ_WORKBENCH_HEIGHT - f32::from(EQ_INNER_PADDING) * 2.0);
                     eq_header(ui, setter, params, selected_eq_band, colors, theme);
                     ui.add_space(3.0);
                     eq_separator(ui, theme);
-                    ui.add_space(5.0);
+                    ui.add_space(4.0);
                     ui.horizontal_top(|ui| {
                         let available_width = ui.available_width();
                         let inspector_width = inspector_width_for(available_width);
                         let canvas_width =
-                            (available_width - inspector_width - EQ_CONTENT_GAP - EQ_RIGHT_MARGIN)
-                                .max(0.0);
+                            (available_width - inspector_width - EQ_CONTENT_GAP).max(0.0);
                         ui.spacing_mut().item_spacing.x = EQ_CONTENT_GAP;
                         eq_canvas(
                             ui,
@@ -93,12 +95,13 @@ pub(crate) fn eq_workbench(
 }
 
 fn inspector_width_for(available_width: f32) -> f32 {
-    let room_after_min_canvas = available_width - EQ_MIN_CANVAS_WIDTH - EQ_CONTENT_GAP;
-    let max_without_overflow = (available_width - EQ_CONTENT_GAP - EQ_RIGHT_MARGIN).max(0.0);
-    room_after_min_canvas
-        .min(EQ_INSPECTOR_WIDTH)
+    let max_for_canvas_ratio =
+        (available_width * (1.0 - EQ_MIN_CANVAS_RATIO) - EQ_CONTENT_GAP).max(0.0);
+    EQ_TARGET_INSPECTOR_WIDTH
+        .min(EQ_MAX_INSPECTOR_WIDTH)
+        .min(max_for_canvas_ratio)
         .max(EQ_MIN_INSPECTOR_WIDTH)
-        .min(max_without_overflow)
+        .min((available_width - EQ_CONTENT_GAP).max(0.0))
 }
 
 fn eq_header(
@@ -128,25 +131,9 @@ fn eq_header(
             }
         }
         eq_toolbar_divider(ui, theme);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for band in 0..EQ_NODE_COUNT {
-                let selected = band == *selected_eq_band;
-                if eq_band_tab_button(
-                    ui,
-                    eq_band_tab_label(band),
-                    selected,
-                    eq_band_color(band, colors),
-                    theme,
-                )
-                .clicked()
-                {
-                    *selected_eq_band = band;
-                }
-            }
-        });
+        eq_band_tabs(ui, selected_eq_band, colors, theme);
         eq_toolbar_divider(ui, theme);
-        if eq_reset_button(ui, colors.master, theme).clicked() {
+        if eq_reset_button(ui, colors.eq, theme).clicked() {
             reset_eq_to_defaults(setter, params);
             *selected_eq_band = 0;
         }
@@ -160,18 +147,18 @@ fn eq_toggle_button(
     theme: Theme,
 ) -> egui::Response {
     let label = if active { "ON" } else { "OFF" };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(42.0, 18.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(46.0, 20.0), Sense::click());
     let fill = if active {
-        accent
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 220)
     } else if response.hovered() {
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 44)
+        Color32::from_rgb(230, 224, 213)
     } else {
-        Color32::from_rgb(238, 232, 221)
+        Color32::from_rgb(220, 214, 203)
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+    ui.painter().rect_filled(rect, CornerRadius::same(10), fill);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(8),
+        CornerRadius::same(10),
         Stroke::new(
             1.0,
             if active {
@@ -182,21 +169,33 @@ fn eq_toggle_button(
         ),
         StrokeKind::Inside,
     );
-    let dot_center = Pos2::new(rect.left() + 8.0, rect.center().y);
+    let knob_x = if active {
+        rect.right() - 9.5
+    } else {
+        rect.left() + 9.5
+    };
     ui.painter().circle_filled(
-        dot_center,
-        2.5,
-        if active {
-            Color32::WHITE
-        } else {
-            theme.muted_dark
-        },
+        Pos2::new(knob_x, rect.center().y),
+        7.0,
+        Color32::from_rgb(250, 247, 240),
+    );
+    ui.painter().circle_stroke(
+        Pos2::new(knob_x, rect.center().y),
+        7.0,
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.6)),
     );
     ui.painter().text(
-        Pos2::new(rect.center().x + 4.0, rect.center().y),
+        Pos2::new(
+            if active {
+                rect.left() + 14.0
+            } else {
+                rect.right() - 14.0
+            },
+            rect.center().y,
+        ),
         egui::Align2::CENTER_CENTER,
         label,
-        FontId::monospace(8.2),
+        FontId::monospace(8.0),
         if active {
             Color32::WHITE
         } else {
@@ -206,33 +205,86 @@ fn eq_toggle_button(
     response
 }
 
-fn eq_band_tab_button(
+fn eq_band_tabs(
     ui: &mut egui::Ui,
-    label: &'static str,
-    active: bool,
-    accent: Color32,
+    selected_eq_band: &mut usize,
+    colors: ModuleColors,
     theme: Theme,
-) -> egui::Response {
-    let width = match label.len() {
-        0..=2 => 30.0,
-        3..=4 => 44.0,
-        _ => 54.0,
-    };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 18.0), Sense::click());
-    let fill = if active {
-        accent
-    } else if response.hovered() {
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 58)
-    } else {
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 28)
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
+) {
+    let tabs_width = 232.0;
+    let (group_rect, _) = ui.allocate_exact_size(Vec2::new(tabs_width, 22.0), Sense::hover());
+    ui.painter().rect_filled(
+        group_rect,
+        CornerRadius::same(7),
+        Color32::from_rgb(232, 226, 215),
+    );
     ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(4),
-        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.42)),
+        group_rect,
+        CornerRadius::same(7),
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.48)),
         StrokeKind::Inside,
     );
+
+    let mut x = group_rect.left() + 3.0;
+    for band in 0..EQ_NODE_COUNT {
+        let label = eq_band_tab_label(band);
+        let width = eq_band_tab_width(label);
+        let rect =
+            egui::Rect::from_min_size(Pos2::new(x, group_rect.top() + 3.0), Vec2::new(width, 16.0));
+        let response = ui.interact(
+            rect,
+            ui.make_persistent_id(("eq_tab", band)),
+            Sense::click(),
+        );
+        if response.clicked() {
+            *selected_eq_band = band;
+        }
+        paint_eq_band_tab(
+            ui,
+            rect,
+            label,
+            band == *selected_eq_band,
+            response.hovered(),
+            eq_band_color(band, colors),
+            theme,
+        );
+        x += width + 3.0;
+    }
+}
+
+fn eq_band_tab_width(label: &'static str) -> f32 {
+    match label.len() {
+        0..=2 => 30.0,
+        3..=4 => 42.0,
+        _ => 52.0,
+    }
+}
+
+fn paint_eq_band_tab(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    label: &'static str,
+    active: bool,
+    hovered: bool,
+    accent: Color32,
+    theme: Theme,
+) {
+    let fill = if active {
+        accent
+    } else if hovered {
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 58)
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
+    if active || hovered {
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(5),
+            Stroke::new(1.0, theme.card_edge.gamma_multiply(0.36)),
+            StrokeKind::Inside,
+        );
+    }
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -244,27 +296,29 @@ fn eq_band_tab_button(
             theme.text_dark.gamma_multiply(0.78)
         },
     );
-    response
 }
 
 fn eq_reset_button(ui: &mut egui::Ui, accent: Color32, theme: Theme) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(54.0, 18.0), Sense::click());
-    let fill = if response.hovered() {
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 34)
-    } else {
-        Color32::from_rgb(244, 239, 229)
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(62.0, 20.0), Sense::click());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(10),
+        if response.hovered() {
+            Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 26)
+        } else {
+            Color32::from_rgb(244, 239, 229)
+        },
+    );
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(4),
-        Stroke::new(1.0, theme.card_edge),
+        CornerRadius::same(10),
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.72)),
         StrokeKind::Inside,
     );
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
-        "RESET",
+        "RESET EQ",
         FontId::monospace(8.0),
         theme.muted_dark,
     );
@@ -599,7 +653,7 @@ fn eq_controls(
     inspector_width: f32,
 ) {
     ui.allocate_ui(Vec2::new(inspector_width, EQ_CANVAS_HEIGHT), |ui| {
-        ui.spacing_mut().item_spacing.y = 3.0;
+        ui.spacing_mut().item_spacing.y = 2.0;
         ui.label(
             RichText::new(format!(
                 "{}  -  {}",
@@ -618,22 +672,21 @@ fn eq_controls(
         );
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.spacing_mut().item_spacing.x = 6.0;
             let band_color = eq_band_color(*selected_eq_band, colors);
             eq_param_knob(
                 ui,
                 setter,
                 selected_frequency_param(params, *selected_eq_band),
                 "FREQ",
-                "FREQ",
                 band_color,
                 theme,
             );
             if let Some(gain) = selected_gain_param(params, *selected_eq_band) {
-                eq_param_knob(ui, setter, gain, "GAIN", "GAIN", band_color, theme);
+                eq_param_knob(ui, setter, gain, "GAIN", band_color, theme);
             }
             if let Some(q) = selected_q_param(params, *selected_eq_band) {
-                eq_param_knob(ui, setter, q, "Q", "Q", band_color, theme);
+                eq_param_knob(ui, setter, q, "Q", band_color, theme);
             }
         });
     });
@@ -644,14 +697,13 @@ fn eq_param_knob(
     setter: &ParamSetter<'_>,
     param: &FloatParam,
     label: &'static str,
-    sublabel: &'static str,
     accent: Color32,
     theme: Theme,
 ) {
-    ui.allocate_ui(Vec2::new(60.0, 70.0), |ui| {
+    ui.allocate_ui(Vec2::new(48.0, 56.0), |ui| {
         ui.vertical_centered(|ui| {
             let (rect, response) =
-                ui.allocate_exact_size(Vec2::splat(42.0), Sense::click_and_drag());
+                ui.allocate_exact_size(Vec2::splat(36.0), Sense::click_and_drag());
             handle_float_drag(ui, setter, param, &response);
             paint_colored_knob(
                 ui,
@@ -665,12 +717,6 @@ fn eq_param_knob(
                     .font(FontId::monospace(8.5))
                     .strong()
                     .color(theme.text_dark),
-            );
-            ui.label(
-                RichText::new(sublabel)
-                    .font(FontId::monospace(7.0))
-                    .strong()
-                    .color(theme.muted_dark),
             );
             response.on_hover_text(format!("{}: {}", param.name(), value_string(param)));
         });
