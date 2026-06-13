@@ -6,7 +6,7 @@ use nih_plug_egui::egui::{
 use crate::{params::Cc22Params, presets::internal_presets};
 
 use super::{
-    meters::UiState,
+    meters::{MeterReading, UiState},
     theme::{ModuleColors, Theme},
     widgets::{
         brand_orb, global_bypass_button, rounded_panel, set_float_normalized, small_strip_knob,
@@ -18,18 +18,22 @@ pub(crate) fn bottom_macro_row(
     setter: &ParamSetter<'_>,
     state: &mut UiState,
     params: &Cc22Params,
+    meter_reading: MeterReading,
     colors: ModuleColors,
     theme: Theme,
 ) {
+    let panel_height = ui.available_height().max(78.0);
+    let strip_height = (panel_height - 20.0).clamp(58.0, 96.0);
     rounded_panel(
         ui,
         theme.paper,
         theme.text_dark,
         CornerRadius::same(18),
         |ui| {
+            ui.set_min_height(panel_height - 20.0);
             ui.horizontal_top(|ui| {
                 let (strip_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(440.0, 50.0), Sense::hover());
+                    ui.allocate_exact_size(Vec2::new(620.0, strip_height), Sense::hover());
                 ui.scope_builder(
                     UiBuilder::new()
                         .max_rect(strip_rect)
@@ -40,7 +44,7 @@ pub(crate) fn bottom_macro_row(
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(egui::Margin::same(8))
                             .show(ui, |ui| {
-                                ui.set_min_size(Vec2::new(424.0, 34.0));
+                                ui.set_min_size(Vec2::new(604.0, strip_height - 16.0));
                                 ui.horizontal(|ui| {
                                     brand_orb(ui, colors);
                                     ui.vertical(|ui| {
@@ -57,29 +61,22 @@ pub(crate) fn bottom_macro_row(
                                                 .color(colors.eq),
                                         );
                                     });
-                                    ui.add_space(18.0);
+                                    ui.add_space(12.0);
+                                    bottom_master_section(
+                                        ui,
+                                        setter,
+                                        params,
+                                        meter_reading,
+                                        colors,
+                                        theme,
+                                    );
+                                    bottom_strip_divider(ui);
                                     small_strip_knob(
                                         ui,
                                         setter,
                                         &params.character.mix,
                                         "CHAR MIX",
                                         colors.character,
-                                        theme,
-                                    );
-                                    small_strip_knob(
-                                        ui,
-                                        setter,
-                                        &params.output_gain,
-                                        "OUT",
-                                        colors.master,
-                                        theme,
-                                    );
-                                    small_strip_knob(
-                                        ui,
-                                        setter,
-                                        &params.dry_wet,
-                                        "DRY/WET",
-                                        colors.eq,
                                         theme,
                                     );
                                     small_strip_knob(
@@ -120,6 +117,83 @@ pub(crate) fn bottom_macro_row(
                 });
             });
         },
+    );
+}
+
+fn bottom_master_section(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    params: &Cc22Params,
+    meter_reading: MeterReading,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = 7.0;
+        ui.vertical(|ui| {
+            ui.set_width(70.0);
+            ui.label(
+                RichText::new("MASTER / OUT")
+                    .font(FontId::monospace(9.0))
+                    .strong()
+                    .color(Color32::from_rgb(245, 237, 218)),
+            );
+            ui.label(
+                RichText::new("FINAL")
+                    .font(FontId::monospace(7.0))
+                    .strong()
+                    .color(Color32::from_rgb(165, 154, 132)),
+            );
+        });
+        bottom_meter(ui, "IN", meter_reading.input.level(), meter_reading.input.clipped);
+        bottom_meter(
+            ui,
+            "OUT",
+            meter_reading.output.level(),
+            meter_reading.output.clipped,
+        );
+        small_strip_knob(ui, setter, &params.input_gain, "INPUT", colors.master, theme);
+        small_strip_knob(ui, setter, &params.output_gain, "OUTPUT", colors.master, theme);
+        small_strip_knob(ui, setter, &params.dry_wet, "DRY/WET", colors.eq, theme);
+    });
+}
+
+fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: bool) {
+    ui.vertical_centered(|ui| {
+        ui.label(
+            RichText::new(label)
+                .font(FontId::monospace(7.0))
+                .strong()
+                .color(Color32::from_rgb(245, 237, 218)),
+        );
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 22.0), Sense::hover());
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(18, 15, 12));
+        let fill_bounds = rect.shrink2(Vec2::new(2.0, 2.0));
+        let fill_h = fill_bounds.height() * level.clamp(0.0, 1.0);
+        let fill = egui::Rect::from_min_max(
+            egui::pos2(fill_bounds.left(), fill_bounds.bottom() - fill_h),
+            fill_bounds.right_bottom(),
+        );
+        if fill_h > 0.5 {
+            ui.painter().rect_filled(
+                fill,
+                CornerRadius::same(2),
+                if clipped {
+                    Color32::from_rgb(225, 64, 52)
+                } else {
+                    Color32::from_rgb(245, 132, 34)
+                },
+            );
+        }
+    });
+}
+
+fn bottom_strip_divider(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 34.0), Sense::hover());
+    ui.painter().line_segment(
+        [rect.center_top(), rect.center_bottom()],
+        egui::Stroke::new(1.0, Color32::from_rgb(83, 74, 61)),
     );
 }
 

@@ -1,9 +1,4 @@
 use crate::meters::Meters;
-use nih_plug_egui::egui::{
-    self, Color32, CornerRadius, FontId, Pos2, RichText, Sense, Stroke, StrokeKind, Vec2,
-};
-
-use super::theme::Theme;
 
 impl Default for UiState {
     fn default() -> Self {
@@ -51,6 +46,12 @@ pub(crate) struct MeterReading {
 pub(crate) struct MeterSnapshot {
     level: f32,
     pub(crate) clipped: bool,
+}
+
+impl MeterSnapshot {
+    pub(crate) fn level(self) -> f32 {
+        self.level
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -109,85 +110,6 @@ impl MeterBallistics {
         self.level = self.level.clamp(0.0, 1.0);
         self.level
     }
-}
-
-pub(crate) fn level_meter(
-    ui: &mut egui::Ui,
-    label: &'static str,
-    reading: MeterSnapshot,
-    accent: Color32,
-    theme: Theme,
-) {
-    ui.vertical_centered(|ui| {
-        ui.label(
-            RichText::new(label)
-                .font(FontId::monospace(8.5))
-                .strong()
-                .color(theme.muted_dark),
-        );
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(16.0, 26.0), Sense::hover());
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(6), Color32::from_rgb(44, 39, 33));
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(6),
-            Stroke::new(1.0, Color32::from_rgb(112, 103, 88)),
-            StrokeKind::Outside,
-        );
-        for tick in 1..4 {
-            let y = rect.bottom() - rect.height() * tick as f32 / 4.0;
-            ui.painter().line_segment(
-                [
-                    Pos2::new(rect.left() + 4.0, y),
-                    Pos2::new(rect.right() - 4.0, y),
-                ],
-                Stroke::new(0.7, Color32::from_rgba_premultiplied(246, 239, 226, 72)),
-            );
-        }
-
-        let fill_bounds = rect.shrink2(Vec2::new(4.0, 4.0));
-        let fill_height = fill_bounds.height() * reading.level;
-        let fill_rect = egui::Rect::from_min_max(
-            Pos2::new(fill_bounds.left(), fill_bounds.bottom() - fill_height),
-            fill_bounds.right_bottom(),
-        );
-        if fill_height > 0.5 {
-            ui.painter().rect_filled(
-                fill_rect,
-                CornerRadius::same(3),
-                if reading.clipped {
-                    theme.warning
-                } else {
-                    accent
-                },
-            );
-        }
-    });
-}
-
-pub(crate) fn clip_indicator(ui: &mut egui::Ui, label: &'static str, clipped: bool, theme: Theme) {
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
-        ui.painter().circle_filled(
-            rect.center(),
-            4.0,
-            if clipped {
-                theme.warning
-            } else {
-                Color32::from_rgb(156, 147, 132)
-            },
-        );
-        ui.label(
-            RichText::new(label)
-                .font(FontId::monospace(8.5))
-                .strong()
-                .color(if clipped {
-                    theme.warning
-                } else {
-                    theme.muted_dark
-                }),
-        );
-    });
 }
 
 fn peak_to_meter_level(peak: f32) -> f32 {

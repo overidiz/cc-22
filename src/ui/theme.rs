@@ -1,6 +1,6 @@
 use nih_plug_egui::egui::Color32;
 
-pub(crate) const CARD_HEIGHT: f32 = 235.0;
+pub(crate) const CARD_HEIGHT: f32 = 252.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
 pub(crate) const KNOB_SIZE: f32 = 50.0;
 
@@ -12,7 +12,6 @@ pub(crate) const FONT_CONTROL_LABEL: f32 = 9.0;
 pub(crate) const FONT_VALUE_LABEL: f32 = 8.5;
 pub(crate) const FONT_SECONDARY: f32 = 9.0;
 pub(crate) const FONT_HINT: f32 = 8.5;
-pub(crate) const FONT_SECTION: f32 = 10.5;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Theme {

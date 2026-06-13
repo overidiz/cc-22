@@ -9,7 +9,6 @@ use nih_plug_egui::{
 use crate::{meters::Meters, params::Cc22Params, Cc22};
 
 mod eq_view;
-mod master_strip;
 mod meters;
 mod module_card;
 mod preset_bar;
@@ -61,6 +60,7 @@ pub fn create_editor(
                 let colors = ModuleColors::default();
                 let look = Look { colors, theme };
                 let now = ctx.input(|input| input.time);
+                let meter_reading = state.next_meter_reading(&meters, now);
                 ctx.request_repaint_after(Duration::from_millis(33));
 
                 if !state.eq_open_reset_done {
@@ -77,9 +77,17 @@ pub fn create_editor(
                             ui.vertical(|ui| {
                                 top_bar(ui, setter, state, &params, colors, theme);
                                 ui.add_space(2.0);
-                                center_modules(ui, setter, state, &params, &meters, now, look);
+                                center_modules(ui, setter, state, &params, look);
                                 ui.add_space(2.0);
-                                bottom_macro_row(ui, setter, state, &params, colors, theme);
+                                bottom_macro_row(
+                                    ui,
+                                    setter,
+                                    state,
+                                    &params,
+                                    meter_reading,
+                                    colors,
+                                    theme,
+                                );
                             });
                         });
                 });

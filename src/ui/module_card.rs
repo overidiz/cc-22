@@ -12,18 +12,15 @@ use crate::{
         movement::{LfoShape, MovementMode},
         texture::TextureMode,
     },
-    meters::Meters,
     params::Cc22Params,
 };
 
 use super::{
     eq_view::eq_workbench,
-    master_strip::master_strip,
     meters::UiState,
     signal_flow::{
         card_shadow, compute_drop_slot, drag_handle, drop_indicator_x, final_index_from_drop_slot,
         paint_drop_indicator, paint_floating_card, position_badge, signal_flow_arrow,
-        signal_flow_band,
     },
     theme::{
         Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, FONT_MODULE_TITLE, FONT_SECONDARY,
@@ -36,8 +33,6 @@ use super::{
 };
 
 const LIFT_AMOUNT: f32 = 3.0;
-const POST_MODULE_GAP: f32 = 4.0;
-
 struct ModuleCardSpec<'a> {
     title: &'static str,
     accent: Color32,
@@ -53,24 +48,15 @@ pub(crate) fn center_modules(
     setter: &ParamSetter<'_>,
     state: &mut UiState,
     params: &Cc22Params,
-    meters: &Meters,
-    now: f64,
     look: Look,
 ) {
     let colors = look.colors;
     let theme = look.theme;
-    let meter_reading = state.next_meter_reading(meters, now);
     let chain_order = params.chain_order();
     let module_row_width = (CARD_WIDTH * 4.0) + (ui.spacing().item_spacing.x * 3.0);
     let card_specs: [ModuleCardSpec<'_>; 4] = chain_order.map(|m| module_spec(m, params, colors));
 
     // ── compute card layout ──────────────────────────────────────────
-    ui.horizontal_top(|ui| {
-        center_fixed_width_row(ui, module_row_width);
-        signal_flow_band(ui, module_row_width, state.drag_source.is_some(), theme);
-    });
-    ui.add_space(6.0);
-
     let mut card_rects: [Rect; 4] = [Rect::NOTHING; 4];
     let row_start = ui.cursor().min.x + ((ui.available_width() - module_row_width).max(0.0) * 0.5);
     let gaps = ui.spacing().item_spacing.x;
@@ -225,15 +211,6 @@ pub(crate) fn center_modules(
     }
 
     ui.add_space(8.0);
-    ui.label(
-        RichText::new("MODULES -> EQ -> MASTER/OUT")
-            .font(FontId::monospace(FONT_SECONDARY))
-            .strong()
-            .color(theme.muted_dark),
-    );
-
-    // Keep the post-module tools inside the same centered lane as the module cards.
-    ui.add_space(4.0);
     let post_module_width = module_row_width
         .min(ui.available_width())
         .max(0.0)
@@ -248,17 +225,6 @@ pub(crate) fn center_modules(
                 params,
                 &mut state.selected_eq_band,
                 colors,
-                theme,
-                post_module_width,
-            );
-
-            ui.add_space(POST_MODULE_GAP);
-            master_strip(
-                ui,
-                setter,
-                params,
-                meter_reading,
-                colors.master,
                 theme,
                 post_module_width,
             );
