@@ -5,8 +5,8 @@ impl Default for UiState {
         Self {
             selected_preset: 0,
             random_seed: 0,
-            selected_eq_band: 0,
-            eq_open_reset_done: false,
+            selected_eq_stage: EqStageSelection::Post,
+            selected_eq_band: EqBandSelection::LowCut,
             drag_source: None,
             drag_drop_slot: None,
             input_meter: MeterBallistics::default(),
@@ -23,8 +23,8 @@ impl Default for UiState {
 pub(crate) struct UiState {
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
-    pub(crate) selected_eq_band: usize,
-    pub(crate) eq_open_reset_done: bool,
+    pub(crate) selected_eq_stage: EqStageSelection,
+    pub(crate) selected_eq_band: EqBandSelection,
     pub(crate) drag_source: Option<usize>,
     pub(crate) drag_drop_slot: Option<usize>,
     pub(crate) input_meter: MeterBallistics,
@@ -34,6 +34,51 @@ pub(crate) struct UiState {
     pub(crate) input_clip_until: f64,
     pub(crate) output_clip_until: f64,
     pub(crate) last_meter_time: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EqStageSelection {
+    Pre,
+    Post,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EqBandSelection {
+    LowCut,
+    LowShelf,
+    Mid,
+    HighShelf,
+    HighCut,
+}
+
+impl EqBandSelection {
+    pub(crate) const ALL: [Self; 5] = [
+        Self::LowCut,
+        Self::LowShelf,
+        Self::Mid,
+        Self::HighShelf,
+        Self::HighCut,
+    ];
+
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::LowCut => 0,
+            Self::LowShelf => 1,
+            Self::Mid => 2,
+            Self::HighShelf => 3,
+            Self::HighCut => 4,
+        }
+    }
+
+    pub(crate) fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::LowCut,
+            1 => Self::LowShelf,
+            2 => Self::Mid,
+            3 => Self::HighShelf,
+            _ => Self::HighCut,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

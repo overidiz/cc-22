@@ -21,7 +21,10 @@ use crate::{
 use nih_plug::prelude::{BoolParam, EnumParam, FloatParam};
 
 use super::{
-    character::CharacterMode, diffusion::DiffusionMode, eq::EqMode, movement::MovementMode,
+    character::CharacterMode,
+    diffusion::DiffusionMode,
+    eq::{EqBandType, EqMode},
+    movement::MovementMode,
     texture::TextureMode,
 };
 
@@ -334,9 +337,9 @@ fn module_bypass_preserves_signal_for_each_module() {
 
     let mut eq_params = EqParams::default();
     eq_params.bypass = BoolParam::new("EQ Bypass", true);
-    eq_params.mid_gain = float_param("Mid Gain", 18.0);
-    eq_params.low_shelf_gain = float_param("Low Shelf Gain", 18.0);
-    eq_params.high_shelf_gain = float_param("High Shelf Gain", 18.0);
+    eq_params.band1_gain = float_param("Band 1 Gain", 24.0);
+    eq_params.band3_gain = float_param("Band 3 Gain", 24.0);
+    eq_params.band5_gain = float_param("Band 5 Gain", 24.0);
     eq_params.reset_smoothers();
     let mut eq = Eq::default();
     eq.prepare(TEST_SAMPLE_RATE);
@@ -389,15 +392,27 @@ fn processor_dry_wet_endpoints_are_stable() {
 fn eq_extreme_settings_stay_finite_and_gain_safe() {
     let mut params = EqParams::default();
     params.mode = EnumParam::new("EQ Mode", EqMode::On);
-    params.low_cut_frequency = float_param("Low Cut Frequency", 500.0);
-    params.low_shelf_gain = float_param("Low Shelf Gain", 18.0);
-    params.low_shelf_frequency = float_param("Low Shelf Frequency", 500.0);
-    params.mid_gain = float_param("Mid Gain", -18.0);
-    params.mid_frequency = float_param("Mid Frequency", 8_000.0);
-    params.mid_q = float_param("Mid Q", 10.0);
-    params.high_shelf_gain = float_param("High Shelf Gain", 18.0);
-    params.high_shelf_frequency = float_param("High Shelf Frequency", 16_000.0);
-    params.high_cut_frequency = float_param("High Cut Frequency", 2_000.0);
+    params.band1_enabled = BoolParam::new("Band 1 Enabled", true);
+    params.band1_type = EnumParam::new("Band 1 Type", EqBandType::HighPass);
+    params.band1_frequency = float_param("Band 1 Frequency", 500.0);
+    params.band1_q = float_param("Band 1 Q", 12.0);
+    params.band2_enabled = BoolParam::new("Band 2 Enabled", true);
+    params.band2_type = EnumParam::new("Band 2 Type", EqBandType::LowShelf);
+    params.band2_frequency = float_param("Band 2 Frequency", 500.0);
+    params.band2_gain = float_param("Band 2 Gain", 24.0);
+    params.band3_enabled = BoolParam::new("Band 3 Enabled", true);
+    params.band3_type = EnumParam::new("Band 3 Type", EqBandType::Bell);
+    params.band3_frequency = float_param("Band 3 Frequency", 8_000.0);
+    params.band3_gain = float_param("Band 3 Gain", -24.0);
+    params.band3_q = float_param("Band 3 Q", 12.0);
+    params.band4_enabled = BoolParam::new("Band 4 Enabled", true);
+    params.band4_type = EnumParam::new("Band 4 Type", EqBandType::HighShelf);
+    params.band4_frequency = float_param("Band 4 Frequency", 16_000.0);
+    params.band4_gain = float_param("Band 4 Gain", 24.0);
+    params.band5_enabled = BoolParam::new("Band 5 Enabled", true);
+    params.band5_type = EnumParam::new("Band 5 Type", EqBandType::LowPass);
+    params.band5_frequency = float_param("Band 5 Frequency", 2_000.0);
+    params.band5_q = float_param("Band 5 Q", 12.0);
     params.reset_smoothers();
 
     let mut eq = Eq::default();

@@ -17,16 +17,13 @@ mod theme;
 mod top_bar;
 mod widgets;
 
-use eq_view::reset_eq_to_defaults;
+use eq_view::eq_workbench;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
-use theme::{Look, ModuleColors, Theme, BASE_HEIGHT, BASE_WIDTH};
+use theme::{Look, ModuleColors, Theme};
+pub(crate) use theme::{BASE_HEIGHT, BASE_WIDTH};
 use top_bar::top_bar;
-
-fn fixed_editor_size() -> (u32, u32) {
-    (BASE_WIDTH.round() as u32, BASE_HEIGHT.round() as u32)
-}
 
 pub fn create_editor(
     params: Arc<Cc22Params>,
@@ -34,7 +31,6 @@ pub fn create_editor(
     _async_executor: AsyncExecutor<Cc22>,
 ) -> Option<Box<dyn Editor>> {
     let editor_state = params.editor_state.clone();
-    editor_state.set_requested_size(fixed_editor_size());
 
     create_egui_editor(
         editor_state.clone(),
@@ -63,22 +59,26 @@ pub fn create_editor(
                 let meter_reading = state.next_meter_reading(&meters, now);
                 ctx.request_repaint_after(Duration::from_millis(33));
 
-                if !state.eq_open_reset_done {
-                    reset_eq_to_defaults(setter, &params);
-                    state.selected_eq_band = 0;
-                    state.eq_open_reset_done = true;
-                }
-
                 CentralPanel::default().show(ctx, |ui| {
                     egui::Frame::new()
                         .fill(theme.background)
-                        .inner_margin(egui::Margin::same(8))
+                        .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 8.0;
                                 top_bar(ui, setter, state, &params, colors, theme);
-                                ui.add_space(2.0);
                                 center_modules(ui, setter, state, &params, look);
-                                ui.add_space(2.0);
+                                let eq_width = ui.available_width();
+                                eq_workbench(
+                                    ui,
+                                    setter,
+                                    &params,
+                                    &mut state.selected_eq_stage,
+                                    &mut state.selected_eq_band,
+                                    colors,
+                                    theme,
+                                    eq_width,
+                                );
                                 bottom_macro_row(
                                     ui,
                                     setter,

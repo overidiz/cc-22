@@ -86,19 +86,21 @@ pub fn validate_chain_order(slots: &[usize; 4]) -> [ChainModule; 4] {
 
 #[derive(Default)]
 pub struct EffectChain {
+    pre_eq: Eq,
     character: Character,
     movement: Movement,
     diffusion: Diffusion,
     texture: Texture,
-    eq: Eq,
+    post_eq: Eq,
 }
 
 pub struct ChainFrame {
+    pre_eq: EqFrame,
     character: CharacterFrame,
     movement: MovementFrame,
     diffusion: DiffusionFrame,
     texture: TextureFrame,
-    eq: EqFrame,
+    post_eq: EqFrame,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -154,28 +156,31 @@ impl ModuleCore {
 
 impl EffectChain {
     pub fn prepare(&mut self, sample_rate: f32) {
+        self.pre_eq.prepare(sample_rate);
         self.character.prepare(sample_rate);
         self.movement.prepare(sample_rate);
         self.diffusion.prepare(sample_rate);
         self.texture.prepare(sample_rate);
-        self.eq.prepare(sample_rate);
+        self.post_eq.prepare(sample_rate);
     }
 
     pub fn reset(&mut self) {
+        self.pre_eq.reset();
         self.character.reset();
         self.movement.reset();
         self.diffusion.reset();
         self.texture.reset();
-        self.eq.reset();
+        self.post_eq.reset();
     }
 
     pub fn next_frame(&mut self, params: &Cc22Params) -> ChainFrame {
         ChainFrame {
+            pre_eq: self.pre_eq.next_frame(&params.pre_eq),
             character: self.character.next_frame(&params.character),
             movement: self.movement.next_frame(&params.movement),
             diffusion: self.diffusion.next_frame(&params.diffusion),
             texture: self.texture.next_frame(&params.texture),
-            eq: self.eq.next_frame(&params.eq),
+            post_eq: self.post_eq.next_frame(&params.post_eq),
         }
     }
 
@@ -186,7 +191,9 @@ impl EffectChain {
         frame: &ChainFrame,
         order: &[ChainModule; 4],
     ) -> f32 {
-        let mut sample = sample;
+        let mut sample = self
+            .pre_eq
+            .process_sample_for_channel(channel, sample, &frame.pre_eq);
         for &module in order.iter() {
             sample = match module {
                 ChainModule::Character => {
@@ -207,8 +214,8 @@ impl EffectChain {
                 }
             };
         }
-        self.eq
-            .process_sample_for_channel(channel, sample, &frame.eq)
+        self.post_eq
+            .process_sample_for_channel(channel, sample, &frame.post_eq)
     }
 
     pub fn process_block(
@@ -258,9 +265,14 @@ pub fn safety_limit_sample(sample: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, FloatRange};
+
+    use crate::dsp::eq::EqBandType;
+    use crate::params::{Cc22Params, EqParams, PreEqParams};
+
     use super::{
         default_chain_order, reorder_module, safety_limit_sample, sanitize_sample,
-        soft_clip_sample, validate_chain_order, ChainModule, ModuleCore,
+        soft_clip_sample, validate_chain_order, ChainModule, EffectChain, ModuleCore,
     };
 
     #[test]
@@ -361,5 +373,180 @@ mod tests {
                 ChainModule::Character,
             ]
         );
+    }
+
+    #[test]
+    fn pre_and_post_eq_can_be_configured_independently() {
+        let pre_boost = process_eq_chain_rms(Some((1_000.0, 9.0)), Some((1_000.0, -9.0)));
+        let post_only_cut = process_eq_chain_rms(None, Some((1_000.0, -9.0)));
+        let pre_only_boost = process_eq_chain_rms(Some((1_000.0, 9.0)), None);
+
+        assert!(pre_boost > post_only_cut * 1.8);
+        assert!(pre_only_boost > pre_boost * 1.8);
+    }
+
+    #[test]
+    fn pre_post_eq_off_preserves_signal() {
+        let dry = process_eq_chain_rms(None, None);
+        let reference = sine_rms();
+
+        assert!((dry - reference).abs() < 0.000_1);
+    }
+
+    #[test]
+    fn pre_or_post_eq_only_changes_signal_when_enabled() {
+        let dry = process_eq_chain_rms(None, None);
+        let pre_only = process_eq_chain_rms(Some((1_000.0, 6.0)), None);
+        let post_only = process_eq_chain_rms(None, Some((1_000.0, 6.0)));
+
+        assert!(pre_only > dry * 1.15);
+        assert!(post_only > dry * 1.15);
+        assert!((pre_only - post_only).abs() < dry * 0.08);
+    }
+
+    #[test]
+    fn pre_and_post_eq_are_cumulative_when_both_active() {
+        let post_only = process_eq_chain_rms(None, Some((1_000.0, 6.0)));
+        let pre_only = process_eq_chain_rms(Some((1_000.0, 6.0)), None);
+        let both = process_eq_chain_rms(Some((1_000.0, 6.0)), Some((1_000.0, 6.0)));
+
+        assert!(both > post_only * 1.15);
+        assert!(both > pre_only * 1.15);
+    }
+
+    #[test]
+    fn changing_pre_eq_does_not_mutate_post_eq_params() {
+        let mut params = Cc22Params::default();
+        let post_gain = params.post_eq.band3_gain.value();
+        let post_type = params.post_eq.band3_type.value();
+
+        params.pre_eq.band3_enabled = BoolParam::new("Pre Band 3 Enabled", true);
+        params.pre_eq.band3_type = EnumParam::new("Pre Band 3 Type", EqBandType::HighPass);
+        params.pre_eq.band3_gain = FloatParam::new(
+            "Pre Band 3 Gain",
+            12.0,
+            FloatRange::Linear {
+                min: -24.0,
+                max: 24.0,
+            },
+        );
+
+        assert_eq!(params.post_eq.band3_gain.value(), post_gain);
+        assert_eq!(params.post_eq.band3_type.value(), post_type);
+    }
+
+    #[test]
+    fn changing_post_eq_does_not_mutate_pre_eq_params() {
+        let mut params = Cc22Params::default();
+        let pre_gain = params.pre_eq.band3_gain.value();
+        let pre_type = params.pre_eq.band3_type.value();
+
+        params.post_eq.band3_enabled = BoolParam::new("Post Band 3 Enabled", true);
+        params.post_eq.band3_type = EnumParam::new("Post Band 3 Type", EqBandType::LowPass);
+        params.post_eq.band3_gain = FloatParam::new(
+            "Post Band 3 Gain",
+            -12.0,
+            FloatRange::Linear {
+                min: -24.0,
+                max: 24.0,
+            },
+        );
+
+        assert_eq!(params.pre_eq.band3_gain.value(), pre_gain);
+        assert_eq!(params.pre_eq.band3_type.value(), pre_type);
+    }
+
+    fn process_eq_chain_rms(pre_band: Option<(f32, f32)>, post_band: Option<(f32, f32)>) -> f32 {
+        fn eq_gain_param(value: f32) -> FloatParam {
+            FloatParam::new(
+                "EQ Gain",
+                value,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            )
+        }
+
+        fn eq_frequency_param(value: f32) -> FloatParam {
+            FloatParam::new(
+                "EQ Frequency",
+                value,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 20_000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+        }
+
+        let mut params = Cc22Params::default();
+        params.character.bypass = BoolParam::new("Character Bypass", true);
+        params.movement.bypass = BoolParam::new("Movement Bypass", true);
+        params.diffusion.bypass = BoolParam::new("Diffusion Bypass", true);
+        params.texture.bypass = BoolParam::new("Texture Bypass", true);
+        disable_pre_eq_bands(&mut params.pre_eq);
+        disable_post_eq_bands(&mut params.post_eq);
+
+        if let Some((frequency, gain)) = pre_band {
+            params.pre_eq.bypass = BoolParam::new("Pre EQ Bypass", false);
+            params.pre_eq.band3_enabled = BoolParam::new("Pre Band 3 Enabled", true);
+            params.pre_eq.band3_type = EnumParam::new("Pre Band 3 Type", EqBandType::Bell);
+            params.pre_eq.band3_frequency = eq_frequency_param(frequency);
+            params.pre_eq.band3_gain = eq_gain_param(gain);
+        }
+
+        if let Some((frequency, gain)) = post_band {
+            params.post_eq.bypass = BoolParam::new("Post EQ Bypass", false);
+            params.post_eq.band3_enabled = BoolParam::new("Post Band 3 Enabled", true);
+            params.post_eq.band3_type = EnumParam::new("Post Band 3 Type", EqBandType::Bell);
+            params.post_eq.band3_frequency = eq_frequency_param(frequency);
+            params.post_eq.band3_gain = eq_gain_param(gain);
+        }
+
+        params.reset_smoothers();
+
+        let mut chain = EffectChain::default();
+        chain.prepare(48_000.0);
+        let order = params.chain_order();
+        let mut sum = 0.0;
+
+        for index in 0..4_800 {
+            let frame = chain.next_frame(&params);
+            let phase = core::f32::consts::TAU * 1_000.0 * index as f32 / 48_000.0;
+            let sample = phase.sin() * 0.1;
+            let out = chain.process_sample(0, sample, &frame, &order);
+            sum += out * out;
+        }
+
+        (sum / 4_800.0).sqrt()
+    }
+
+    fn sine_rms() -> f32 {
+        let mut sum = 0.0;
+        for index in 0..4_800 {
+            let phase = core::f32::consts::TAU * 1_000.0 * index as f32 / 48_000.0;
+            let sample = phase.sin() * 0.1;
+            sum += sample * sample;
+        }
+        (sum / 4_800.0).sqrt()
+    }
+
+    fn disable_pre_eq_bands(eq: &mut PreEqParams) {
+        eq.bypass = BoolParam::new("Pre EQ Bypass", true);
+        eq.band1_enabled = BoolParam::new("Pre Band 1 Enabled", false);
+        eq.band2_enabled = BoolParam::new("Pre Band 2 Enabled", false);
+        eq.band3_enabled = BoolParam::new("Pre Band 3 Enabled", false);
+        eq.band4_enabled = BoolParam::new("Pre Band 4 Enabled", false);
+        eq.band5_enabled = BoolParam::new("Pre Band 5 Enabled", false);
+    }
+
+    fn disable_post_eq_bands(eq: &mut EqParams) {
+        eq.bypass = BoolParam::new("Post EQ Bypass", true);
+        eq.band1_enabled = BoolParam::new("Post Band 1 Enabled", false);
+        eq.band2_enabled = BoolParam::new("Post Band 2 Enabled", false);
+        eq.band3_enabled = BoolParam::new("Post Band 3 Enabled", false);
+        eq.band4_enabled = BoolParam::new("Post Band 4 Enabled", false);
+        eq.band5_enabled = BoolParam::new("Post Band 5 Enabled", false);
     }
 }

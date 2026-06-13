@@ -2,8 +2,12 @@ use nih_plug::prelude::{Param, ParamSetter};
 
 use crate::{
     dsp::{
-        character::CharacterMode, diffusion::DiffusionMode, eq::EqMode, movement::LfoShape,
-        movement::MovementMode, texture::TextureMode,
+        character::CharacterMode,
+        diffusion::DiffusionMode,
+        eq::{EqBandType, EqMode},
+        movement::LfoShape,
+        movement::MovementMode,
+        texture::TextureMode,
     },
     params::Cc22Params,
 };
@@ -890,18 +894,34 @@ impl TexturePreset {
 
 impl EqPreset {
     fn apply_with_setter(&self, setter: &ParamSetter<'_>, params: &Cc22Params) {
-        let eq = &params.eq;
+        let eq = &params.post_eq;
         set_param(setter, &eq.mode, self.mode);
         set_param(setter, &eq.bypass, false);
-        set_param(setter, &eq.low_cut_frequency, self.low_cut_hz);
-        set_param(setter, &eq.low_shelf_gain, self.low_shelf_gain_db);
-        set_param(setter, &eq.low_shelf_frequency, self.low_shelf_hz);
-        set_param(setter, &eq.mid_gain, self.mid_gain_db);
-        set_param(setter, &eq.mid_frequency, self.mid_hz);
-        set_param(setter, &eq.mid_q, self.mid_q);
-        set_param(setter, &eq.high_shelf_gain, self.high_shelf_gain_db);
-        set_param(setter, &eq.high_shelf_frequency, self.high_shelf_hz);
-        set_param(setter, &eq.high_cut_frequency, self.high_cut_hz);
+        set_param(setter, &eq.band1_enabled, true);
+        set_param(setter, &eq.band1_type, EqBandType::LowShelf);
+        set_param(setter, &eq.band1_frequency, self.low_shelf_hz);
+        set_param(setter, &eq.band1_gain, self.low_shelf_gain_db);
+        set_param(setter, &eq.band1_q, 1.0);
+        set_param(setter, &eq.band2_enabled, true);
+        set_param(setter, &eq.band2_type, EqBandType::Bell);
+        set_param(setter, &eq.band2_frequency, self.mid_hz);
+        set_param(setter, &eq.band2_gain, self.mid_gain_db);
+        set_param(setter, &eq.band2_q, self.mid_q);
+        set_param(setter, &eq.band3_enabled, true);
+        set_param(setter, &eq.band3_type, EqBandType::HighShelf);
+        set_param(setter, &eq.band3_frequency, self.high_shelf_hz);
+        set_param(setter, &eq.band3_gain, self.high_shelf_gain_db);
+        set_param(setter, &eq.band3_q, 1.0);
+        set_param(setter, &eq.band4_enabled, false);
+        set_param(setter, &eq.band4_type, EqBandType::Off);
+        set_param(setter, &eq.band4_frequency, self.low_cut_hz);
+        set_param(setter, &eq.band4_gain, 0.0);
+        set_param(setter, &eq.band4_q, 0.707);
+        set_param(setter, &eq.band5_enabled, false);
+        set_param(setter, &eq.band5_type, EqBandType::Off);
+        set_param(setter, &eq.band5_frequency, self.high_cut_hz);
+        set_param(setter, &eq.band5_gain, 0.0);
+        set_param(setter, &eq.band5_q, 0.707);
     }
 }
 
@@ -952,6 +972,32 @@ mod tests {
             assert!(values.character.mix <= 0.85);
             assert!(values.input_gain_db <= 0.0);
             assert!(values.output_gain_db <= 0.0);
+        }
+    }
+
+    #[test]
+    fn legacy_presets_load_with_migratable_eq_values() {
+        for preset in internal_presets() {
+            let eq = preset.values.eq;
+
+            assert!(eq.low_cut_hz.is_finite());
+            assert!(eq.low_shelf_hz.is_finite());
+            assert!(eq.low_shelf_gain_db.is_finite());
+            assert!(eq.mid_hz.is_finite());
+            assert!(eq.mid_gain_db.is_finite());
+            assert!(eq.mid_q.is_finite());
+            assert!(eq.high_shelf_hz.is_finite());
+            assert!(eq.high_shelf_gain_db.is_finite());
+            assert!(eq.high_cut_hz.is_finite());
+            assert!((20.0..=20_000.0).contains(&eq.low_cut_hz));
+            assert!((20.0..=20_000.0).contains(&eq.low_shelf_hz));
+            assert!((20.0..=20_000.0).contains(&eq.mid_hz));
+            assert!((20.0..=20_000.0).contains(&eq.high_shelf_hz));
+            assert!((20.0..=20_000.0).contains(&eq.high_cut_hz));
+            assert!((-24.0..=24.0).contains(&eq.low_shelf_gain_db));
+            assert!((-24.0..=24.0).contains(&eq.mid_gain_db));
+            assert!((-24.0..=24.0).contains(&eq.high_shelf_gain_db));
+            assert!((0.1..=12.0).contains(&eq.mid_q));
         }
     }
 

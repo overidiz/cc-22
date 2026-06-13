@@ -16,7 +16,6 @@ use crate::{
 };
 
 use super::{
-    eq_view::eq_workbench,
     meters::UiState,
     signal_flow::{
         card_shadow, compute_drop_slot, drag_handle, drop_indicator_x, final_index_from_drop_slot,
@@ -209,27 +208,6 @@ pub(crate) fn center_modules(
             set_chain_params(setter, params, &new_order);
         }
     }
-
-    ui.add_space(8.0);
-    let post_module_width = module_row_width
-        .min(ui.available_width())
-        .max(0.0)
-        .floor();
-    ui.horizontal_top(|ui| {
-        center_fixed_width_row(ui, post_module_width);
-        ui.vertical(|ui| {
-            ui.set_width(post_module_width);
-            eq_workbench(
-                ui,
-                setter,
-                params,
-                &mut state.selected_eq_band,
-                colors,
-                theme,
-                post_module_width,
-            );
-        });
-    });
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────

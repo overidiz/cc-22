@@ -6,7 +6,7 @@ use nih_plug_egui::egui::{
 
 use crate::{
     dsp::{
-        character::CharacterMode, diffusion::DiffusionMode, eq::EqMode, movement::MovementMode,
+        character::CharacterMode, diffusion::DiffusionMode, movement::MovementMode,
         texture::TextureMode,
     },
     params::Cc22Params,
@@ -39,22 +39,6 @@ pub(crate) fn brand_mark(ui: &mut egui::Ui, colors: ModuleColors, theme: Theme) 
             color,
         );
     }
-}
-
-pub(crate) fn brand_orb(ui: &mut egui::Ui, colors: ModuleColors) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
-    let center = rect.center();
-    ui.painter()
-        .circle_filled(center, 16.0, Color32::from_rgb(244, 238, 220));
-    ui.painter()
-        .circle_filled(center + Vec2::new(-3.0, -4.0), 13.0, colors.character);
-    ui.painter()
-        .circle_filled(center + Vec2::new(4.0, 3.0), 13.0, colors.texture);
-    ui.painter().circle_stroke(
-        center,
-        16.0,
-        Stroke::new(1.5, Color32::from_rgb(245, 237, 218)),
-    );
 }
 
 pub(crate) fn small_strip_knob(
@@ -369,23 +353,6 @@ pub(crate) fn paint_arc(
         .add(egui::Shape::line(points, Stroke::new(width, color)));
 }
 
-#[allow(dead_code)]
-pub(crate) fn enum_option<T>(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<T>,
-    current: T,
-    value: T,
-    label: &'static str,
-) where
-    T: Enum + Copy + PartialEq,
-{
-    if ui.selectable_label(current == value, label).clicked() {
-        set_param(setter, param, value);
-        ui.close_menu();
-    }
-}
-
 pub(crate) fn global_bypass_button(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -429,29 +396,6 @@ pub(crate) fn compact_button(
     )
 }
 
-pub(crate) fn rounded_panel<R>(
-    ui: &mut egui::Ui,
-    fill: Color32,
-    stroke: Color32,
-    radius: CornerRadius,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    let rect = ui.available_rect_before_wrap();
-    let shadow_rect = Rect::from_min_size(
-        rect.min + Vec2::new(4.0, 5.0),
-        Vec2::new(rect.width().min(1_100.0), 50.0),
-    );
-    ui.painter()
-        .rect_filled(shadow_rect, radius, Theme::default().shadow);
-    egui::Frame::new()
-        .fill(fill)
-        .stroke(Stroke::new(1.0, stroke))
-        .corner_radius(radius)
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, add_contents)
-        .inner
-}
-
 pub(crate) fn set_float_normalized(setter: &ParamSetter<'_>, param: &FloatParam, normalized: f32) {
     setter.begin_set_parameter(param);
     setter.set_parameter_normalized(param, normalized.clamp(0.0, 1.0));
@@ -482,8 +426,4 @@ pub(crate) fn diffusion_active(params: &Cc22Params) -> bool {
 
 pub(crate) fn texture_active(params: &Cc22Params) -> bool {
     !params.texture.bypass.value() && params.texture.mode.value() != TextureMode::Off
-}
-
-pub(crate) fn eq_active(params: &Cc22Params) -> bool {
-    !params.eq.bypass.value() && params.eq.mode.value() == EqMode::On
 }

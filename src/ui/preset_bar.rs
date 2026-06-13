@@ -1,6 +1,6 @@
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{
-    self, Align, Color32, CornerRadius, FontId, RichText, Sense, UiBuilder, Vec2,
+    self, Align, Color32, CornerRadius, FontId, Pos2, RichText, Sense, Stroke, UiBuilder, Vec2,
 };
 
 use crate::{params::Cc22Params, presets::internal_presets};
@@ -8,154 +8,126 @@ use crate::{params::Cc22Params, presets::internal_presets};
 use super::{
     meters::{MeterReading, UiState},
     theme::{ModuleColors, Theme},
-    widgets::{
-        brand_orb, global_bypass_button, rounded_panel, set_float_normalized, small_strip_knob,
-    },
+    widgets::{set_float_normalized, small_strip_knob},
 };
+
+pub(crate) const MASTER_ROW_HEIGHT: f32 = 82.0;
 
 pub(crate) fn bottom_macro_row(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    state: &mut UiState,
+    _state: &mut UiState,
     params: &Cc22Params,
     meter_reading: MeterReading,
     colors: ModuleColors,
     theme: Theme,
 ) {
-    let panel_height = ui.available_height().max(78.0);
-    let strip_height = (panel_height - 20.0).clamp(58.0, 96.0);
-    rounded_panel(
-        ui,
-        theme.paper,
-        theme.text_dark,
-        CornerRadius::same(18),
+    let row_width = ui.available_width().max(0.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(row_width, MASTER_ROW_HEIGHT), Sense::hover());
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(Align::Min)),
         |ui| {
-            ui.set_min_height(panel_height - 20.0);
-            ui.horizontal_top(|ui| {
-                let (strip_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(620.0, strip_height), Sense::hover());
-                ui.scope_builder(
-                    UiBuilder::new()
-                        .max_rect(strip_rect)
-                        .layout(egui::Layout::top_down(Align::Min)),
-                    |ui| {
-                        egui::Frame::new()
-                            .fill(Color32::from_rgb(31, 26, 21))
-                            .corner_radius(CornerRadius::same(8))
-                            .inner_margin(egui::Margin::same(8))
-                            .show(ui, |ui| {
-                                ui.set_min_size(Vec2::new(604.0, strip_height - 16.0));
-                                ui.horizontal(|ui| {
-                                    brand_orb(ui, colors);
-                                    ui.vertical(|ui| {
-                                        ui.label(
-                                            RichText::new("CC-22")
-                                                .font(FontId::proportional(20.0))
-                                                .strong()
-                                                .color(Color32::from_rgb(245, 237, 218)),
-                                        );
-                                        ui.label(
-                                            RichText::new("MULTI-FX")
-                                                .font(FontId::monospace(8.0))
-                                                .strong()
-                                                .color(colors.eq),
-                                        );
-                                    });
-                                    ui.add_space(12.0);
-                                    bottom_master_section(
-                                        ui,
-                                        setter,
-                                        params,
-                                        meter_reading,
-                                        colors,
-                                        theme,
-                                    );
-                                    bottom_strip_divider(ui);
-                                    small_strip_knob(
-                                        ui,
-                                        setter,
-                                        &params.character.mix,
-                                        "CHAR MIX",
-                                        colors.character,
-                                        theme,
-                                    );
-                                    small_strip_knob(
-                                        ui,
-                                        setter,
-                                        &params.diffusion.mix,
-                                        "DIFF MIX",
-                                        colors.diffusion,
-                                        theme,
-                                    );
-                                    small_strip_knob(
-                                        ui,
-                                        setter,
-                                        &params.movement.rate,
-                                        "MOV RATE",
-                                        colors.movement,
-                                        theme,
-                                    );
-                                });
-                            });
-                    },
-                );
-
-                ui.add_space(6.0);
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        preset_selector_with_id(
-                            ui,
-                            setter,
-                            state,
-                            params,
-                            theme,
-                            "bottom-preset-selector",
-                            150.0,
-                        );
-                        global_bypass_button(ui, setter, &params.global_bypass, theme);
-                    });
+            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+            egui::Frame::new()
+                .fill(Color32::from_rgb(34, 29, 23))
+                .stroke(Stroke::new(1.0, theme.text_dark))
+                .corner_radius(CornerRadius::same(12))
+                .show(ui, |ui| {
+                    ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    paint_master_row(ui, setter, params, meter_reading, colors, theme, rect);
                 });
-            });
         },
     );
 }
 
-fn bottom_master_section(
+fn paint_master_row(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
     meter_reading: MeterReading,
     colors: ModuleColors,
     theme: Theme,
+    rect: egui::Rect,
 ) {
-    ui.horizontal_centered(|ui| {
-        ui.spacing_mut().item_spacing.x = 7.0;
-        ui.vertical(|ui| {
-            ui.set_width(70.0);
-            ui.label(
-                RichText::new("MASTER / OUT")
-                    .font(FontId::monospace(9.0))
-                    .strong()
-                    .color(Color32::from_rgb(245, 237, 218)),
-            );
-            ui.label(
-                RichText::new("FINAL")
-                    .font(FontId::monospace(7.0))
-                    .strong()
-                    .color(Color32::from_rgb(165, 154, 132)),
-            );
-        });
-        bottom_meter(ui, "IN", meter_reading.input.level(), meter_reading.input.clipped);
+    let clip = rect.intersect(ui.clip_rect());
+    let content = rect.shrink2(Vec2::new(12.0, 8.0));
+    let knob_w = 58.0;
+    let knob_gap = 8.0;
+    let knob_total = (knob_w * 3.0) + (knob_gap * 2.0);
+    let knob_x = content.right() - knob_total;
+    let y = content.top();
+    let h = content.height();
+
+    fixed_child_ui(ui, clip, content.left(), y, 82.0, h, |ui| {
+        master_label(ui, colors.eq);
+    });
+
+    let mut x = content.left() + 94.0;
+    fixed_child_ui(ui, clip, x, y + 12.0, 48.0, h - 24.0, |ui| {
+        clip_indicator(
+            ui,
+            meter_reading.input.clipped || meter_reading.output.clipped,
+            theme,
+        );
+    });
+    x += 58.0;
+    fixed_child_ui(ui, clip, x, y + 4.0, 34.0, h - 8.0, |ui| {
+        bottom_meter(
+            ui,
+            "IN",
+            meter_reading.input.level(),
+            meter_reading.input.clipped,
+        );
+    });
+    x += 40.0;
+    fixed_child_ui(ui, clip, x, y + 4.0, 34.0, h - 8.0, |ui| {
         bottom_meter(
             ui,
             "OUT",
             meter_reading.output.level(),
             meter_reading.output.clipped,
         );
-        small_strip_knob(ui, setter, &params.input_gain, "INPUT", colors.master, theme);
-        small_strip_knob(ui, setter, &params.output_gain, "OUTPUT", colors.master, theme);
-        small_strip_knob(ui, setter, &params.dry_wet, "DRY/WET", colors.eq, theme);
     });
+
+    if x + 46.0 < knob_x {
+        fixed_child_ui(ui, clip, knob_x - 18.0, y + 7.0, 1.0, h - 14.0, |ui| {
+            bottom_strip_divider(ui);
+        });
+    }
+
+    fixed_child_ui(ui, clip, knob_x, y, knob_w, h, |ui| {
+        small_strip_knob(
+            ui,
+            setter,
+            &params.input_gain,
+            "INPUT",
+            colors.master,
+            theme,
+        );
+    });
+    fixed_child_ui(ui, clip, knob_x + knob_w + knob_gap, y, knob_w, h, |ui| {
+        small_strip_knob(
+            ui,
+            setter,
+            &params.output_gain,
+            "OUTPUT",
+            colors.master,
+            theme,
+        );
+    });
+    fixed_child_ui(
+        ui,
+        clip,
+        knob_x + (knob_w + knob_gap) * 2.0,
+        y,
+        knob_w,
+        h,
+        |ui| {
+            small_strip_knob(ui, setter, &params.dry_wet, "DRY/WET", colors.eq, theme);
+        },
+    );
 }
 
 fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: bool) {
@@ -189,11 +161,72 @@ fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: boo
     });
 }
 
+fn master_label(ui: &mut egui::Ui, accent: Color32) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(13.0);
+        ui.label(
+            RichText::new("MASTER")
+                .font(FontId::monospace(13.0))
+                .strong()
+                .color(Color32::from_rgb(245, 237, 218)),
+        );
+        ui.label(
+            RichText::new("FINAL OUT")
+                .font(FontId::monospace(8.0))
+                .strong()
+                .color(accent),
+        );
+    });
+}
+
+fn clip_indicator(ui: &mut egui::Ui, clipped: bool, theme: Theme) {
+    ui.horizontal_centered(|ui| {
+        let color = if clipped {
+            theme.warning
+        } else {
+            Color32::from_rgb(111, 101, 86)
+        };
+        let (dot, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+        ui.painter().circle_filled(dot.center(), 4.0, color);
+        ui.label(
+            RichText::new("CLIP")
+                .font(FontId::monospace(8.0))
+                .strong()
+                .color(if clipped {
+                    theme.warning
+                } else {
+                    Color32::from_rgb(170, 158, 137)
+                }),
+        );
+    });
+}
+
 fn bottom_strip_divider(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, 34.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, ui.available_height()), Sense::hover());
     ui.painter().line_segment(
         [rect.center_top(), rect.center_bottom()],
         egui::Stroke::new(1.0, Color32::from_rgb(83, 74, 61)),
+    );
+}
+
+fn fixed_child_ui(
+    ui: &mut egui::Ui,
+    clip: egui::Rect,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let rect = egui::Rect::from_min_size(Pos2::new(x, y), Vec2::new(width.max(0.0), height));
+    ui.scope_builder(
+        UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+        |ui| {
+            ui.set_clip_rect(rect.intersect(clip));
+            add_contents(ui);
+        },
     );
 }
 

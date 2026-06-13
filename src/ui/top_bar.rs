@@ -12,7 +12,7 @@ use super::{
     widgets::{brand_mark, colored_knob, compact_button, global_bypass_button},
 };
 
-const TOP_BAR_HEIGHT: f32 = 86.0;
+pub(crate) const TOP_BAR_HEIGHT: f32 = 86.0;
 
 pub(crate) fn top_bar(
     ui: &mut egui::Ui,
