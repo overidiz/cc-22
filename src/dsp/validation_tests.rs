@@ -258,14 +258,19 @@ fn default_post_eq_does_not_cut_sub_100hz() {
 
     for band in 0..5 {
         assert!(
-            !params.band_enabled(band).value(),
-            "default POST EQ band {} should be disabled",
+            params.band_enabled(band).value(),
+            "default POST EQ band {} should be enabled",
             band + 1
         );
         assert_eq!(
             params.band_type(band).value(),
-            EqBandType::Off,
-            "default POST EQ band {} should be Off",
+            EqBandType::Bell,
+            "default POST EQ band {} should be Bell",
+            band + 1
+        );
+        assert!(
+            params.band_gain(band).value().abs() < 0.000_001,
+            "default POST EQ band {} should be flat",
             band + 1
         );
     }
