@@ -75,7 +75,17 @@ pub struct Diffusion {
     mode_crossfade: LinearSmoother,
     last_output: [f32; MAX_CHANNELS],
     has_processed: bool,
-    reels_wow_phase: f32,
+    reels_delay_time_state: [f32; MAX_CHANNELS],
+    reels_wow_phase: [f32; MAX_CHANNELS],
+    reels_flutter_phase: [f32; MAX_CHANNELS],
+    reels_drift_state: [f32; MAX_CHANNELS],
+    reels_drift_target: [f32; MAX_CHANNELS],
+    reels_drift_countdown: [usize; MAX_CHANNELS],
+    reels_drift_rng: [u32; MAX_CHANNELS],
+    reels_hp_state: [f32; MAX_CHANNELS],
+    reels_lp_state: [f32; MAX_CHANNELS],
+    reels_smear_state: [f32; MAX_CHANNELS],
+    reels_feedback_level_state: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -139,6 +149,7 @@ struct ReverseState {
     crossfade_position_samples: [usize; MAX_CHANNELS],
     crossfade_length_samples: [usize; MAX_CHANNELS],
     filter_state: [f32; MAX_CHANNELS],
+    feedback_filter_state: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -161,7 +172,17 @@ impl Default for Diffusion {
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
             last_output: [0.0; MAX_CHANNELS],
             has_processed: false,
-            reels_wow_phase: 0.0,
+            reels_delay_time_state: [0.0; MAX_CHANNELS],
+            reels_wow_phase: [0.0, 0.37],
+            reels_flutter_phase: [0.0, 0.61],
+            reels_drift_state: [0.0; MAX_CHANNELS],
+            reels_drift_target: [0.0; MAX_CHANNELS],
+            reels_drift_countdown: [0; MAX_CHANNELS],
+            reels_drift_rng: [0x51f1_7eed, 0x7a9e_2d31],
+            reels_hp_state: [0.0; MAX_CHANNELS],
+            reels_lp_state: [0.0; MAX_CHANNELS],
+            reels_smear_state: [0.0; MAX_CHANNELS],
+            reels_feedback_level_state: [0.0; MAX_CHANNELS],
         };
         diffusion.prepare(44_100.0);
         diffusion
@@ -188,7 +209,17 @@ impl Diffusion {
         self.mode_crossfade.reset(1.0);
         self.last_output = [0.0; MAX_CHANNELS];
         self.has_processed = false;
-        self.reels_wow_phase = 0.0;
+        self.reels_delay_time_state = [0.0; MAX_CHANNELS];
+        self.reels_wow_phase = [0.0, 0.37];
+        self.reels_flutter_phase = [0.0, 0.61];
+        self.reels_drift_state = [0.0; MAX_CHANNELS];
+        self.reels_drift_target = [0.0; MAX_CHANNELS];
+        self.reels_drift_countdown = [0; MAX_CHANNELS];
+        self.reels_drift_rng = [0x51f1_7eed, 0x7a9e_2d31];
+        self.reels_hp_state = [0.0; MAX_CHANNELS];
+        self.reels_lp_state = [0.0; MAX_CHANNELS];
+        self.reels_smear_state = [0.0; MAX_CHANNELS];
+        self.reels_feedback_level_state = [0.0; MAX_CHANNELS];
     }
 
     pub fn next_frame(&mut self, params: &DiffusionParams) -> DiffusionFrame {
@@ -357,55 +388,64 @@ impl Diffusion {
 
     fn process_reels(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
-        let decay = frame.decay.clamp(0.0, 1.0);
-        let tone_alpha = frame.tone_alpha;
-
-        // Wow modulation: slow tape-speed drift
-        let wow_rate = 0.45 + frame.size * 1.8;
-        self.reels_wow_phase += wow_rate / self.sample_rate.max(1.0);
-        if self.reels_wow_phase >= 1.0 {
-            self.reels_wow_phase -= 1.0;
-        }
-        let ch_phase = (self.reels_wow_phase + if index == 0 { 0.0 } else { 0.34 }).fract();
-        let wow_ms = (ch_phase * core::f32::consts::TAU).sin() * frame.size * 3.8;
-
-        let delay_ms = (frame.time_ms + wow_ms).clamp(25.0, 2_000.0);
-        let delay_samples = delay_ms * 0.001 * self.sample_rate;
-
-        // Read delayed signal (interpolated)
+        let sample_rate = self.sample_rate.max(1.0);
         let buf_len = self.delay.buffers[index].len();
-        let write_pos = self.delay.write_positions[index];
-        let clamped = delay_samples.clamp(1.0, buf_len as f32 - 2.0);
-        let rp = write_pos as f32 - clamped;
-        let mut rp = rp;
-        while rp < 0.0 {
-            rp += buf_len as f32;
+        if buf_len < 4 {
+            return sample;
         }
-        let ia = rp.floor() as usize % buf_len;
-        let ib = (ia + 1) % buf_len;
-        let frac = rp - rp.floor();
-        let delayed = sanitize_sample(
-            self.delay.buffers[index][ia] * (1.0 - frac) + self.delay.buffers[index][ib] * frac,
+
+        let target_delay_ms = frame.time_ms.clamp(12.0, 2_000.0);
+        if self.reels_delay_time_state[index] <= 0.0 {
+            self.reels_delay_time_state[index] = target_delay_ms;
+        }
+        let time_alpha = (1.0 / (sample_rate * 0.045)).clamp(0.0, 1.0);
+        self.reels_delay_time_state[index] +=
+            (target_delay_ms - self.reels_delay_time_state[index]) * time_alpha;
+
+        let drift = reels_drift_next(
+            index,
+            sample_rate,
+            frame.size,
+            &mut self.reels_drift_rng[index],
+            &mut self.reels_drift_state[index],
+            &mut self.reels_drift_target[index],
+            &mut self.reels_drift_countdown[index],
+        );
+        let delay_ms = reels_modulated_delay_ms(
+            index,
+            frame,
+            sample_rate,
+            self.reels_delay_time_state[index],
+            &mut self.reels_wow_phase[index],
+            &mut self.reels_flutter_phase[index],
+            drift,
+        );
+        let delay_samples = (delay_ms * 0.001 * sample_rate).clamp(1.0, buf_len as f32 - 2.0);
+
+        let write_pos = self.delay.write_positions[index];
+        let delayed = read_interpolated(&self.delay.buffers[index], write_pos, delay_samples);
+
+        let colored = reels_feedback_color(
+            delayed,
+            frame,
+            sample_rate,
+            &mut self.reels_hp_state[index],
+            &mut self.reels_lp_state[index],
+            &mut self.reels_smear_state[index],
+            &mut self.reels_feedback_level_state[index],
         );
 
-        // Tape saturation in feedback path
-        let sat_gain = 1.0 + decay * 3.8;
-        let saturated = (delayed * sat_gain).tanh();
+        let other = self.reels_lp_state[1 - index];
+        let width = frame.width.clamp(0.0, 1.0);
+        let wet = sanitize_sample(((colored + other) * 0.5 * (1.0 - width)) + colored * width);
 
-        // Progressive tone damping
-        let fb_filtered = self.delay.feedback_filter_state[index]
-            + tone_alpha * (saturated - self.delay.feedback_filter_state[index]);
-        self.delay.feedback_filter_state[index] = sanitize_sample(fb_filtered);
-
-        // Write back with feedback
-        let fb = frame.feedback.clamp(0.0, 0.92);
-        let buffer = &mut self.delay.buffers[index];
-        buffer[write_pos] = sanitize_sample(sample + fb_filtered * fb);
+        let feedback =
+            frame.feedback.clamp(0.0, 0.91) * (0.72 + frame.decay.clamp(0.0, 1.0) * 0.18);
+        self.delay.buffers[index][write_pos] = sanitize_sample(sample + colored * feedback);
         self.delay.write_positions[index] = (write_pos + 1) % buf_len;
 
-        sanitize_sample(fb_filtered * reels_level_compensation(frame.feedback, decay))
+        sanitize_sample(wet * reels_level_compensation(frame.feedback, frame.decay))
     }
-
     fn process_space(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
 
@@ -599,17 +639,21 @@ impl Diffusion {
             let buffer = &self.reverse.buffers[index];
             let current_pos = self.reverse.playback_positions[index];
             let current_len = self.reverse.segment_lengths[index];
-            let current = read_reverse_segment(
+            let current =
+                reverse_read_sample(
+                    buffer,
+                    self.reverse.segment_starts[index],
+                    current_len,
+                    current_pos,
+                ) * reverse_envelope(current_pos, current_len, frame.decay, self.sample_rate);
+            let shadow = read_reverse_shadow_segment(
                 buffer,
                 self.reverse.segment_starts[index],
                 current_len,
                 current_pos,
-            ) * reverse_segment_envelope(
-                current_pos,
-                current_len,
-                frame.decay,
-                self.sample_rate,
-            );
+                frame,
+            ) * reverse_shadow_gain(frame);
+            let current = sanitize_sample(current + shadow);
 
             let crossfade_len = self.reverse.crossfade_length_samples[index];
             if crossfade_len == 0 {
@@ -617,21 +661,25 @@ impl Diffusion {
             } else {
                 let previous_pos = self.reverse.previous_playback_positions[index];
                 let previous_len = self.reverse.previous_segment_lengths[index];
-                let previous = read_reverse_segment(
+                let previous =
+                    reverse_read_sample(
+                        buffer,
+                        self.reverse.previous_segment_starts[index],
+                        previous_len,
+                        previous_pos,
+                    ) * reverse_envelope(previous_pos, previous_len, frame.decay, self.sample_rate);
+                let previous_shadow = read_reverse_shadow_segment(
                     buffer,
                     self.reverse.previous_segment_starts[index],
                     previous_len,
                     previous_pos,
-                ) * reverse_segment_envelope(
-                    previous_pos,
-                    previous_len,
-                    frame.decay,
-                    self.sample_rate,
-                );
-                let amount = smoothstep(
+                    frame,
+                ) * reverse_shadow_gain(frame);
+                let previous = sanitize_sample(previous + previous_shadow);
+                let amount = reverse_crossfade_amount(
                     self.reverse.crossfade_position_samples[index] as f32 / crossfade_len as f32,
                 );
-                linear_crossfade(previous, current, amount)
+                equal_power_crossfade(previous, current, amount)
             }
         };
 
@@ -648,13 +696,27 @@ impl Diffusion {
             }
         }
 
-        let tone_alpha = reverse_tone_alpha(frame);
-        let filtered = self.reverse.filter_state[index]
-            + tone_alpha * (wet - self.reverse.filter_state[index]);
-        self.reverse.filter_state[index] = sanitize_sample(filtered);
+        let filtered = reverse_tone_filter(
+            wet,
+            frame,
+            self.sample_rate,
+            &mut self.reverse.filter_state[index],
+        );
+
+        let other = self.reverse.filter_state[1 - index];
+        let width = frame.width.clamp(0.0, 1.0);
+        let stereo_wet =
+            sanitize_sample(((filtered + other) * 0.5 * (1.0 - width)) + filtered * width);
 
         let feedback = reverse_feedback_gain(frame.feedback, frame.decay);
-        self.reverse.buffers[index][write_pos] = sanitize_sample(sample + filtered * feedback);
+        let feedback_toned = reverse_tone_filter(
+            stereo_wet,
+            frame,
+            self.sample_rate,
+            &mut self.reverse.feedback_filter_state[index],
+        );
+        let feedback_sample = reverse_feedback_saturate(feedback_toned * feedback, frame.decay);
+        self.reverse.buffers[index][write_pos] = sanitize_sample(sample + feedback_sample);
         self.reverse.write_positions[index] = (write_pos + 1) % buf_len;
 
         self.reverse.playback_positions[index] += 1;
@@ -662,7 +724,7 @@ impl Diffusion {
             self.capture_reverse_segment(index, frame, buf_len, true);
         }
 
-        sanitize_sample(filtered * reverse_level_compensation(frame.feedback, frame.decay))
+        sanitize_sample(stereo_wet * reverse_level_compensation(frame.feedback, frame.decay))
     }
 
     fn capture_reverse_segment(
@@ -726,6 +788,13 @@ impl Diffusion {
 fn linear_crossfade(dry: f32, wet: f32, amount: f32) -> f32 {
     let amount = amount.clamp(0.0, 1.0);
     sanitize_sample((dry * (1.0 - amount)) + (wet * amount))
+}
+
+#[inline]
+fn equal_power_crossfade(from: f32, to: f32, amount: f32) -> f32 {
+    let amount = amount.clamp(0.0, 1.0);
+    let a = amount * core::f32::consts::FRAC_PI_2;
+    sanitize_sample(from * a.cos() + to * a.sin())
 }
 
 impl Default for CollageState {
@@ -801,6 +870,7 @@ impl ReverseState {
         self.crossfade_position_samples = [0; MAX_CHANNELS];
         self.crossfade_length_samples = [0; MAX_CHANNELS];
         self.filter_state = [0.0; MAX_CHANNELS];
+        self.feedback_filter_state = [0.0; MAX_CHANNELS];
     }
 }
 
@@ -1081,7 +1151,7 @@ fn read_interpolated(buffer: &[f32], write_pos: usize, delay_samples: f32) -> f3
 }
 
 #[inline]
-fn read_reverse_segment(
+fn reverse_read_sample(
     buffer: &[f32],
     segment_start: usize,
     segment_len: usize,
@@ -1095,6 +1165,30 @@ fn read_reverse_segment(
     let pos = playback_pos.min(segment_len - 1);
     let reverse_offset = segment_len - 1 - pos;
     sanitize_sample(buffer[(segment_start + reverse_offset) % len])
+}
+
+#[inline]
+fn read_reverse_shadow_segment(
+    buffer: &[f32],
+    segment_start: usize,
+    segment_len: usize,
+    playback_pos: usize,
+    frame: &DiffusionFrame,
+) -> f32 {
+    if buffer.is_empty() || segment_len == 0 {
+        return 0.0;
+    }
+
+    let smear = (0.18 + frame.size.clamp(0.0, 1.0) * 0.32) * segment_len as f32;
+    let shifted_pos = playback_pos as f32 + smear;
+    let wrapped_pos = shifted_pos.rem_euclid(segment_len as f32);
+    let index_a = wrapped_pos.floor() as usize;
+    let index_b = (index_a + 1) % segment_len;
+    let frac = wrapped_pos - wrapped_pos.floor();
+    let a = reverse_read_sample(buffer, segment_start, segment_len, index_a);
+    let b = reverse_read_sample(buffer, segment_start, segment_len, index_b);
+
+    sanitize_sample((a * (1.0 - frac)) + (b * frac))
 }
 
 #[inline]
@@ -1125,7 +1219,120 @@ fn cascade_level_compensation(decay: f32, feedback: f32) -> f32 {
 fn reels_level_compensation(feedback: f32, decay: f32) -> f32 {
     let feedback = feedback.clamp(0.0, 1.0);
     let decay = decay.clamp(0.0, 1.0);
-    (1.0 - (feedback * 0.10) - (decay * 0.04)).clamp(0.80, 1.0)
+    (1.0 - (feedback * 0.12) - (decay * 0.06)).clamp(0.76, 1.0)
+}
+
+#[inline]
+fn reels_modulated_delay_ms(
+    channel: usize,
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    base_delay_ms: f32,
+    wow_phase: &mut f32,
+    flutter_phase: &mut f32,
+    drift: f32,
+) -> f32 {
+    let size = frame.size.clamp(0.0, 1.0);
+    let width = frame.width.clamp(0.0, 1.0);
+    let stereo_offset = frame.stereo_offset.clamp(-0.5, 0.5) * width;
+    let stereo_sign = if channel == 0 { -1.0 } else { 1.0 };
+    let channel_offset_ms = base_delay_ms * stereo_offset * stereo_sign * 0.08;
+
+    let wow_rate = 0.15 + size * 0.65;
+    *wow_phase = (*wow_phase + wow_rate / sample_rate.max(1.0)).fract();
+    let wow = (*wow_phase * core::f32::consts::TAU).sin() * size * 4.8;
+
+    let flutter_rate = 4.0 + size * 5.0 + channel as f32 * 0.37;
+    *flutter_phase = (*flutter_phase + flutter_rate / sample_rate.max(1.0)).fract();
+    let flutter = (*flutter_phase * core::f32::consts::TAU).sin() * size * 0.62;
+
+    (base_delay_ms + channel_offset_ms + wow + flutter + drift).clamp(8.0, 2_000.0)
+}
+
+fn reels_feedback_color(
+    delayed: f32,
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    hp_state: &mut f32,
+    lp_state: &mut f32,
+    smear_state: &mut f32,
+    feedback_level_state: &mut f32,
+) -> f32 {
+    let decay = frame.decay.clamp(0.0, 1.0);
+    let size = frame.size.clamp(0.0, 1.0);
+    let damping = frame.damping.clamp(0.0, 1.0);
+
+    let saturated = reels_tape_saturate(delayed, decay);
+    let level = saturated.abs();
+    *feedback_level_state += (level - *feedback_level_state) * 0.004;
+    let compression = 1.0 / (1.0 + (*feedback_level_state * (0.32 + decay * 0.72)));
+    let compressed = saturated * compression.clamp(0.62, 1.0);
+
+    let hp_cutoff = 38.0 + decay * 70.0;
+    let hp_alpha =
+        (1.0 - (-core::f32::consts::TAU * hp_cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+    *hp_state += hp_alpha * (compressed - *hp_state);
+    let high_passed = sanitize_sample(compressed - *hp_state);
+
+    let tone_brightness = frame.tone_alpha.clamp(0.0, 1.0);
+    let lp_cutoff =
+        (1_250.0 + tone_brightness * 9_500.0) * (1.0 - damping * 0.36) * (1.0 - decay * 0.30);
+    let lp_cutoff = lp_cutoff.clamp(700.0, 12_000.0);
+    let lp_alpha =
+        (1.0 - (-core::f32::consts::TAU * lp_cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+    *lp_state += lp_alpha * (high_passed - *lp_state);
+    let low_passed = sanitize_sample(*lp_state);
+
+    let smear_amount = (0.18 + size * 0.22 + decay * 0.10).clamp(0.18, 0.50);
+    let smeared = sanitize_sample(-smear_amount * low_passed + *smear_state);
+    *smear_state = sanitize_sample(low_passed + smear_amount * smeared);
+
+    sanitize_sample(smeared)
+}
+
+#[inline]
+fn reels_tape_saturate(sample: f32, decay: f32) -> f32 {
+    let decay = decay.clamp(0.0, 1.0);
+    let drive = 1.0 + decay * 2.6;
+    let bias = sample * sample * 0.018 * decay;
+    sanitize_sample(((sample + bias) * drive).tanh() / drive)
+}
+
+fn reels_drift_next(
+    channel: usize,
+    sample_rate: f32,
+    size: f32,
+    rng: &mut u32,
+    state: &mut f32,
+    target: &mut f32,
+    countdown: &mut usize,
+) -> f32 {
+    let size = size.clamp(0.0, 1.0);
+    if *countdown == 0 {
+        let random = next_reels_random(rng);
+        *target = ((random * 2.0) - 1.0) * size * (1.6 + size * 2.8);
+        let hold_ms = 80.0 + random * 180.0 + channel as f32 * 23.0;
+        *countdown = (hold_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
+    } else {
+        *countdown -= 1;
+    }
+
+    let alpha = (1.0 / (sample_rate.max(1.0) * 0.18)).clamp(0.0, 1.0);
+    *state += (*target - *state) * alpha;
+    sanitize_sample(*state)
+}
+
+#[inline]
+fn next_reels_random(rng: &mut u32) -> f32 {
+    let mut state = *rng;
+    if state == 0 {
+        state = 0x51f1_7eed;
+    }
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    *rng = state;
+    ((state >> 8) as f32) * (1.0 / 16_777_216.0)
 }
 
 #[inline]
@@ -1144,11 +1351,13 @@ fn reverse_segment_length_samples(
     sample_rate: f32,
     buf_len: usize,
 ) -> usize {
-    let time_ms = frame.time_ms.clamp(18.0, 1_800.0);
+    let time_ms = frame.time_ms.clamp(60.0, 2_000.0);
     let size = frame.size.clamp(0.0, 1.0);
-    let segment_ms = (time_ms * (0.18 + size * 0.70)).clamp(12.0, 1_200.0);
+    let segment_ms = (time_ms * (0.35 + size * 0.55)).clamp(60.0, 1_600.0);
     let samples = (segment_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
-    samples.clamp(8, (buf_len / 3).max(8))
+    let min_samples = (sample_rate.max(1.0) * 0.060).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 1.600).round() as usize;
+    samples.clamp(min_samples.max(8), max_samples.min((buf_len / 2).max(8)))
 }
 
 #[inline]
@@ -1165,7 +1374,9 @@ fn reverse_window_samples(
     } else {
         1.0 + offset
     };
-    let window_ms = (frame.time_ms.clamp(20.0, 2_000.0) * multiplier).clamp(12.0, 2_000.0);
+    let pre_delay_ms = frame.pre_delay_ms.clamp(0.0, 120.0) * 0.35;
+    let window_ms =
+        (frame.time_ms.clamp(60.0, 2_000.0) * multiplier + pre_delay_ms).clamp(60.0, 2_000.0);
     let samples = (window_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
     let min_window = segment_len.saturating_add(2);
     samples.clamp(min_window, buf_len.saturating_sub(2).max(min_window))
@@ -1173,22 +1384,17 @@ fn reverse_window_samples(
 
 #[inline]
 fn reverse_crossfade_samples(segment_len: usize, sample_rate: f32) -> usize {
-    let min_samples = (sample_rate.max(1.0) * 0.002).round() as usize;
-    let max_samples = (sample_rate.max(1.0) * 0.008).round() as usize;
+    let min_samples = (sample_rate.max(1.0) * 0.008).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 0.040).round() as usize;
     let max_for_segment = (segment_len / 2).max(1);
-    (segment_len / 5)
+    (segment_len / 6)
         .clamp(min_samples.max(4), max_samples.max(4))
         .min(max_for_segment)
         .max(1)
 }
 
 #[inline]
-fn reverse_segment_envelope(
-    position: usize,
-    segment_len: usize,
-    decay: f32,
-    sample_rate: f32,
-) -> f32 {
+fn reverse_envelope(position: usize, segment_len: usize, decay: f32, sample_rate: f32) -> f32 {
     if segment_len <= 1 {
         return 1.0;
     }
@@ -1207,17 +1413,19 @@ fn reverse_segment_envelope(
     } else {
         1.0
     };
-    let swell = smoothstep(progress).powf(1.0 + decay.clamp(0.0, 1.0) * 1.2);
-    let edge = fade_in * (0.35 + 0.65 * fade_out);
+    let decay = decay.clamp(0.0, 1.0);
+    let swell = smoothstep(progress).powf(0.82 + decay * 0.58);
+    let bloom = (core::f32::consts::PI * progress).sin().max(0.0) * (0.10 + decay * 0.12);
+    let edge = fade_in.sqrt() * (0.42 + 0.58 * fade_out.sqrt());
 
-    ((0.22 + 0.78 * swell) * edge).clamp(0.0, 1.0)
+    ((0.18 + 0.76 * swell + bloom) * edge).clamp(0.0, 1.0)
 }
 
 #[inline]
 fn reverse_envelope_samples(segment_len: usize, decay: f32, sample_rate: f32) -> usize {
-    let min_samples = (sample_rate.max(1.0) * 0.003).round() as usize;
-    let max_samples = (sample_rate.max(1.0) * 0.035).round() as usize;
-    let by_decay = (segment_len as f32 * (0.08 + decay.clamp(0.0, 1.0) * 0.18)).round() as usize;
+    let min_samples = (sample_rate.max(1.0) * 0.006).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 0.055).round() as usize;
+    let by_decay = (segment_len as f32 * (0.045 + decay.clamp(0.0, 1.0) * 0.085)).round() as usize;
     by_decay
         .clamp(min_samples.max(2), max_samples.max(2))
         .min((segment_len / 2).max(1))
@@ -1225,15 +1433,46 @@ fn reverse_envelope_samples(segment_len: usize, decay: f32, sample_rate: f32) ->
 }
 
 #[inline]
-fn reverse_tone_alpha(frame: &DiffusionFrame) -> f32 {
-    (frame.tone_alpha * (1.0 - frame.damping.clamp(0.0, 1.0) * 0.72)).clamp(0.025, 0.92)
+fn reverse_crossfade_amount(progress: f32) -> f32 {
+    smoothstep(progress.clamp(0.0, 1.0))
+}
+
+#[inline]
+fn reverse_tone_filter(
+    input: f32,
+    frame: &DiffusionFrame,
+    sample_rate: f32,
+    state: &mut f32,
+) -> f32 {
+    let tone = frame.tone_alpha.clamp(0.0, 1.0);
+    let damping = frame.damping.clamp(0.0, 1.0);
+    let decay = frame.decay.clamp(0.0, 1.0);
+    let cutoff = (900.0 + tone * 12_500.0) * (1.0 - damping * 0.42) * (1.0 - decay * 0.18);
+    let cutoff = cutoff.clamp(650.0, 14_000.0);
+    let alpha =
+        (1.0 - (-core::f32::consts::TAU * cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+    *state = sanitize_sample(*state + alpha * (input - *state));
+    *state
+}
+
+#[inline]
+fn reverse_shadow_gain(frame: &DiffusionFrame) -> f32 {
+    let size = frame.size.clamp(0.0, 1.0);
+    let decay = frame.decay.clamp(0.0, 1.0);
+    (0.08 + size * 0.10 + decay * 0.08).clamp(0.08, 0.26)
+}
+
+#[inline]
+fn reverse_feedback_saturate(sample: f32, decay: f32) -> f32 {
+    let drive = 1.0 + decay.clamp(0.0, 1.0) * 0.7;
+    sanitize_sample((sample * drive).tanh() / drive)
 }
 
 #[inline]
 fn reverse_feedback_gain(feedback: f32, decay: f32) -> f32 {
     let feedback = feedback.clamp(0.0, 1.0);
     let decay = decay.clamp(0.0, 1.0);
-    (feedback * (0.28 + decay * 0.18)).clamp(0.0, 0.50)
+    (feedback * (0.32 + decay * 0.20)).clamp(0.0, 0.54)
 }
 
 #[inline]
@@ -1726,6 +1965,133 @@ mod tests {
         assert!((c0 - 1.0).abs() < 0.01);
     }
 
+    #[test]
+    fn reels_impulse_repeats_decay_without_runaway() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reels_frame(90.0, 0.78, 0.55, 0.65);
+
+        let mut window_peaks = [0.0_f32; 5];
+        for index in 0..32_000 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+
+            let repeat = index / 4_320;
+            if repeat > 0 && repeat <= window_peaks.len() {
+                window_peaks[repeat - 1] = window_peaks[repeat - 1].max(output.abs());
+            }
+        }
+
+        assert!(window_peaks[0] > 0.05, "first repeat should be audible");
+        assert!(
+            window_peaks[3] < window_peaks[0],
+            "later repeats should decay, peaks={window_peaks:?}"
+        );
+        assert!(
+            window_peaks.iter().copied().fold(0.0, f32::max) < 1.2,
+            "reels impulse repeats should stay controlled: {window_peaks:?}"
+        );
+    }
+
+    #[test]
+    fn reels_time_automation_stays_smooth_and_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let short_frame = reels_frame(70.0, 0.62, 0.7, 0.7);
+        let long_frame = reels_frame(420.0, 0.62, 0.7, 0.7);
+
+        let mut phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..48_000 {
+            phase += 330.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.25;
+            let frame = if (index / 6_000) % 2 == 0 {
+                &short_frame
+            } else {
+                &long_frame
+            };
+            let output = diffusion.process_sample_for_channel(0, input, frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+            if index > 6_000 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+
+        assert!(
+            max_step < 0.55,
+            "reels time automation produced a click-sized step: {max_step}"
+        );
+    }
+
+    #[test]
+    fn reels_silence_has_no_dc_runaway() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reels_frame(160.0, 1.0, 1.0, 1.0);
+
+        let mut peak = 0.0_f32;
+        for _ in 0..480_000 {
+            let output = diffusion.process_sample_for_channel(0, 0.0, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+            peak = peak.max(output.abs());
+        }
+
+        assert!(
+            peak < 0.000_001,
+            "reels silence should stay silent, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn reels_stereo_input_keeps_lr_difference() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = DiffusionFrame {
+            mode: DiffusionMode::Reels,
+            time_ms: 80.0,
+            feedback: 0.58,
+            size: 0.7,
+            decay: 0.65,
+            pre_delay_ms: 0.0,
+            damping: 0.45,
+            mix: 1.0,
+            stereo_offset: 0.4,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.7,
+            mode_fade: 1.0,
+        };
+
+        let mut left_energy = 0.0_f32;
+        let mut right_energy = 0.0_f32;
+        let mut diff_energy = 0.0_f32;
+        for index in 0..24_000 {
+            let left_in = (core::f32::consts::TAU * 220.0 * index as f32 / 48_000.0).sin() * 0.22;
+            let right_in = (core::f32::consts::TAU * 330.0 * index as f32 / 48_000.0).sin() * 0.18;
+            let left = diffusion.process_sample_for_channel(0, left_in, &frame);
+            let right = diffusion.process_sample_for_channel(1, right_in, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            assert!(left.abs() <= 8.0 && right.abs() <= 8.0);
+            if index > 6_000 {
+                left_energy += left * left;
+                right_energy += right * right;
+                diff_energy += (left - right) * (left - right);
+            }
+        }
+
+        assert!(left_energy > 0.000_1 && right_energy > 0.000_1);
+        assert!(
+            diff_energy > (left_energy + right_energy) * 0.08,
+            "reels should preserve stereo difference"
+        );
+    }
+
     fn collage_frame(
         time_ms: f32,
         feedback: f32,
@@ -2011,8 +2377,88 @@ mod tests {
         assert!(len >= 8);
         assert!(window > len);
         assert!(xfade > 0 && xfade <= len / 2);
-        assert!(reverse_feedback_gain(1.0, 1.0) <= 0.50);
+        assert!(reverse_feedback_gain(1.0, 1.0) <= 0.54);
         assert!(reverse_level_compensation(1.0, 1.0) < 1.0);
+    }
+
+    #[test]
+    fn reverse_max_feedback_for_ten_seconds_does_not_runaway() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reverse_frame(180.0, 1.0, 0.85, 1.0, 0.25, 1.0);
+
+        let mut peak = 0.0_f32;
+        let mut phase = 0.0_f32;
+        for index in 0..480_000 {
+            phase += 220.0 / 48_000.0;
+            let input = if index < 240_000 {
+                (phase * core::f32::consts::TAU).sin() * 0.24
+            } else {
+                0.0
+            };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+            peak = peak.max(output.abs());
+        }
+
+        assert!(peak < 1.8, "reverse max feedback peak was {peak}");
+    }
+
+    #[test]
+    fn reverse_size_extremes_and_stereo_offset_stay_safe() {
+        for (size, stereo_offset) in [(0.0, -0.5), (1.0, 0.5)] {
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(48_000.0);
+            let frame = reverse_frame(120.0, 0.72, size, 0.75, stereo_offset, 1.0);
+
+            let mut previous_l = 0.0_f32;
+            let mut previous_r = 0.0_f32;
+            let mut max_step = 0.0_f32;
+            for index in 0..36_000 {
+                let hit = index % 6_000 == 0;
+                let left_in = if hit { 0.85 } else { 0.0 };
+                let right_in = if hit { -0.55 } else { 0.0 };
+                let left = diffusion.process_sample_for_channel(0, left_in, &frame);
+                let right = diffusion.process_sample_for_channel(1, right_in, &frame);
+                assert!(left.is_finite() && right.is_finite());
+                assert!(left.abs() <= 8.0 && right.abs() <= 8.0);
+                if index > 4_000 {
+                    max_step = max_step
+                        .max((left - previous_l).abs())
+                        .max((right - previous_r).abs());
+                }
+                previous_l = left;
+                previous_r = right;
+            }
+
+            assert!(
+                max_step < 0.85,
+                "reverse size/stereo extreme clicked, size={size}, stereo={stereo_offset}, step={max_step}"
+            );
+        }
+    }
+
+    #[test]
+    fn reverse_time_and_size_automation_stays_finite() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let short_frame = reverse_frame(70.0, 0.52, 0.0, 0.35, -0.25, 1.0);
+        let long_frame = reverse_frame(900.0, 0.52, 1.0, 0.85, 0.25, 1.0);
+
+        let mut phase = 0.0_f32;
+        for index in 0..72_000 {
+            phase += 275.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.24;
+            let frame = if (index / 12_000) % 2 == 0 {
+                &short_frame
+            } else {
+                &long_frame
+            };
+            let output = diffusion.process_sample_for_channel(0, input, frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+        }
     }
 
     fn space_frame(size: f32, decay: f32, damping: f32, width: f32) -> DiffusionFrame {

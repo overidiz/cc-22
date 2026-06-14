@@ -24,6 +24,11 @@ pub enum PresetId {
     ReverseDream,
     TapeReels,
     InterferenceSwell,
+    HowlingTapeLead,
+    SwellReverseBloom,
+    ReelsDubEcho,
+    ReversePsychedelic,
+    SoftSwellSpace,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,7 +119,7 @@ pub struct EqPreset {
     pub high_cut_hz: f32,
 }
 
-pub const INTERNAL_PRESETS: [InternalPreset; 10] = [
+pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
     InternalPreset {
         id: PresetId::WarmTapeChorus,
         name: "Warm Tape Chorus",
@@ -795,6 +800,346 @@ pub const INTERNAL_PRESETS: [InternalPreset; 10] = [
             dry_wet: 1.0,
         },
     },
+    InternalPreset {
+        id: PresetId::HowlingTapeLead,
+        name: "Howling Tape Lead",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Howl,
+                drive: 0.46,
+                age: 0.0,
+                tone: 0.58,
+                noise: 0.0,
+                mix: 0.74,
+                output_trim_db: -2.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Phaser,
+                rate_hz: 0.42,
+                depth: 0.24,
+                shape: LfoShape::Sine,
+                delay_ms: 14.0,
+                feedback: 0.12,
+                width: 0.62,
+                phase_degrees: 140.0,
+                tone: 0.52,
+                mix: 0.24,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reels,
+                time_ms: 330.0,
+                feedback: 0.32,
+                size: 0.34,
+                decay: 0.30,
+                pre_delay_ms: 10.0,
+                damping: 0.50,
+                mix: 0.24,
+                tone: 0.50,
+                stereo_offset: 0.12,
+                width: 0.70,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Cassette,
+                wow_depth: 0.16,
+                wow_rate_hz: 0.36,
+                flutter_depth: 0.06,
+                flutter_rate_hz: 7.8,
+                random_drift: 0.12,
+                noise_amount: 0.10,
+                noise_color: 0.40,
+                degrade: 0.18,
+                stereo_spread: 0.62,
+                mix: 0.20,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 75.0,
+                low_shelf_gain_db: -1.4,
+                low_shelf_hz: 150.0,
+                mid_gain_db: 1.2,
+                mid_hz: 1_650.0,
+                mid_q: 0.85,
+                high_shelf_gain_db: -0.8,
+                high_shelf_hz: 8_200.0,
+                high_cut_hz: 16_000.0,
+            },
+            input_gain_db: -1.0,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::SwellReverseBloom,
+        name: "Swell Reverse Bloom",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Swell,
+                drive: 0.56,
+                age: 0.0,
+                tone: 0.48,
+                noise: 0.0,
+                mix: 0.78,
+                output_trim_db: -2.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Vibrato,
+                rate_hz: 1.15,
+                depth: 0.16,
+                shape: LfoShape::Sine,
+                delay_ms: 13.0,
+                feedback: 0.0,
+                width: 0.72,
+                phase_degrees: 160.0,
+                tone: 0.50,
+                mix: 0.22,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reverse,
+                time_ms: 720.0,
+                feedback: 0.26,
+                size: 0.50,
+                decay: 0.48,
+                pre_delay_ms: 20.0,
+                damping: 0.58,
+                mix: 0.34,
+                tone: 0.48,
+                stereo_offset: 0.18,
+                width: 0.82,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Cassette,
+                wow_depth: 0.12,
+                wow_rate_hz: 0.34,
+                flutter_depth: 0.04,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.08,
+                noise_amount: 0.08,
+                noise_color: 0.38,
+                degrade: 0.14,
+                stereo_spread: 0.66,
+                mix: 0.18,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 50.0,
+                low_shelf_gain_db: -0.6,
+                low_shelf_hz: 140.0,
+                mid_gain_db: -0.4,
+                mid_hz: 2_200.0,
+                mid_q: 0.75,
+                high_shelf_gain_db: -1.2,
+                high_shelf_hz: 7_800.0,
+                high_cut_hz: 16_500.0,
+            },
+            input_gain_db: -1.0,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ReelsDubEcho,
+        name: "Reels Dub Echo",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Sweet,
+                drive: 0.24,
+                age: 0.0,
+                tone: 0.46,
+                noise: 0.0,
+                mix: 0.60,
+                output_trim_db: -1.4,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Doubler,
+                rate_hz: 0.24,
+                depth: 0.10,
+                shape: LfoShape::Sine,
+                delay_ms: 22.0,
+                feedback: 0.04,
+                width: 0.66,
+                phase_degrees: 120.0,
+                tone: 0.46,
+                mix: 0.18,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reels,
+                time_ms: 520.0,
+                feedback: 0.48,
+                size: 0.44,
+                decay: 0.46,
+                pre_delay_ms: 12.0,
+                damping: 0.64,
+                mix: 0.36,
+                tone: 0.40,
+                stereo_offset: 0.20,
+                width: 0.78,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Broken,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.40,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.20,
+                noise_amount: 0.12,
+                noise_color: 0.42,
+                degrade: 0.22,
+                stereo_spread: 0.70,
+                mix: 0.18,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 60.0,
+                low_shelf_gain_db: -1.0,
+                low_shelf_hz: 130.0,
+                mid_gain_db: -0.8,
+                mid_hz: 2_000.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: -2.2,
+                high_shelf_hz: 6_500.0,
+                high_cut_hz: 13_000.0,
+            },
+            input_gain_db: -1.0,
+            output_gain_db: -2.5,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ReversePsychedelic,
+        name: "Reverse Psychedelic",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Drive,
+                drive: 0.34,
+                age: 0.0,
+                tone: 0.56,
+                noise: 0.0,
+                mix: 0.66,
+                output_trim_db: -1.8,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Phaser,
+                rate_hz: 0.58,
+                depth: 0.38,
+                shape: LfoShape::Sine,
+                delay_ms: 14.0,
+                feedback: 0.18,
+                width: 0.76,
+                phase_degrees: 170.0,
+                tone: 0.54,
+                mix: 0.34,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reverse,
+                time_ms: 560.0,
+                feedback: 0.34,
+                size: 0.36,
+                decay: 0.42,
+                pre_delay_ms: 18.0,
+                damping: 0.50,
+                mix: 0.32,
+                tone: 0.54,
+                stereo_offset: 0.26,
+                width: 0.86,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Interference,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.40,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.22,
+                noise_amount: 0.14,
+                noise_color: 0.60,
+                degrade: 0.18,
+                stereo_spread: 0.74,
+                mix: 0.16,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 55.0,
+                low_shelf_gain_db: -0.8,
+                low_shelf_hz: 145.0,
+                mid_gain_db: 0.8,
+                mid_hz: 1_250.0,
+                mid_q: 0.9,
+                high_shelf_gain_db: -1.0,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 15_500.0,
+            },
+            input_gain_db: -1.0,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::SoftSwellSpace,
+        name: "Soft Swell Space",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Swell,
+                drive: 0.36,
+                age: 0.0,
+                tone: 0.42,
+                noise: 0.0,
+                mix: 0.66,
+                output_trim_db: -1.5,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Chorus,
+                rate_hz: 0.24,
+                depth: 0.22,
+                shape: LfoShape::Sine,
+                delay_ms: 20.0,
+                feedback: 0.06,
+                width: 0.80,
+                phase_degrees: 180.0,
+                tone: 0.48,
+                mix: 0.28,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Space,
+                time_ms: 440.0,
+                feedback: 0.24,
+                size: 0.62,
+                decay: 0.56,
+                pre_delay_ms: 26.0,
+                damping: 0.60,
+                mix: 0.30,
+                tone: 0.46,
+                stereo_offset: 0.10,
+                width: 0.90,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Tape,
+                wow_depth: 0.14,
+                wow_rate_hz: 0.30,
+                flutter_depth: 0.05,
+                flutter_rate_hz: 6.8,
+                random_drift: 0.10,
+                noise_amount: 0.06,
+                noise_color: 0.36,
+                degrade: 0.12,
+                stereo_spread: 0.70,
+                mix: 0.16,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 45.0,
+                low_shelf_gain_db: -0.4,
+                low_shelf_hz: 135.0,
+                mid_gain_db: -0.6,
+                mid_hz: 2_400.0,
+                mid_q: 0.75,
+                high_shelf_gain_db: -1.4,
+                high_shelf_hz: 7_200.0,
+                high_cut_hz: 16_000.0,
+            },
+            input_gain_db: -0.5,
+            output_gain_db: -1.8,
+            dry_wet: 1.0,
+        },
+    },
 ];
 
 pub fn internal_presets() -> &'static [InternalPreset] {
@@ -943,11 +1288,13 @@ mod tests {
     fn exposes_named_presets_without_reordering_existing_ones() {
         let presets = internal_presets();
 
-        assert_eq!(presets.len(), 10);
+        assert_eq!(presets.len(), 15);
         assert_eq!(presets[0].name, "Warm Tape Chorus");
         assert_eq!(presets[4].name, "Clean Widen");
         assert_eq!(presets[5].name, "Sweet Console");
         assert_eq!(presets[9].name, "Interference Swell");
+        assert_eq!(presets[10].name, "Howling Tape Lead");
+        assert_eq!(presets[14].name, "Soft Swell Space");
     }
 
     #[test]
@@ -1050,5 +1397,62 @@ mod tests {
             interference_swell.values.texture.mode,
             TextureMode::Interference
         );
+
+        let howling_tape_lead = find_preset(PresetId::HowlingTapeLead).expect("preset exists");
+        assert_eq!(howling_tape_lead.values.character.mode, CharacterMode::Howl);
+        assert_eq!(howling_tape_lead.values.movement.mode, MovementMode::Phaser);
+        assert_eq!(
+            howling_tape_lead.values.diffusion.mode,
+            DiffusionMode::Reels
+        );
+        assert_eq!(howling_tape_lead.values.texture.mode, TextureMode::Cassette);
+
+        let swell_reverse_bloom = find_preset(PresetId::SwellReverseBloom).expect("preset exists");
+        assert_eq!(
+            swell_reverse_bloom.values.character.mode,
+            CharacterMode::Swell
+        );
+        assert_eq!(
+            swell_reverse_bloom.values.movement.mode,
+            MovementMode::Vibrato
+        );
+        assert_eq!(
+            swell_reverse_bloom.values.diffusion.mode,
+            DiffusionMode::Reverse
+        );
+        assert_eq!(
+            swell_reverse_bloom.values.texture.mode,
+            TextureMode::Cassette
+        );
+
+        let reels_dub_echo = find_preset(PresetId::ReelsDubEcho).expect("preset exists");
+        assert_eq!(reels_dub_echo.values.character.mode, CharacterMode::Sweet);
+        assert_eq!(reels_dub_echo.values.movement.mode, MovementMode::Doubler);
+        assert_eq!(reels_dub_echo.values.diffusion.mode, DiffusionMode::Reels);
+        assert_eq!(reels_dub_echo.values.texture.mode, TextureMode::Broken);
+
+        let reverse_psychedelic = find_preset(PresetId::ReversePsychedelic).expect("preset exists");
+        assert_eq!(
+            reverse_psychedelic.values.character.mode,
+            CharacterMode::Drive
+        );
+        assert_eq!(
+            reverse_psychedelic.values.movement.mode,
+            MovementMode::Phaser
+        );
+        assert_eq!(
+            reverse_psychedelic.values.diffusion.mode,
+            DiffusionMode::Reverse
+        );
+        assert_eq!(
+            reverse_psychedelic.values.texture.mode,
+            TextureMode::Interference
+        );
+
+        let soft_swell_space = find_preset(PresetId::SoftSwellSpace).expect("preset exists");
+        assert_eq!(soft_swell_space.values.character.mode, CharacterMode::Swell);
+        assert_eq!(soft_swell_space.values.movement.mode, MovementMode::Chorus);
+        assert_eq!(soft_swell_space.values.diffusion.mode, DiffusionMode::Space);
+        assert_eq!(soft_swell_space.values.texture.mode, TextureMode::Tape);
     }
 }

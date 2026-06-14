@@ -7,8 +7,10 @@ use crate::{
         eq::Eq,
         movement::Movement,
         test_utils::{
-            assert_audio_sane, max_abs_difference, with_stereo_buffer, TestSignal,
-            TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE,
+            assert_audio_sane, assert_finite_buffer, assert_peak_below, make_sine,
+            make_stereo_different, make_stereo_impulse, make_white_noise, max_abs_difference, peak,
+            process_test_signal, render_mode_for_seconds, with_stereo_buffer, TestSignal,
+            MAX_EXPECTED_ABS_SAMPLE, TEN_SECONDS_SAMPLES, TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE,
         },
         texture::Texture,
         Processor,
@@ -724,6 +726,235 @@ fn new_diffusion_modes_validate_active_settings_mix_and_bypass() {
 }
 
 #[test]
+fn target_character_modes_cover_long_stability_signals_and_parameter_ranges() {
+    for (mode_id, mode) in [
+        ("howl", CharacterMode::Howl),
+        ("swell", CharacterMode::Swell),
+    ] {
+        for (signal_id, input) in target_test_signals(TEN_SECONDS_SAMPLES) {
+            let params = target_character_params(mode, 1.0, false, ParamLevel::Mid);
+            let mut character = Character::default();
+            character.prepare(TEST_SAMPLE_RATE);
+            character.reset();
+
+            let output = process_test_signal(input, |buffer| {
+                character.process_block(buffer, &params);
+            });
+
+            assert_finite_buffer(&format!("character/{mode_id}/{signal_id}/finite"), &output);
+            assert_peak_below(
+                &format!("character/{mode_id}/{signal_id}/peak"),
+                &output,
+                MAX_EXPECTED_ABS_SAMPLE + 0.000_1,
+            );
+        }
+
+        for level in [ParamLevel::Min, ParamLevel::Mid, ParamLevel::Max] {
+            let params = target_character_params(mode, 1.0, false, level);
+            let mut character = Character::default();
+            character.prepare(TEST_SAMPLE_RATE);
+            character.reset();
+            let output = render_mode_for_seconds(
+                1.0,
+                TEST_SAMPLE_RATE,
+                |samples, sample_rate| make_sine(samples, sample_rate, 440.0, 0.28),
+                |buffer| character.process_block(buffer, &params),
+            );
+            assert_audio_sane(&format!("character/{mode_id}/params/{level:?}"), &output);
+        }
+    }
+}
+
+#[test]
+fn target_diffusion_modes_cover_long_stability_signals_and_parameter_ranges() {
+    for (mode_id, mode) in [
+        ("reels", DiffusionMode::Reels),
+        ("reverse", DiffusionMode::Reverse),
+    ] {
+        for (signal_id, input) in target_test_signals(TEN_SECONDS_SAMPLES) {
+            let params = target_diffusion_params(mode, 1.0, false, ParamLevel::Mid);
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(TEST_SAMPLE_RATE);
+            diffusion.reset();
+
+            let output = process_test_signal(input, |buffer| {
+                diffusion.process_block(buffer, &params);
+            });
+
+            assert_finite_buffer(&format!("diffusion/{mode_id}/{signal_id}/finite"), &output);
+            assert_peak_below(
+                &format!("diffusion/{mode_id}/{signal_id}/peak"),
+                &output,
+                MAX_EXPECTED_ABS_SAMPLE + 0.000_1,
+            );
+        }
+
+        for level in [ParamLevel::Min, ParamLevel::Mid, ParamLevel::Max] {
+            let params = target_diffusion_params(mode, 1.0, false, level);
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(TEST_SAMPLE_RATE);
+            diffusion.reset();
+            let output = render_mode_for_seconds(
+                10.0,
+                TEST_SAMPLE_RATE,
+                |samples, sample_rate| make_sine(samples, sample_rate, 110.0, 0.24),
+                |buffer| diffusion.process_block(buffer, &params),
+            );
+            assert_audio_sane(&format!("diffusion/{mode_id}/params/{level:?}"), &output);
+        }
+    }
+}
+
+#[test]
+fn target_modes_validate_mix_endpoints_bypass_and_audible_wet_output() {
+    let dry = make_sine(TEN_SECONDS_SAMPLES, TEST_SAMPLE_RATE, 440.0, 0.28);
+
+    for (mode_id, mode) in [
+        ("howl", CharacterMode::Howl),
+        ("swell", CharacterMode::Swell),
+    ] {
+        let mix0 = render_character_mode(mode, 0.0, false, dry.clone());
+        let mix50 = render_character_mode(mode, 0.5, false, dry.clone());
+        let mix100 = render_character_mode(mode, 1.0, false, dry.clone());
+        let bypass = render_character_mode(mode, 1.0, true, dry.clone());
+
+        assert_audio_sane(&format!("character/{mode_id}/mix50"), &mix50);
+        assert!(max_abs_difference(&mix0, &dry) < 0.000_001);
+        assert!(max_abs_difference(&bypass, &dry) < 0.000_001);
+        assert!(
+            max_abs_difference(&mix100, &dry) > 0.001 || peak(&mix100) > peak(&dry) * 1.02,
+            "character/{mode_id} mix 100 should be audibly different from dry"
+        );
+    }
+
+    for (mode_id, mode) in [
+        ("reels", DiffusionMode::Reels),
+        ("reverse", DiffusionMode::Reverse),
+    ] {
+        let mix0 = render_diffusion_mode(mode, 0.0, false, dry.clone());
+        let mix50 = render_diffusion_mode(mode, 0.5, false, dry.clone());
+        let mix100 = render_diffusion_mode(mode, 1.0, false, dry.clone());
+        let bypass = render_diffusion_mode(mode, 1.0, true, dry.clone());
+
+        assert_audio_sane(&format!("diffusion/{mode_id}/mix50"), &mix50);
+        assert!(max_abs_difference(&mix0, &dry) < 0.000_001);
+        assert!(max_abs_difference(&bypass, &dry) < 0.000_001);
+        assert!(
+            max_abs_difference(&mix100, &dry) > 0.001 || peak(&mix100) > peak(&dry) * 1.02,
+            "diffusion/{mode_id} mix 100 should be audibly different from dry"
+        );
+    }
+}
+
+#[test]
+fn target_modes_survive_continuous_audio_mode_switching() {
+    let block_samples = TEST_BLOCK_SAMPLES;
+    let blocks = TEN_SECONDS_SAMPLES / block_samples;
+
+    let mut character = Character::default();
+    character.prepare(TEST_SAMPLE_RATE);
+    character.reset();
+    for block in 0..blocks {
+        let mode = if block % 2 == 0 {
+            CharacterMode::Howl
+        } else {
+            CharacterMode::Swell
+        };
+        let params = target_character_params(mode, 1.0, false, ParamLevel::Mid);
+        let mut audio = make_white_noise(block_samples, 0.12);
+        with_stereo_buffer(&mut audio, |buffer| {
+            character.process_block(buffer, &params);
+        });
+        assert_audio_sane("character/howl-swell/switch", &audio);
+    }
+
+    let mut diffusion = Diffusion::default();
+    diffusion.prepare(TEST_SAMPLE_RATE);
+    diffusion.reset();
+    for block in 0..blocks {
+        let mode = if block % 2 == 0 {
+            DiffusionMode::Reels
+        } else {
+            DiffusionMode::Reverse
+        };
+        let params = target_diffusion_params(mode, 1.0, false, ParamLevel::Mid);
+        let mut audio = make_white_noise(block_samples, 0.12);
+        with_stereo_buffer(&mut audio, |buffer| {
+            diffusion.process_block(buffer, &params);
+        });
+        assert_audio_sane("diffusion/reels-reverse/switch", &audio);
+    }
+}
+
+#[test]
+fn reels_reverse_switching_avoids_large_clicks() {
+    let mut diffusion = Diffusion::default();
+    diffusion.prepare(TEST_SAMPLE_RATE);
+    diffusion.reset();
+
+    let mut previous = 0.0_f32;
+    let mut max_step = 0.0_f32;
+    for block in 0..24 {
+        let mode = if block % 2 == 0 {
+            DiffusionMode::Reels
+        } else {
+            DiffusionMode::Reverse
+        };
+        let params = target_diffusion_params(mode, 1.0, false, ParamLevel::Mid);
+        let mut audio = make_sine(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE, 220.0, 0.24);
+        with_stereo_buffer(&mut audio, |buffer| {
+            diffusion.process_block(buffer, &params);
+        });
+        assert_audio_sane(&format!("diffusion/reels-reverse-click/{mode:?}"), &audio);
+
+        for sample in audio[0].iter().copied().skip(64) {
+            max_step = max_step.max((sample - previous).abs());
+            previous = sample;
+        }
+    }
+
+    assert!(
+        max_step < 1.0,
+        "Reels <-> Reverse switching produced a large sample step: {max_step}"
+    );
+}
+
+#[test]
+fn howl_survives_fuzz_howl_sweet_switch_without_large_click() {
+    let mut character = Character::default();
+    character.prepare(TEST_SAMPLE_RATE);
+    character.reset();
+
+    let sequence = [
+        CharacterMode::Fuzz,
+        CharacterMode::Howl,
+        CharacterMode::Sweet,
+        CharacterMode::Howl,
+    ];
+    let mut previous = 0.0_f32;
+    let mut max_step = 0.0_f32;
+
+    for mode in sequence {
+        let params = target_character_params(mode, 1.0, false, ParamLevel::Max);
+        let mut audio = make_sine(TEST_BLOCK_SAMPLES * 2, TEST_SAMPLE_RATE, 220.0, 0.24);
+        with_stereo_buffer(&mut audio, |buffer| {
+            character.process_block(buffer, &params);
+        });
+        assert_audio_sane(&format!("character/fuzz-howl-sweet/{mode:?}"), &audio);
+
+        for sample in audio[0].iter().copied().skip(256) {
+            max_step = max_step.max((sample - previous).abs());
+            previous = sample;
+        }
+    }
+
+    assert!(
+        max_step < 1.25,
+        "Fuzz -> Howl -> Sweet switching produced a large sample step: {max_step}"
+    );
+}
+
+#[test]
 fn new_texture_modes_validate_active_settings_mix_and_bypass() {
     for (mode_id, mode) in [
         ("filter", TextureMode::Filter),
@@ -955,6 +1186,131 @@ fn diffusion_reset_makes_reverb_repeatable() {
         max_abs_difference(&first, &second) < 0.000_001,
         "reverb output changed after reset for identical input"
     );
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ParamLevel {
+    Min,
+    Mid,
+    Max,
+}
+
+fn target_test_signals(samples: usize) -> Vec<(&'static str, [Vec<f32>; 2])> {
+    vec![
+        (
+            "silence",
+            TestSignal::Silence.render(samples, TEST_SAMPLE_RATE),
+        ),
+        (
+            "sine-440",
+            make_sine(samples, TEST_SAMPLE_RATE, 440.0, 0.28),
+        ),
+        (
+            "sine-110",
+            make_sine(samples, TEST_SAMPLE_RATE, 110.0, 0.28),
+        ),
+        ("impulse", make_stereo_impulse(samples)),
+        ("white-noise", make_white_noise(samples, 0.18)),
+        (
+            "stereo-different-lr",
+            make_stereo_different(samples, TEST_SAMPLE_RATE),
+        ),
+    ]
+}
+
+fn render_character_mode(
+    mode: CharacterMode,
+    mix: f32,
+    bypass: bool,
+    input: [Vec<f32>; 2],
+) -> [Vec<f32>; 2] {
+    let params = target_character_params(mode, mix, bypass, ParamLevel::Mid);
+    let mut character = Character::default();
+    character.prepare(TEST_SAMPLE_RATE);
+    character.reset();
+
+    let mut warmup = input.clone();
+    with_stereo_buffer(&mut warmup, |buffer| {
+        character.process_block(buffer, &params);
+    });
+
+    process_test_signal(input, |buffer| {
+        character.process_block(buffer, &params);
+    })
+}
+
+fn render_diffusion_mode(
+    mode: DiffusionMode,
+    mix: f32,
+    bypass: bool,
+    input: [Vec<f32>; 2],
+) -> [Vec<f32>; 2] {
+    let params = target_diffusion_params(mode, mix, bypass, ParamLevel::Mid);
+    let mut diffusion = Diffusion::default();
+    diffusion.prepare(TEST_SAMPLE_RATE);
+    diffusion.reset();
+
+    let mut warmup = input.clone();
+    with_stereo_buffer(&mut warmup, |buffer| {
+        diffusion.process_block(buffer, &params);
+    });
+
+    process_test_signal(input, |buffer| {
+        diffusion.process_block(buffer, &params);
+    })
+}
+
+fn target_character_params(
+    mode: CharacterMode,
+    mix: f32,
+    bypass: bool,
+    level: ParamLevel,
+) -> CharacterParams {
+    let mut params = CharacterParams::default();
+    params.mode = EnumParam::new("Character Mode", mode);
+    params.bypass = BoolParam::new("Character Bypass", bypass);
+    let (drive, age, tone, noise, trim) = match level {
+        ParamLevel::Min => (0.0, 0.0, 0.0, 0.0, -12.0),
+        ParamLevel::Mid => (0.55, 0.35, 0.55, 0.04, -3.0),
+        ParamLevel::Max => (1.0, 1.0, 1.0, 0.25, 0.0),
+    };
+    params.drive = float_param("Drive", drive);
+    params.age = float_param("Age", age);
+    params.tone = float_param("Tone", tone);
+    params.noise = float_param("Noise", noise);
+    params.mix = float_param("Mix", mix);
+    params.output_trim = float_param("Output Trim", trim);
+    params.reset_smoothers();
+    params
+}
+
+fn target_diffusion_params(
+    mode: DiffusionMode,
+    mix: f32,
+    bypass: bool,
+    level: ParamLevel,
+) -> DiffusionParams {
+    let mut params = DiffusionParams::default();
+    params.mode = EnumParam::new("Diffusion Mode", mode);
+    params.bypass = BoolParam::new("Diffusion Bypass", bypass);
+    let (time, feedback, size, decay, pre_delay, damping, tone, stereo_offset, width) = match level
+    {
+        ParamLevel::Min => (1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.5, 0.0),
+        ParamLevel::Mid => (320.0, 0.42, 0.58, 0.56, 18.0, 0.45, 0.52, 0.18, 0.85),
+        ParamLevel::Max => (2_000.0, 0.95, 1.0, 1.0, 120.0, 1.0, 1.0, 0.5, 1.0),
+    };
+    params.time = float_param("Time", time);
+    params.feedback = float_param("Feedback", feedback);
+    params.size = float_param("Size", size);
+    params.decay = float_param("Decay", decay);
+    params.pre_delay = float_param("Pre-delay", pre_delay);
+    params.damping = float_param("Damping", damping);
+    params.mix = float_param("Mix", mix);
+    params.tone = float_param("Tone", tone);
+    params.stereo_offset = float_param("Stereo Offset", stereo_offset);
+    params.width = float_param("Width", width);
+    params.reset_smoothers();
+    params
 }
 
 fn process_with_params(mut audio: [Vec<f32>; 2], params: &Cc22Params) -> [Vec<f32>; 2] {

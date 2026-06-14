@@ -839,11 +839,18 @@ fn render_module_content(
         ChainModule::Character => {
             let mode = params.character.mode.value();
             let (first_label, first_param, first_tip) = match mode {
-                CharacterMode::Swell => (
-                    "SENS",
+                CharacterMode::Howl => (
+                    "RESO",
                     &params.character.drive,
                     Some(
-                        "SENS controls the real Drive parameter as the swell detector sensitivity.",
+                        "RESO controls the real Drive parameter: input push, resonant howl, and feedback-like aggression.",
+                    ),
+                ),
+                CharacterMode::Swell => (
+                    "ATTACK",
+                    &params.character.drive,
+                    Some(
+                        "ATTACK controls the real Drive parameter: swell attack time, transient removal, and retrigger sensitivity.",
                     ),
                 ),
                 CharacterMode::Cassette => (
@@ -854,6 +861,18 @@ fn render_module_content(
                 _ => ("DRIVE", &params.character.drive, None),
             };
             let (second_label, second_param, second_tip) = match mode {
+                CharacterMode::Howl => (
+                    "FORMANT",
+                    &params.character.tone,
+                    Some(
+                        "FORMANT controls the real Tone parameter: vocal formant center and final brightness.",
+                    ),
+                ),
+                CharacterMode::Swell => (
+                    "TONE",
+                    &params.character.tone,
+                    Some("TONE controls the real Tone parameter for post-swell brightness."),
+                ),
                 CharacterMode::Cassette => (
                     "AGE",
                     &params.character.age,
@@ -949,6 +968,7 @@ fn render_module_content(
             let mode = params.diffusion.mode.value();
             let first = diffusion_first_control(mode, params);
             let second = diffusion_second_control(mode, params);
+            let (first_slider, second_slider) = diffusion_secondary_controls(mode, params);
             ui.horizontal(|ui| {
                 knob_with_tip(
                     ui,
@@ -973,8 +993,8 @@ fn render_module_content(
             secondary_slider_pair(
                 ui,
                 setter,
-                (&params.diffusion.mix, "MIX", None),
-                (&params.diffusion.width, "WIDTH", None),
+                (first_slider.param, first_slider.label, first_slider.tip),
+                (second_slider.param, second_slider.label, second_slider.tip),
                 spec.accent,
                 theme,
             );
@@ -1123,6 +1143,20 @@ fn diffusion_first_control<'a>(
     params: &'a Cc22Params,
 ) -> FloatControlSpec<'a> {
     match mode {
+        DiffusionMode::Reels => FloatControlSpec {
+            label: "TIME",
+            param: &params.diffusion.time,
+            tip: Some(
+                "TIME controls the real Time parameter: smoothed base delay time for the tape echo.",
+            ),
+        },
+        DiffusionMode::Reverse => FloatControlSpec {
+            label: "TIME",
+            param: &params.diffusion.time,
+            tip: Some(
+                "TIME controls the real Time parameter: reverse capture window and delay feel.",
+            ),
+        },
         DiffusionMode::Reverb | DiffusionMode::Space | DiffusionMode::Collage => FloatControlSpec {
             label: "SIZE",
             param: &params.diffusion.size,
@@ -1141,6 +1175,20 @@ fn diffusion_second_control<'a>(
     params: &'a Cc22Params,
 ) -> FloatControlSpec<'a> {
     match mode {
+        DiffusionMode::Reels => FloatControlSpec {
+            label: "WOW/DRIFT",
+            param: &params.diffusion.size,
+            tip: Some(
+                "WOW/DRIFT controls the real Size parameter: tape wow, flutter, and random drift amount.",
+            ),
+        },
+        DiffusionMode::Reverse => FloatControlSpec {
+            label: "LENGTH",
+            param: &params.diffusion.size,
+            tip: Some(
+                "LENGTH controls the real Size parameter: reverse segment length and density.",
+            ),
+        },
         DiffusionMode::Reverb | DiffusionMode::Space => FloatControlSpec {
             label: "DECAY",
             param: &params.diffusion.decay,
@@ -1158,6 +1206,48 @@ fn diffusion_second_control<'a>(
             param: &params.diffusion.feedback,
             tip: None,
         },
+    }
+}
+
+fn diffusion_secondary_controls<'a>(
+    mode: DiffusionMode,
+    params: &'a Cc22Params,
+) -> (FloatControlSpec<'a>, FloatControlSpec<'a>) {
+    let mix = FloatControlSpec {
+        label: "MIX",
+        param: &params.diffusion.mix,
+        tip: Some("MIX controls the real Mix parameter: dry/wet blend."),
+    };
+
+    match mode {
+        DiffusionMode::Reels => (
+            mix,
+            FloatControlSpec {
+                label: "REPEATS",
+                param: &params.diffusion.feedback,
+                tip: Some(
+                    "REPEATS controls the real Feedback parameter: amount of colored tape echo returned to the feedback path.",
+                ),
+            },
+        ),
+        DiffusionMode::Reverse => (
+            mix,
+            FloatControlSpec {
+                label: "REPEATS",
+                param: &params.diffusion.feedback,
+                tip: Some(
+                    "REPEATS controls the real Feedback parameter: how much reversed signal is written back for repeats.",
+                ),
+            },
+        ),
+        _ => (
+            mix,
+            FloatControlSpec {
+                label: "WIDTH",
+                param: &params.diffusion.width,
+                tip: None,
+            },
+        ),
     }
 }
 
