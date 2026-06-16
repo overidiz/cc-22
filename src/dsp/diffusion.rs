@@ -398,7 +398,7 @@ impl Diffusion {
         if self.reels_delay_time_state[index] <= 0.0 {
             self.reels_delay_time_state[index] = target_delay_ms;
         }
-        let time_alpha = (1.0 / (sample_rate * 0.045)).clamp(0.0, 1.0);
+        let time_alpha = (1.0 / (sample_rate * 0.080)).clamp(0.0, 1.0);
         self.reels_delay_time_state[index] +=
             (target_delay_ms - self.reels_delay_time_state[index]) * time_alpha;
 
@@ -439,9 +439,9 @@ impl Diffusion {
         let width = frame.width.clamp(0.0, 1.0);
         let wet = sanitize_sample(((colored + other) * 0.5 * (1.0 - width)) + colored * width);
 
-        let feedback =
-            frame.feedback.clamp(0.0, 0.91) * (0.72 + frame.decay.clamp(0.0, 1.0) * 0.18);
-        self.delay.buffers[index][write_pos] = sanitize_sample(sample + colored * feedback);
+        let feedback_gain =
+            frame.feedback.clamp(0.0, 0.94) * (0.65 + frame.decay.clamp(0.0, 1.0) * 0.25);
+        self.delay.buffers[index][write_pos] = sanitize_sample(sample + colored * feedback_gain);
         self.delay.write_positions[index] = (write_pos + 1) % buf_len;
 
         sanitize_sample(wet * reels_level_compensation(frame.feedback, frame.decay))
@@ -626,7 +626,7 @@ impl Diffusion {
     fn process_reverse(&mut self, channel: usize, sample: f32, frame: &DiffusionFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         let buf_len = self.reverse.buffers[index].len();
-        if buf_len < 4 {
+        if buf_len < 8 {
             return sample;
         }
 
@@ -635,62 +635,43 @@ impl Diffusion {
         }
 
         let write_pos = self.reverse.write_positions[index];
-        let wet = {
-            let buffer = &self.reverse.buffers[index];
-            let current_pos = self.reverse.playback_positions[index];
-            let current_len = self.reverse.segment_lengths[index];
-            let current =
-                reverse_read_sample(
-                    buffer,
-                    self.reverse.segment_starts[index],
-                    current_len,
-                    current_pos,
-                ) * reverse_envelope(current_pos, current_len, frame.decay, self.sample_rate);
-            let shadow = read_reverse_shadow_segment(
-                buffer,
-                self.reverse.segment_starts[index],
-                current_len,
-                current_pos,
-                frame,
-            ) * reverse_shadow_gain(frame);
-            let current = sanitize_sample(current + shadow);
 
-            let crossfade_len = self.reverse.crossfade_length_samples[index];
-            if crossfade_len == 0 {
-                current
-            } else {
-                let previous_pos = self.reverse.previous_playback_positions[index];
-                let previous_len = self.reverse.previous_segment_lengths[index];
-                let previous =
-                    reverse_read_sample(
-                        buffer,
-                        self.reverse.previous_segment_starts[index],
-                        previous_len,
-                        previous_pos,
-                    ) * reverse_envelope(previous_pos, previous_len, frame.decay, self.sample_rate);
-                let previous_shadow = read_reverse_shadow_segment(
-                    buffer,
-                    self.reverse.previous_segment_starts[index],
-                    previous_len,
-                    previous_pos,
-                    frame,
-                ) * reverse_shadow_gain(frame);
-                let previous = sanitize_sample(previous + previous_shadow);
-                let amount = reverse_crossfade_amount(
-                    self.reverse.crossfade_position_samples[index] as f32 / crossfade_len as f32,
-                );
-                equal_power_crossfade(previous, current, amount)
-            }
-        };
+        let current_pos = self.reverse.playback_positions[index];
+        let current_len = self.reverse.segment_lengths[index];
+        let current_sample = reverse_read_sample(
+            &self.reverse.buffers[index],
+            self.reverse.segment_starts[index],
+            current_len,
+            current_pos,
+        );
+        let current_env =
+            reverse_playback_envelope(current_pos, current_len, frame.decay, self.sample_rate);
+        let mut wet = sanitize_sample(current_sample * current_env);
 
-        if self.reverse.crossfade_length_samples[index] > 0 {
+        let crossfade_len = self.reverse.crossfade_length_samples[index];
+        if crossfade_len > 0 {
+            let prev_pos = self.reverse.previous_playback_positions[index];
+            let prev_len = self.reverse.previous_segment_lengths[index];
+            let prev_sample = reverse_read_sample(
+                &self.reverse.buffers[index],
+                self.reverse.previous_segment_starts[index],
+                prev_len,
+                prev_pos,
+            );
+            let prev_env =
+                reverse_playback_envelope(prev_pos, prev_len, frame.decay, self.sample_rate);
+            let prev_wet = sanitize_sample(prev_sample * prev_env);
+            let amount =
+                self.reverse.crossfade_position_samples[index] as f32 / crossfade_len as f32;
+            wet = equal_power_crossfade(prev_wet, wet, amount);
+        }
+
+        if crossfade_len > 0 {
             self.reverse.previous_playback_positions[index] =
                 (self.reverse.previous_playback_positions[index] + 1)
                     .min(self.reverse.previous_segment_lengths[index].saturating_sub(1));
             self.reverse.crossfade_position_samples[index] += 1;
-            if self.reverse.crossfade_position_samples[index]
-                >= self.reverse.crossfade_length_samples[index]
-            {
+            if self.reverse.crossfade_position_samples[index] >= crossfade_len {
                 self.reverse.crossfade_position_samples[index] = 0;
                 self.reverse.crossfade_length_samples[index] = 0;
             }
@@ -715,8 +696,8 @@ impl Diffusion {
             self.sample_rate,
             &mut self.reverse.feedback_filter_state[index],
         );
-        let feedback_sample = reverse_feedback_saturate(feedback_toned * feedback, frame.decay);
-        self.reverse.buffers[index][write_pos] = sanitize_sample(sample + feedback_sample);
+        let fb_saturated = reverse_feedback_saturate(feedback_toned * feedback, frame.decay);
+        self.reverse.buffers[index][write_pos] = sanitize_sample(sample + fb_saturated);
         self.reverse.write_positions[index] = (write_pos + 1) % buf_len;
 
         self.reverse.playback_positions[index] += 1;
@@ -734,24 +715,28 @@ impl Diffusion {
         buf_len: usize,
         crossfade: bool,
     ) {
-        let previous_start = self.reverse.segment_starts[channel];
-        let previous_len = self.reverse.segment_lengths[channel];
         let segment_len = reverse_segment_length_samples(frame, self.sample_rate, buf_len);
         let window = reverse_window_samples(channel, frame, self.sample_rate, buf_len, segment_len);
         let write_pos = self.reverse.write_positions[channel];
         let start = wrap_sub(write_pos, window, buf_len);
 
-        if crossfade && previous_len > 0 {
-            let crossfade_len =
-                reverse_crossfade_samples(segment_len.min(previous_len), self.sample_rate)
-                    .min(segment_len)
-                    .min(previous_len);
-            self.reverse.previous_segment_starts[channel] = previous_start;
-            self.reverse.previous_segment_lengths[channel] = previous_len;
-            self.reverse.previous_playback_positions[channel] =
-                previous_len.saturating_sub(crossfade_len.max(1));
-            self.reverse.crossfade_position_samples[channel] = 0;
-            self.reverse.crossfade_length_samples[channel] = crossfade_len.max(1);
+        if crossfade {
+            let prev_len = self.reverse.segment_lengths[channel];
+            if prev_len > 0 {
+                let xfade_len =
+                    reverse_crossfade_samples(segment_len.min(prev_len), self.sample_rate)
+                        .min(segment_len)
+                        .min(prev_len)
+                        .max(1);
+
+                self.reverse.previous_segment_starts[channel] =
+                    self.reverse.segment_starts[channel];
+                self.reverse.previous_segment_lengths[channel] = prev_len;
+                self.reverse.previous_playback_positions[channel] =
+                    prev_len.saturating_sub(xfade_len.max(1));
+                self.reverse.crossfade_position_samples[channel] = 0;
+                self.reverse.crossfade_length_samples[channel] = xfade_len;
+            }
         } else {
             self.reverse.crossfade_position_samples[channel] = 0;
             self.reverse.crossfade_length_samples[channel] = 0;
@@ -1168,30 +1153,6 @@ fn reverse_read_sample(
 }
 
 #[inline]
-fn read_reverse_shadow_segment(
-    buffer: &[f32],
-    segment_start: usize,
-    segment_len: usize,
-    playback_pos: usize,
-    frame: &DiffusionFrame,
-) -> f32 {
-    if buffer.is_empty() || segment_len == 0 {
-        return 0.0;
-    }
-
-    let smear = (0.18 + frame.size.clamp(0.0, 1.0) * 0.32) * segment_len as f32;
-    let shifted_pos = playback_pos as f32 + smear;
-    let wrapped_pos = shifted_pos.rem_euclid(segment_len as f32);
-    let index_a = wrapped_pos.floor() as usize;
-    let index_b = (index_a + 1) % segment_len;
-    let frac = wrapped_pos - wrapped_pos.floor();
-    let a = reverse_read_sample(buffer, segment_start, segment_len, index_a);
-    let b = reverse_read_sample(buffer, segment_start, segment_len, index_b);
-
-    sanitize_sample((a * (1.0 - frac)) + (b * frac))
-}
-
-#[inline]
 fn wrap_sub(position: usize, amount: usize, len: usize) -> usize {
     if len == 0 {
         0
@@ -1219,7 +1180,7 @@ fn cascade_level_compensation(decay: f32, feedback: f32) -> f32 {
 fn reels_level_compensation(feedback: f32, decay: f32) -> f32 {
     let feedback = feedback.clamp(0.0, 1.0);
     let decay = decay.clamp(0.0, 1.0);
-    (1.0 - (feedback * 0.12) - (decay * 0.06)).clamp(0.76, 1.0)
+    (1.0 - (feedback * 0.16) - (decay * 0.03)).clamp(0.72, 1.0)
 }
 
 #[inline]
@@ -1236,17 +1197,19 @@ fn reels_modulated_delay_ms(
     let width = frame.width.clamp(0.0, 1.0);
     let stereo_offset = frame.stereo_offset.clamp(-0.5, 0.5) * width;
     let stereo_sign = if channel == 0 { -1.0 } else { 1.0 };
-    let channel_offset_ms = base_delay_ms * stereo_offset * stereo_sign * 0.08;
+    let channel_offset_ms = base_delay_ms * stereo_offset * stereo_sign * 0.10;
 
-    let wow_rate = 0.15 + size * 0.65;
-    *wow_phase = (*wow_phase + wow_rate / sample_rate.max(1.0)).fract();
-    let wow = (*wow_phase * core::f32::consts::TAU).sin() * size * 4.8;
+    let wow_rate_1 = 0.17 + size * 0.45;
+    *wow_phase = (*wow_phase + wow_rate_1 / sample_rate.max(1.0)).fract();
+    let wow_angle = *wow_phase * core::f32::consts::TAU;
+    let wow1 = wow_angle.sin() * size * 3.4;
+    let wow2 = (wow_angle * 2.0 + channel as f32 * 1.2).sin() * size * 1.3;
 
-    let flutter_rate = 4.0 + size * 5.0 + channel as f32 * 0.37;
+    let flutter_rate = 5.2 + size * 4.8 + channel as f32 * 0.71;
     *flutter_phase = (*flutter_phase + flutter_rate / sample_rate.max(1.0)).fract();
-    let flutter = (*flutter_phase * core::f32::consts::TAU).sin() * size * 0.62;
+    let flutter = (*flutter_phase * core::f32::consts::TAU).sin() * size * 0.48;
 
-    (base_delay_ms + channel_offset_ms + wow + flutter + drift).clamp(8.0, 2_000.0)
+    (base_delay_ms + channel_offset_ms + wow1 + wow2 + flutter + drift).clamp(8.0, 2_000.0)
 }
 
 fn reels_feedback_color(
@@ -1263,12 +1226,13 @@ fn reels_feedback_color(
     let damping = frame.damping.clamp(0.0, 1.0);
 
     let saturated = reels_tape_saturate(delayed, decay);
-    let level = saturated.abs();
-    *feedback_level_state += (level - *feedback_level_state) * 0.004;
-    let compression = 1.0 / (1.0 + (*feedback_level_state * (0.32 + decay * 0.72)));
-    let compressed = saturated * compression.clamp(0.62, 1.0);
 
-    let hp_cutoff = 38.0 + decay * 70.0;
+    let level = saturated.abs();
+    *feedback_level_state += (level - *feedback_level_state) * 0.003;
+    let compression = 1.0 / (1.0 + (*feedback_level_state * (0.26 + decay * 0.88)));
+    let compressed = saturated * compression.clamp(0.55, 1.0);
+
+    let hp_cutoff = 34.0 + decay * 52.0;
     let hp_alpha =
         (1.0 - (-core::f32::consts::TAU * hp_cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
     *hp_state += hp_alpha * (compressed - *hp_state);
@@ -1276,14 +1240,14 @@ fn reels_feedback_color(
 
     let tone_brightness = frame.tone_alpha.clamp(0.0, 1.0);
     let lp_cutoff =
-        (1_250.0 + tone_brightness * 9_500.0) * (1.0 - damping * 0.36) * (1.0 - decay * 0.30);
-    let lp_cutoff = lp_cutoff.clamp(700.0, 12_000.0);
+        (1_150.0 + tone_brightness * 10_350.0) * (1.0 - damping * 0.44) * (1.0 - decay * 0.38);
+    let lp_cutoff = lp_cutoff.clamp(580.0, 13_000.0);
     let lp_alpha =
         (1.0 - (-core::f32::consts::TAU * lp_cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
     *lp_state += lp_alpha * (high_passed - *lp_state);
     let low_passed = sanitize_sample(*lp_state);
 
-    let smear_amount = (0.18 + size * 0.22 + decay * 0.10).clamp(0.18, 0.50);
+    let smear_amount = (0.14 + size * 0.18 + decay * 0.06).clamp(0.14, 0.38);
     let smeared = sanitize_sample(-smear_amount * low_passed + *smear_state);
     *smear_state = sanitize_sample(low_passed + smear_amount * smeared);
 
@@ -1293,9 +1257,10 @@ fn reels_feedback_color(
 #[inline]
 fn reels_tape_saturate(sample: f32, decay: f32) -> f32 {
     let decay = decay.clamp(0.0, 1.0);
-    let drive = 1.0 + decay * 2.6;
-    let bias = sample * sample * 0.018 * decay;
-    sanitize_sample(((sample + bias) * drive).tanh() / drive)
+    let drive = 1.0 + decay * 2.9;
+    let bias = sample * sample * decay * 0.022;
+    let driven = (sample + bias) * drive;
+    sanitize_sample(driven.tanh() / (drive * (1.0 + decay * 0.04)))
 }
 
 fn reels_drift_next(
@@ -1310,14 +1275,14 @@ fn reels_drift_next(
     let size = size.clamp(0.0, 1.0);
     if *countdown == 0 {
         let random = next_reels_random(rng);
-        *target = ((random * 2.0) - 1.0) * size * (1.6 + size * 2.8);
-        let hold_ms = 80.0 + random * 180.0 + channel as f32 * 23.0;
+        *target = ((random * 2.0) - 1.0) * size * (2.2 + size * 4.0);
+        let hold_ms = 130.0 + random * 290.0 + channel as f32 * 31.0;
         *countdown = (hold_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
     } else {
         *countdown -= 1;
     }
 
-    let alpha = (1.0 / (sample_rate.max(1.0) * 0.18)).clamp(0.0, 1.0);
+    let alpha = (1.0 / (sample_rate.max(1.0) * 0.26)).clamp(0.0, 1.0);
     *state += (*target - *state) * alpha;
     sanitize_sample(*state)
 }
@@ -1387,54 +1352,34 @@ fn reverse_crossfade_samples(segment_len: usize, sample_rate: f32) -> usize {
     let min_samples = (sample_rate.max(1.0) * 0.008).round() as usize;
     let max_samples = (sample_rate.max(1.0) * 0.040).round() as usize;
     let max_for_segment = (segment_len / 2).max(1);
-    (segment_len / 6)
+    (segment_len / 5)
         .clamp(min_samples.max(4), max_samples.max(4))
         .min(max_for_segment)
         .max(1)
 }
 
 #[inline]
-fn reverse_envelope(position: usize, segment_len: usize, decay: f32, sample_rate: f32) -> f32 {
-    if segment_len <= 1 {
+fn reverse_playback_envelope(pos: usize, len: usize, decay: f32, sample_rate: f32) -> f32 {
+    if len < 2 {
         return 1.0;
     }
-
-    let position = position.min(segment_len - 1);
-    let progress = position as f32 / (segment_len - 1) as f32;
-    let fade_len = reverse_envelope_samples(segment_len, decay, sample_rate);
-    let fade_in = if position < fade_len {
-        smoothstep(position as f32 / fade_len as f32)
-    } else {
-        1.0
-    };
-    let remaining = segment_len - 1 - position;
-    let fade_out = if remaining < fade_len {
-        smoothstep(remaining as f32 / fade_len as f32)
-    } else {
-        1.0
-    };
+    let pos = pos.min(len - 1);
+    let progress = pos as f32 / (len - 1) as f32;
     let decay = decay.clamp(0.0, 1.0);
-    let swell = smoothstep(progress).powf(0.82 + decay * 0.58);
-    let bloom = (core::f32::consts::PI * progress).sin().max(0.0) * (0.10 + decay * 0.12);
-    let edge = fade_in.sqrt() * (0.42 + 0.58 * fade_out.sqrt());
 
-    ((0.18 + 0.76 * swell + bloom) * edge).clamp(0.0, 1.0)
-}
+    let fade_samples = (sample_rate * 0.0035).round() as usize;
+    let fade_ratio = (fade_samples as f32 / len as f32).clamp(0.0, 0.40);
 
-#[inline]
-fn reverse_envelope_samples(segment_len: usize, decay: f32, sample_rate: f32) -> usize {
-    let min_samples = (sample_rate.max(1.0) * 0.006).round() as usize;
-    let max_samples = (sample_rate.max(1.0) * 0.055).round() as usize;
-    let by_decay = (segment_len as f32 * (0.045 + decay.clamp(0.0, 1.0) * 0.085)).round() as usize;
-    by_decay
-        .clamp(min_samples.max(2), max_samples.max(2))
-        .min((segment_len / 2).max(1))
-        .max(1)
-}
+    let fade_in = if progress < fade_ratio {
+        smoothstep(progress / fade_ratio)
+    } else {
+        1.0
+    };
 
-#[inline]
-fn reverse_crossfade_amount(progress: f32) -> f32 {
-    smoothstep(progress.clamp(0.0, 1.0))
+    let swell_amount = 0.55 + decay * 0.45;
+    let swell = smoothstep(progress).powf(1.0 / swell_amount.max(0.01));
+
+    (swell * fade_in).clamp(0.0, 1.0)
 }
 
 #[inline]
@@ -1447,19 +1392,12 @@ fn reverse_tone_filter(
     let tone = frame.tone_alpha.clamp(0.0, 1.0);
     let damping = frame.damping.clamp(0.0, 1.0);
     let decay = frame.decay.clamp(0.0, 1.0);
-    let cutoff = (900.0 + tone * 12_500.0) * (1.0 - damping * 0.42) * (1.0 - decay * 0.18);
-    let cutoff = cutoff.clamp(650.0, 14_000.0);
+    let cutoff = (950.0 + tone * 12_000.0) * (1.0 - damping * 0.38) * (1.0 - decay * 0.22);
+    let cutoff = cutoff.clamp(600.0, 13_500.0);
     let alpha =
         (1.0 - (-core::f32::consts::TAU * cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
     *state = sanitize_sample(*state + alpha * (input - *state));
     *state
-}
-
-#[inline]
-fn reverse_shadow_gain(frame: &DiffusionFrame) -> f32 {
-    let size = frame.size.clamp(0.0, 1.0);
-    let decay = frame.decay.clamp(0.0, 1.0);
-    (0.08 + size * 0.10 + decay * 0.08).clamp(0.08, 0.26)
 }
 
 #[inline]
@@ -1479,7 +1417,7 @@ fn reverse_feedback_gain(feedback: f32, decay: f32) -> f32 {
 fn reverse_level_compensation(feedback: f32, decay: f32) -> f32 {
     let feedback = feedback.clamp(0.0, 1.0);
     let decay = decay.clamp(0.0, 1.0);
-    (0.92 + decay * 0.08 - feedback * 0.14).clamp(0.70, 0.98)
+    (0.96 + decay * 0.04 - feedback * 0.12).clamp(0.72, 1.0)
 }
 
 #[inline]

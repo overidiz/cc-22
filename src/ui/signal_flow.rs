@@ -68,8 +68,6 @@ pub(crate) fn signal_flow_arrow(
     );
 }
 
-// ── flow label ──────────────────────────────────────────────────────────
-
 // ── position badge ──────────────────────────────────────────────────────
 
 pub(crate) fn position_badge(ui: &mut egui::Ui, pos: Pos2, number: usize, accent: Color32) {

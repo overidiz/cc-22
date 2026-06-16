@@ -224,7 +224,7 @@ fn eq_header(
         eq_toolbar_divider(ui, theme);
         if eq_reset_button(ui, colors.eq, theme).clicked() {
             reset_eq_params_to_defaults(setter, eq_params);
-            *selected_eq_band = EqBandSelection::LowCut;
+            *selected_eq_band = EqBandSelection::Band1;
         }
     });
 }
@@ -688,7 +688,7 @@ fn eq_canvas(
         }
         if node_response.double_clicked() {
             *selected_eq_band = node_band;
-            reset_eq_band_to_bell_flat(setter, params, node.index);
+            reset_eq_band(setter, params, node.index);
         }
         if node_response.drag_started() && node.draggable {
             *selected_eq_band = node_band;
@@ -1013,21 +1013,21 @@ fn eq_inspector_slider(
 
 fn eq_band_tab_label(band: EqBandSelection) -> &'static str {
     match band {
-        EqBandSelection::LowCut => "B1",
-        EqBandSelection::LowShelf => "B2",
-        EqBandSelection::Mid => "B3",
-        EqBandSelection::HighShelf => "B4",
-        EqBandSelection::HighCut => "B5",
+        EqBandSelection::Band1 => "B1",
+        EqBandSelection::Band2 => "B2",
+        EqBandSelection::Band3 => "B3",
+        EqBandSelection::Band4 => "B4",
+        EqBandSelection::Band5 => "B5",
     }
 }
 
 fn eq_band_name(band: EqBandSelection) -> &'static str {
     match band {
-        EqBandSelection::LowCut => "BAND 1",
-        EqBandSelection::LowShelf => "BAND 2",
-        EqBandSelection::Mid => "BAND 3",
-        EqBandSelection::HighShelf => "BAND 4",
-        EqBandSelection::HighCut => "BAND 5",
+        EqBandSelection::Band1 => "BAND 1",
+        EqBandSelection::Band2 => "BAND 2",
+        EqBandSelection::Band3 => "BAND 3",
+        EqBandSelection::Band4 => "BAND 4",
+        EqBandSelection::Band5 => "BAND 5",
     }
 }
 
@@ -1115,11 +1115,11 @@ fn eq_type_uses_q(band_type: EqBandType) -> bool {
 
 fn eq_band_color(band: EqBandSelection, colors: ModuleColors) -> Color32 {
     match band {
-        EqBandSelection::LowCut => Color32::from_rgb(255, 90, 55),
-        EqBandSelection::LowShelf => Color32::from_rgb(255, 150, 60),
-        EqBandSelection::Mid => Color32::from_rgb(255, 175, 65),
-        EqBandSelection::HighShelf => Color32::from_rgb(100, 210, 160),
-        EqBandSelection::HighCut => colors.texture,
+        EqBandSelection::Band1 => Color32::from_rgb(255, 90, 55),
+        EqBandSelection::Band2 => Color32::from_rgb(255, 150, 60),
+        EqBandSelection::Band3 => Color32::from_rgb(255, 175, 65),
+        EqBandSelection::Band4 => Color32::from_rgb(100, 210, 160),
+        EqBandSelection::Band5 => colors.texture,
     }
 }
 
@@ -1347,18 +1347,6 @@ fn scroll_frequency(
 }
 
 fn reset_eq_band(setter: &ParamSetter<'_>, params: EqParamSelection<'_>, band: usize) {
-    set_param(setter, params.band_enabled(band), true);
-    set_param(setter, params.band_type(band), EqBandType::Bell);
-    set_param(
-        setter,
-        params.band_frequency(band),
-        safe_eq_reset_frequency(band),
-    );
-    set_param(setter, params.band_gain(band), 0.0);
-    set_param(setter, params.band_q(band), 1.0);
-}
-
-fn reset_eq_band_to_bell_flat(setter: &ParamSetter<'_>, params: EqParamSelection<'_>, band: usize) {
     set_param(setter, params.band_enabled(band), true);
     set_param(setter, params.band_type(band), EqBandType::Bell);
     set_param(
@@ -1607,12 +1595,12 @@ mod tests {
     }
 
     #[test]
-    fn band_1_right_click_becomes_high_pass() {
+    fn band_1_right_click_turns_into_high_pass() {
         assert_eq!(direct_right_click_band_type(0), Some(EqBandType::HighPass));
     }
 
     #[test]
-    fn band_5_right_click_becomes_low_pass() {
+    fn band_5_right_click_turns_into_low_pass() {
         assert_eq!(direct_right_click_band_type(4), Some(EqBandType::LowPass));
     }
 

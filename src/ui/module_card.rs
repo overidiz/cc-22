@@ -514,61 +514,30 @@ fn render_module_mode_list(
     match spec.module {
         ChainModule::Character => {
             let current = params.character.mode.value();
-            mode_list_row(
-                ui,
-                setter,
-                &params.character.mode,
-                spec.bypass,
-                current,
-                CharacterMode::Drive,
-                "DRIVE",
-                mode_option_color(0),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.character.mode,
-                spec.bypass,
-                current,
-                CharacterMode::Sweet,
-                "SWEET",
-                mode_option_color(1),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.character.mode,
-                spec.bypass,
-                current,
-                CharacterMode::Fuzz,
-                "FUZZ",
-                mode_option_color(2),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.character.mode,
-                spec.bypass,
-                current,
-                CharacterMode::Howl,
-                "HOWL",
-                mode_option_color(3),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.character.mode,
-                spec.bypass,
-                current,
-                CharacterMode::Swell,
-                "SWELL",
-                mode_option_color(4),
-                theme,
-            );
+            egui::ComboBox::from_id_salt("character-mode")
+                .width(ui.available_width() - 4.0)
+                .selected_text(character_mode_label(current))
+                .show_ui(ui, |ui| {
+                    for mode in &[
+                        CharacterMode::Clean,
+                        CharacterMode::Saturation,
+                        CharacterMode::Cassette,
+                        CharacterMode::Drive,
+                        CharacterMode::Sweet,
+                        CharacterMode::Fuzz,
+                        CharacterMode::Howl,
+                        CharacterMode::Swell,
+                    ] {
+                        let label = character_mode_label(*mode);
+                        if ui
+                            .selectable_label(current == *mode && !spec.bypass.value(), label)
+                            .clicked()
+                        {
+                            set_param(setter, spec.bypass, false);
+                            set_param(setter, &params.character.mode, *mode);
+                        }
+                    }
+                });
         }
         ChainModule::Movement => {
             let current = params.movement.mode.value();
@@ -688,61 +657,31 @@ fn render_module_mode_list(
         }
         ChainModule::Texture => {
             let current = params.texture.mode.value();
-            mode_list_row(
-                ui,
-                setter,
-                &params.texture.mode,
-                spec.bypass,
-                current,
-                TextureMode::Filter,
-                "FILTER",
-                mode_option_color(0),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.texture.mode,
-                spec.bypass,
-                current,
-                TextureMode::Squash,
-                "SQUASH",
-                mode_option_color(1),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.texture.mode,
-                spec.bypass,
-                current,
-                TextureMode::Cassette,
-                "CASSETTE",
-                mode_option_color(2),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.texture.mode,
-                spec.bypass,
-                current,
-                TextureMode::Broken,
-                "BROKEN",
-                mode_option_color(3),
-                theme,
-            );
-            mode_list_row(
-                ui,
-                setter,
-                &params.texture.mode,
-                spec.bypass,
-                current,
-                TextureMode::Interference,
-                "INTERFERENCE",
-                mode_option_color(4),
-                theme,
-            );
+            egui::ComboBox::from_id_salt("texture-mode")
+                .width(ui.available_width() - 4.0)
+                .selected_text(texture_mode_label(current))
+                .show_ui(ui, |ui| {
+                    for mode in &[
+                        TextureMode::Off,
+                        TextureMode::WowFlutter,
+                        TextureMode::Noise,
+                        TextureMode::Tape,
+                        TextureMode::Filter,
+                        TextureMode::Squash,
+                        TextureMode::Cassette,
+                        TextureMode::Broken,
+                        TextureMode::Interference,
+                    ] {
+                        let label = texture_mode_label(*mode);
+                        if ui
+                            .selectable_label(current == *mode && !spec.bypass.value(), label)
+                            .clicked()
+                        {
+                            set_param(setter, spec.bypass, false);
+                            set_param(setter, &params.texture.mode, *mode);
+                        }
+                    }
+                });
         }
     }
 }
@@ -1390,5 +1329,32 @@ fn lfo_shape_label(shape: LfoShape) -> &'static str {
         LfoShape::Sine => "Sine",
         LfoShape::Triangle => "Triangle",
         LfoShape::SquareSmooth => "Square",
+    }
+}
+
+fn character_mode_label(mode: CharacterMode) -> &'static str {
+    match mode {
+        CharacterMode::Clean => "Clean",
+        CharacterMode::Saturation => "Saturation",
+        CharacterMode::Cassette => "Cassette",
+        CharacterMode::Drive => "Drive",
+        CharacterMode::Sweet => "Sweet",
+        CharacterMode::Fuzz => "Fuzz",
+        CharacterMode::Howl => "Howl",
+        CharacterMode::Swell => "Swell",
+    }
+}
+
+fn texture_mode_label(mode: TextureMode) -> &'static str {
+    match mode {
+        TextureMode::Off => "Off",
+        TextureMode::WowFlutter => "Wow/Flutter",
+        TextureMode::Noise => "Noise",
+        TextureMode::Tape => "Tape",
+        TextureMode::Filter => "Filter",
+        TextureMode::Squash => "Squash",
+        TextureMode::Cassette => "Cassette",
+        TextureMode::Broken => "Broken",
+        TextureMode::Interference => "Interference",
     }
 }

@@ -49,8 +49,8 @@ impl Cc22 {
 impl Plugin for Cc22 {
     const NAME: &'static str = "CC-22";
     const VENDOR: &'static str = "Rafa Audio";
-    const URL: &'static str = "https://example.com/cc-22";
-    const EMAIL: &'static str = "info@example.com";
+    const URL: &'static str = "https://github.com/rafatoledoreis/cc-22";
+    const EMAIL: &'static str = "rafatoledoreis@gmail.com";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
@@ -113,7 +113,7 @@ impl ClapPlugin for Cc22 {
     const CLAP_DESCRIPTION: Option<&'static str> =
         Some("A modular boutique-style multi-FX base with smoothed global controls.");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
-    const CLAP_SUPPORT_URL: Option<&'static str> = None;
+    const CLAP_SUPPORT_URL: Option<&'static str> = Some("mailto:rafatoledoreis@gmail.com");
     const CLAP_FEATURES: &'static [ClapFeature] = &[
         ClapFeature::AudioEffect,
         ClapFeature::Mono,

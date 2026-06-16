@@ -29,6 +29,7 @@ pub enum PresetId {
     ReelsDubEcho,
     ReversePsychedelic,
     SoftSwellSpace,
+    PreEqSculpted,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -45,6 +46,7 @@ pub struct PresetValues {
     pub diffusion: DiffusionPreset,
     pub texture: TexturePreset,
     pub eq: EqPreset,
+    pub pre_eq: Option<EqPreset>,
     pub input_gain_db: f32,
     pub output_gain_db: f32,
     pub dry_wet: f32,
@@ -119,7 +121,7 @@ pub struct EqPreset {
     pub high_cut_hz: f32,
 }
 
-pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
+pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
     InternalPreset {
         id: PresetId::WarmTapeChorus,
         name: "Warm Tape Chorus",
@@ -183,6 +185,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 7_500.0,
                 high_cut_hz: 16_000.0,
             },
+            pre_eq: None,
             input_gain_db: 0.0,
             output_gain_db: 0.0,
             dry_wet: 1.0,
@@ -251,6 +254,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 6_500.0,
                 high_cut_hz: 15_000.0,
             },
+            pre_eq: None,
             input_gain_db: 0.0,
             output_gain_db: -0.5,
             dry_wet: 1.0,
@@ -319,6 +323,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 9_000.0,
                 high_cut_hz: 17_000.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -1.0,
             dry_wet: 1.0,
@@ -387,6 +392,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 5_500.0,
                 high_cut_hz: 9_500.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -1.0,
             dry_wet: 1.0,
@@ -455,6 +461,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 8_000.0,
                 high_cut_hz: 20_000.0,
             },
+            pre_eq: None,
             input_gain_db: 0.0,
             output_gain_db: 0.0,
             dry_wet: 1.0,
@@ -523,6 +530,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 8_500.0,
                 high_cut_hz: 17_000.0,
             },
+            pre_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.0,
             dry_wet: 1.0,
@@ -591,6 +599,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 7_000.0,
                 high_cut_hz: 14_000.0,
             },
+            pre_eq: None,
             input_gain_db: -2.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -659,6 +668,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 9_000.0,
                 high_cut_hz: 16_000.0,
             },
+            pre_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.2,
             dry_wet: 1.0,
@@ -727,6 +737,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 6_800.0,
                 high_cut_hz: 13_500.0,
             },
+            pre_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.5,
             dry_wet: 1.0,
@@ -795,6 +806,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 8_000.0,
                 high_cut_hz: 15_500.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -863,6 +875,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 8_200.0,
                 high_cut_hz: 16_000.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -931,6 +944,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 7_800.0,
                 high_cut_hz: 16_500.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -999,6 +1013,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 6_500.0,
                 high_cut_hz: 13_000.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.5,
             dry_wet: 1.0,
@@ -1067,6 +1082,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 8_000.0,
                 high_cut_hz: 15_500.0,
             },
+            pre_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -1135,8 +1151,89 @@ pub const INTERNAL_PRESETS: [InternalPreset; 15] = [
                 high_shelf_hz: 7_200.0,
                 high_cut_hz: 16_000.0,
             },
+            pre_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.8,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::PreEqSculpted,
+        name: "Pre EQ Sculpted",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Saturation,
+                drive: 0.14,
+                age: 0.0,
+                tone: 0.50,
+                noise: 0.0,
+                mix: 0.80,
+                output_trim_db: -2.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Chorus,
+                rate_hz: 0.45,
+                depth: 0.20,
+                shape: LfoShape::Sine,
+                delay_ms: 14.0,
+                feedback: 0.0,
+                width: 0.70,
+                phase_degrees: 180.0,
+                tone: 0.46,
+                mix: 0.18,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Space,
+                time_ms: 380.0,
+                feedback: 0.18,
+                size: 0.55,
+                decay: 0.48,
+                pre_delay_ms: 22.0,
+                damping: 0.50,
+                mix: 0.28,
+                tone: 0.45,
+                stereo_offset: 0.10,
+                width: 0.80,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Filter,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.5,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 5.0,
+                random_drift: 0.0,
+                noise_amount: 0.0,
+                noise_color: 0.40,
+                degrade: 0.0,
+                stereo_spread: 0.0,
+                mix: 0.10,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 45.0,
+                low_shelf_gain_db: 0.6,
+                low_shelf_hz: 130.0,
+                mid_gain_db: -1.5,
+                mid_hz: 2_800.0,
+                mid_q: 0.80,
+                high_shelf_gain_db: -0.8,
+                high_shelf_hz: 7_800.0,
+                high_cut_hz: 17_000.0,
+            },
+            pre_eq: Some(EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 55.0,
+                low_shelf_gain_db: 2.0,
+                low_shelf_hz: 180.0,
+                mid_gain_db: -2.5,
+                mid_hz: 420.0,
+                mid_q: 1.2,
+                high_shelf_gain_db: 0.0,
+                high_shelf_hz: 5_500.0,
+                high_cut_hz: 15_000.0,
+            }),
+            input_gain_db: -1.0,
+            output_gain_db: -1.5,
             dry_wet: 1.0,
         },
     },
@@ -1167,6 +1264,9 @@ impl PresetValues {
         self.diffusion.apply_with_setter(setter, params);
         self.texture.apply_with_setter(setter, params);
         self.eq.apply_with_setter(setter, params);
+        if let Some(pre_eq) = &self.pre_eq {
+            pre_eq.apply_to_pre_eq(setter, params);
+        }
     }
 }
 
@@ -1268,6 +1368,37 @@ impl EqPreset {
         set_param(setter, &eq.band5_gain, 0.0);
         set_param(setter, &eq.band5_q, 0.707);
     }
+
+    fn apply_to_pre_eq(&self, setter: &ParamSetter<'_>, params: &Cc22Params) {
+        let eq = &params.pre_eq;
+        set_param(setter, &eq.mode, self.mode);
+        set_param(setter, &eq.bypass, false);
+        set_param(setter, &eq.band1_enabled, true);
+        set_param(setter, &eq.band1_type, EqBandType::LowShelf);
+        set_param(setter, &eq.band1_frequency, self.low_shelf_hz);
+        set_param(setter, &eq.band1_gain, self.low_shelf_gain_db);
+        set_param(setter, &eq.band1_q, 1.0);
+        set_param(setter, &eq.band2_enabled, true);
+        set_param(setter, &eq.band2_type, EqBandType::Bell);
+        set_param(setter, &eq.band2_frequency, self.mid_hz);
+        set_param(setter, &eq.band2_gain, self.mid_gain_db);
+        set_param(setter, &eq.band2_q, self.mid_q);
+        set_param(setter, &eq.band3_enabled, true);
+        set_param(setter, &eq.band3_type, EqBandType::HighShelf);
+        set_param(setter, &eq.band3_frequency, self.high_shelf_hz);
+        set_param(setter, &eq.band3_gain, self.high_shelf_gain_db);
+        set_param(setter, &eq.band3_q, 1.0);
+        set_param(setter, &eq.band4_enabled, false);
+        set_param(setter, &eq.band4_type, EqBandType::Off);
+        set_param(setter, &eq.band4_frequency, self.low_cut_hz);
+        set_param(setter, &eq.band4_gain, 0.0);
+        set_param(setter, &eq.band4_q, 0.707);
+        set_param(setter, &eq.band5_enabled, false);
+        set_param(setter, &eq.band5_type, EqBandType::Off);
+        set_param(setter, &eq.band5_frequency, self.high_cut_hz);
+        set_param(setter, &eq.band5_gain, 0.0);
+        set_param(setter, &eq.band5_q, 0.707);
+    }
 }
 
 fn set_param<P: Param>(setter: &ParamSetter<'_>, param: &P, value: P::Plain) {
@@ -1288,7 +1419,7 @@ mod tests {
     fn exposes_named_presets_without_reordering_existing_ones() {
         let presets = internal_presets();
 
-        assert_eq!(presets.len(), 15);
+        assert_eq!(presets.len(), 16);
         assert_eq!(presets[0].name, "Warm Tape Chorus");
         assert_eq!(presets[4].name, "Clean Widen");
         assert_eq!(presets[5].name, "Sweet Console");
@@ -1454,5 +1585,15 @@ mod tests {
         assert_eq!(soft_swell_space.values.movement.mode, MovementMode::Chorus);
         assert_eq!(soft_swell_space.values.diffusion.mode, DiffusionMode::Space);
         assert_eq!(soft_swell_space.values.texture.mode, TextureMode::Tape);
+    }
+
+    #[test]
+    fn pre_eq_sculpted_preset_sets_pre_and_post_eq() {
+        let preset = find_preset(PresetId::PreEqSculpted).expect("preset exists");
+        assert!(preset.values.pre_eq.is_some(), "should have pre_eq");
+        assert_eq!(preset.values.character.mode, CharacterMode::Saturation);
+        assert_eq!(preset.values.movement.mode, MovementMode::Chorus);
+        assert_eq!(preset.values.diffusion.mode, DiffusionMode::Space);
+        assert_eq!(preset.values.texture.mode, TextureMode::Filter);
     }
 }

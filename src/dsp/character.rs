@@ -61,13 +61,13 @@ pub struct Character {
     sweet_exciter_state: [f32; MAX_CHANNELS],
     fuzz_dc_state: [f32; MAX_CHANNELS],
     fuzz_tone_state: [f32; MAX_CHANNELS],
-    howl_prefilter_state: [f32; MAX_CHANNELS],
-    howl_formant1_low_state: [f32; MAX_CHANNELS],
-    howl_formant1_band_state: [f32; MAX_CHANNELS],
-    howl_formant2_low_state: [f32; MAX_CHANNELS],
-    howl_formant2_band_state: [f32; MAX_CHANNELS],
-    howl_feedback_state: [f32; MAX_CHANNELS],
-    howl_tone_state: [f32; MAX_CHANNELS],
+    howl_input_hp_state: [f32; MAX_CHANNELS],
+    howl_body_lp_state: [f32; MAX_CHANNELS],
+    howl_formant1_lp_state: [f32; MAX_CHANNELS],
+    howl_formant1_bp_state: [f32; MAX_CHANNELS],
+    howl_formant2_lp_state: [f32; MAX_CHANNELS],
+    howl_formant2_bp_state: [f32; MAX_CHANNELS],
+    howl_damping_state: [f32; MAX_CHANNELS],
     swell_fast_env_state: [f32; MAX_CHANNELS],
     swell_slow_env_state: [f32; MAX_CHANNELS],
     swell_phase_state: [f32; MAX_CHANNELS],
@@ -112,13 +112,13 @@ impl Default for Character {
             sweet_exciter_state: [0.0; MAX_CHANNELS],
             fuzz_dc_state: [0.0; MAX_CHANNELS],
             fuzz_tone_state: [0.0; MAX_CHANNELS],
-            howl_prefilter_state: [0.0; MAX_CHANNELS],
-            howl_formant1_low_state: [0.0; MAX_CHANNELS],
-            howl_formant1_band_state: [0.0; MAX_CHANNELS],
-            howl_formant2_low_state: [0.0; MAX_CHANNELS],
-            howl_formant2_band_state: [0.0; MAX_CHANNELS],
-            howl_feedback_state: [0.0; MAX_CHANNELS],
-            howl_tone_state: [0.0; MAX_CHANNELS],
+            howl_input_hp_state: [0.0; MAX_CHANNELS],
+            howl_body_lp_state: [0.0; MAX_CHANNELS],
+            howl_formant1_lp_state: [0.0; MAX_CHANNELS],
+            howl_formant1_bp_state: [0.0; MAX_CHANNELS],
+            howl_formant2_lp_state: [0.0; MAX_CHANNELS],
+            howl_formant2_bp_state: [0.0; MAX_CHANNELS],
+            howl_damping_state: [0.0; MAX_CHANNELS],
             swell_fast_env_state: [0.0; MAX_CHANNELS],
             swell_slow_env_state: [0.0; MAX_CHANNELS],
             swell_phase_state: [0.0; MAX_CHANNELS],
@@ -153,13 +153,13 @@ impl Character {
         self.sweet_exciter_state = [0.0; MAX_CHANNELS];
         self.fuzz_dc_state = [0.0; MAX_CHANNELS];
         self.fuzz_tone_state = [0.0; MAX_CHANNELS];
-        self.howl_prefilter_state = [0.0; MAX_CHANNELS];
-        self.howl_formant1_low_state = [0.0; MAX_CHANNELS];
-        self.howl_formant1_band_state = [0.0; MAX_CHANNELS];
-        self.howl_formant2_low_state = [0.0; MAX_CHANNELS];
-        self.howl_formant2_band_state = [0.0; MAX_CHANNELS];
-        self.howl_feedback_state = [0.0; MAX_CHANNELS];
-        self.howl_tone_state = [0.0; MAX_CHANNELS];
+        self.howl_input_hp_state = [0.0; MAX_CHANNELS];
+        self.howl_body_lp_state = [0.0; MAX_CHANNELS];
+        self.howl_formant1_lp_state = [0.0; MAX_CHANNELS];
+        self.howl_formant1_bp_state = [0.0; MAX_CHANNELS];
+        self.howl_formant2_lp_state = [0.0; MAX_CHANNELS];
+        self.howl_formant2_bp_state = [0.0; MAX_CHANNELS];
+        self.howl_damping_state = [0.0; MAX_CHANNELS];
         self.swell_fast_env_state = [0.0; MAX_CHANNELS];
         self.swell_slow_env_state = [0.0; MAX_CHANNELS];
         self.swell_phase_state = [0.0; MAX_CHANNELS];
@@ -381,77 +381,66 @@ impl Character {
         let index = channel.min(MAX_CHANNELS - 1);
         let tone = frame.tone;
         let drive = frame.drive;
-
-        // Stage 1: Map tone to resonant frequency (vocal/synth range)
         let sample_rate = self.sample_rate.max(1.0);
 
-        let hp_cutoff = 70.0 + drive * 90.0 + tone * 65.0;
+        let hp_cutoff = 40.0 + drive * 30.0;
         let hp_alpha =
             (1.0 - (-core::f32::consts::TAU * hp_cutoff / sample_rate).exp()).clamp(0.0, 1.0);
-        let pre_low = self.howl_prefilter_state[index]
-            + hp_alpha * (sample - self.howl_prefilter_state[index]);
-        self.howl_prefilter_state[index] = sanitize_sample(pre_low);
-        let high_passed = sanitize_sample(sample - pre_low);
+        let input_hp =
+            self.howl_input_hp_state[index] + hp_alpha * (sample - self.howl_input_hp_state[index]);
+        self.howl_input_hp_state[index] = sanitize_sample(input_hp);
+        let conditioned = sanitize_sample(sample - input_hp);
 
-        let pre_drive = 1.0 + drive * 3.4;
-        let conditioned = fast_tanh(high_passed * pre_drive);
-        let feedback = self.howl_feedback_state[index].clamp(-1.4, 1.4);
-        let loop_input = sanitize_sample(conditioned + feedback * howl_feedback_amount(drive));
+        let drive_gain = 1.0 + drive * 1.5;
+        let saturated = fast_tanh(conditioned * drive_gain);
 
-        let base_freq = howl_formant_frequency(tone);
-        let movement = 1.0 + feedback * drive * 0.012;
-        let formant1_hz = (base_freq * movement).clamp(120.0, 3_200.0);
-        let formant2_hz =
-            (base_freq * howl_formant_ratio(tone, drive) * (2.0 - movement)).clamp(260.0, 5_500.0);
-        let resonance = (0.18 + drive * 0.78).clamp(0.18, 0.96);
+        let body_cutoff = (250.0 + tone * 50.0 + drive * 30.0).clamp(250.0, 360.0);
+        let body_alpha =
+            (1.0 - (-core::f32::consts::TAU * body_cutoff / sample_rate).exp()).clamp(0.0, 1.0);
+        let body_lp = self.howl_body_lp_state[index]
+            + body_alpha * (saturated - self.howl_body_lp_state[index]);
+        self.howl_body_lp_state[index] = sanitize_sample(body_lp);
 
-        // Stage 2: Map drive to Q (resonance) — quadratic for subtle low end
-        let formant1 = howl_resonator_step(
-            loop_input,
-            formant1_hz,
-            resonance,
+        let f1 = howl_formant1_frequency(tone);
+        let f2 = howl_formant2_frequency(f1, tone, drive);
+        let q = howl_q(drive);
+
+        let (f1_out, _) = howl_resonator_step(
+            saturated,
+            f1,
+            q,
             sample_rate,
-            &mut self.howl_formant1_low_state[index],
-            &mut self.howl_formant1_band_state[index],
+            &mut self.howl_formant1_lp_state[index],
+            &mut self.howl_formant1_bp_state[index],
         );
-        let formant2 = howl_resonator_step(
-            loop_input * (0.82 + tone * 0.18),
-            formant2_hz,
-            (resonance * 0.86).clamp(0.12, 0.90),
+        let (f2_out, _) = howl_resonator_step(
+            saturated,
+            f2,
+            q * 0.75,
             sample_rate,
-            &mut self.howl_formant2_low_state[index],
-            &mut self.howl_formant2_band_state[index],
+            &mut self.howl_formant2_lp_state[index],
+            &mut self.howl_formant2_bp_state[index],
         );
 
-        // Stage 3: Saturation gain in the feedback path
-        let vowel_balance = 0.38 + tone * 0.22;
-        let formants = sanitize_sample(formant1 * (1.0 - vowel_balance) + formant2 * vowel_balance);
-        let feedback_target = fast_tanh((formants + conditioned * 0.22) * (1.15 + drive * 1.35));
-        self.howl_feedback_state[index] = sanitize_sample(
-            self.howl_feedback_state[index] * 0.62 + feedback_target * (0.30 + drive * 0.08),
-        )
-        .clamp(-1.25, 1.25);
+        let formant_balance = 0.35 + tone * 0.08;
+        let formant_mix =
+            sanitize_sample(f1_out * (1.0 - formant_balance) + f2_out * formant_balance);
 
-        // Stage 4: State-variable filter with saturated feedback
-        let body_gain = (0.42 - drive * 0.18).clamp(0.18, 0.42);
-        let resonator_gain = 0.58 + drive * 0.42;
-        let body = fast_tanh(conditioned * (1.0 + drive * 0.55)) * body_gain;
-        let voiced = sanitize_sample(body + formants * resonator_gain);
+        let formant_limited = soft_clip_sample(formant_mix * 0.72);
 
-        // Stage 5: Output the resonant bandpass
-        let brightness_hz = (1_200.0 + tone * tone * 7_800.0).clamp(1_200.0, 9_000.0);
-        let brightness_alpha =
-            (1.0 - (-core::f32::consts::TAU * brightness_hz / sample_rate).exp()).clamp(0.0, 1.0);
-        let toned =
-            self.howl_tone_state[index] + brightness_alpha * (voiced - self.howl_tone_state[index]);
-        self.howl_tone_state[index] = sanitize_sample(toned);
-        let air = (tone * tone * 0.16).clamp(0.0, 0.16);
-        let bright = sanitize_sample(toned * (1.0 - air) + voiced * air);
+        let damping_hz = howl_output_damping(tone);
+        let damping_alpha =
+            (1.0 - (-core::f32::consts::TAU * damping_hz / sample_rate).exp()).clamp(0.0, 1.0);
+        let damped = self.howl_damping_state[index]
+            + damping_alpha * (formant_limited - self.howl_damping_state[index]);
+        self.howl_damping_state[index] = sanitize_sample(damped);
 
-        // Stage 6: Gain compensation — resonance boosts level, compensate proportionally
-        let compensated = sanitize_sample(bright * howl_gain_compensation(drive, tone));
+        let body_mix = howl_body_mix(drive);
+        let voiced = sanitize_sample(body_lp * body_mix + damped * (1.0 - body_mix));
 
-        // Stage 7: Final safety clip
+        let compensation = howl_gain_compensation(drive, q);
+        let compensated = sanitize_sample(voiced * compensation);
+
         soft_clip_sample(compensated)
     }
 
@@ -644,53 +633,66 @@ fn fuzz_compensation(drive: f32) -> f32 {
 }
 
 #[inline]
-fn howl_formant_frequency(tone: f32) -> f32 {
+fn howl_formant1_frequency(tone: f32) -> f32 {
     let tone = tone.clamp(0.0, 1.0);
-    140.0 + tone.powf(1.55) * 2_660.0
+    200.0 + tone * 2_000.0
 }
 
 #[inline]
-fn howl_formant_ratio(tone: f32, drive: f32) -> f32 {
+fn howl_formant2_frequency(f1: f32, tone: f32, drive: f32) -> f32 {
     let tone = tone.clamp(0.0, 1.0);
     let drive = drive.clamp(0.0, 1.0);
-    (1.45 + tone * 0.62 + drive * 0.28).clamp(1.45, 2.35)
+    let ratio = (1.40 + tone * 0.26 + drive * 0.08).clamp(1.40, 1.74);
+    (f1 * ratio).clamp(280.0, 3_200.0)
 }
 
 #[inline]
-fn howl_feedback_amount(drive: f32) -> f32 {
+fn howl_q(drive: f32) -> f32 {
     let drive = drive.clamp(0.0, 1.0);
-    (drive * drive * 0.42).clamp(0.0, 0.42)
+    (0.65 + drive.powf(1.2) * 2.85).clamp(0.65, 3.50)
 }
 
 #[inline]
-fn howl_gain_compensation(drive: f32, tone: f32) -> f32 {
+fn howl_body_mix(drive: f32) -> f32 {
+    (0.40 - drive.clamp(0.0, 1.0) * 0.15).clamp(0.25, 0.40)
+}
+
+#[inline]
+fn howl_gain_compensation(drive: f32, q: f32) -> f32 {
     let drive = drive.clamp(0.0, 1.0);
-    let tone = tone.clamp(0.0, 1.0);
-    (0.98 - drive * 0.46 - tone * drive * 0.10).clamp(0.34, 0.98)
+    let base = 1.0 / (1.0 + drive * 2.2 + q * 0.10);
+    (base * (1.0 + drive * 0.25)).clamp(0.18, 0.90)
 }
 
 #[inline]
 fn howl_resonator_step(
     input: f32,
     frequency_hz: f32,
-    resonance: f32,
+    q: f32,
     sample_rate: f32,
-    low_state: &mut f32,
-    band_state: &mut f32,
-) -> f32 {
-    let frequency_hz = frequency_hz.clamp(80.0, sample_rate.max(1.0) * 0.42);
-    let f = (2.0 * (core::f32::consts::PI * frequency_hz / sample_rate.max(1.0)).sin())
-        .clamp(0.001, 0.92);
-    let resonance = resonance.clamp(0.0, 1.0);
-    let damping = (1.05 - resonance * 0.78).clamp(0.22, 1.05);
-    let high = sanitize_sample(input - *low_state - damping * *band_state);
-    let excited = fast_tanh(high * (1.0 + resonance * 2.2));
-    let band = sanitize_sample((*band_state + f * excited).clamp(-3.0, 3.0));
-    let low = sanitize_sample((*low_state + f * band).clamp(-3.0, 3.0));
-    *band_state = band;
-    *low_state = low;
+    lp_state: &mut f32,
+    bp_state: &mut f32,
+) -> (f32, f32) {
+    let freq = frequency_hz.clamp(40.0, sample_rate.max(1.0) * 0.40);
+    let f = (2.0 * (core::f32::consts::PI * freq / sample_rate.max(1.0)).sin()).clamp(0.0005, 0.82);
+    let q_safe = q.clamp(0.5, 3.80);
+    let damping = (1.0 / q_safe + 0.015).clamp(0.24, 1.0);
 
-    soft_clip_sample(band * (0.72 + resonance * 0.34))
+    let high = sanitize_sample(input - *lp_state - damping * *bp_state);
+    let band = sanitize_sample(fast_tanh((*bp_state + f * high) * 0.70));
+    let low = sanitize_sample(fast_tanh((*lp_state + f * band) * 0.70));
+    *bp_state = band;
+    *lp_state = low;
+
+    let lp_out = soft_clip_sample(low * (0.47 + q * 0.035));
+    let bp_out = soft_clip_sample(band);
+    (lp_out, bp_out)
+}
+
+#[inline]
+fn howl_output_damping(tone: f32) -> f32 {
+    let tone = tone.clamp(0.0, 1.0);
+    (1_400.0 + tone.powf(1.5) * 8_000.0).clamp(1_400.0, 9_400.0)
 }
 
 #[inline]
@@ -1607,6 +1609,155 @@ mod tests {
         // Higher drive = higher Q = more energy around resonance
         assert!(low_out.abs() > 0.001);
         assert!(high_out.abs() > 0.001);
+    }
+
+    #[test]
+    fn howl_silence_10s_max_drive_tone_stays_silent() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(1.0, 1.0);
+
+        let mut peak = 0.0_f32;
+        for _ in 0..(48_000 * 10) {
+            let sample = character.process_sample(0, 0.0, &frame);
+            assert!(sample.is_finite(), "howl 10s silence: NaN/inf");
+            peak = peak.max(sample.abs());
+        }
+        assert!(
+            peak < 0.000_2,
+            "howl should not self-oscillate on silence, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn howl_sine_110hz_stays_controlled() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(1.0, 1.0);
+
+        let mut peak = 0.0_f32;
+        let mut phase = 0.0_f32;
+        for _ in 0..(48_000 * 2) {
+            phase += 110.0 / 48_000.0;
+            let sine = (phase * core::f32::consts::TAU).sin() * 0.5;
+            let sample = character.process_sample(0, sine, &frame);
+            assert!(sample.is_finite(), "howl 110Hz: NaN/inf");
+            peak = peak.max(sample.abs());
+        }
+        assert!(
+            peak < 6.0,
+            "howl 110Hz max drive should stay controlled, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn howl_sine_440hz_is_musical_and_controlled() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(0.6, 0.5);
+
+        let mut peak = 0.0_f32;
+        let mut phase = 0.0_f32;
+        for _ in 0..(48_000 * 2) {
+            phase += 440.0 / 48_000.0;
+            let sine = (phase * core::f32::consts::TAU).sin() * 0.35;
+            let sample = character.process_sample(0, sine, &frame);
+            assert!(sample.is_finite(), "howl 440Hz: NaN/inf");
+            peak = peak.max(sample.abs());
+        }
+        assert!(
+            peak < 5.0,
+            "howl 440Hz moderate drive should be musical, peak={peak}"
+        );
+        assert!(
+            peak > 0.05,
+            "howl 440Hz should produce audible output, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn howl_white_noise_has_controlled_output() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(1.0, 0.8);
+
+        let mut peak = 0.0_f32;
+        let mut rng: u32 = 0xdead_beef;
+        for _ in 0..4096 {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            let noise = (rng as f32 / u32::MAX as f32) * 2.0 - 1.0;
+            let sample = character.process_sample(0, noise * 0.5, &frame);
+            assert!(sample.is_finite(), "howl noise: NaN/inf");
+            peak = peak.max(sample.abs());
+        }
+        assert!(
+            peak < 6.0,
+            "howl white noise should stay controlled, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn howl_impulse_has_controlled_decay() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(0.8, 0.5);
+
+        for _ in 0..32 {
+            character.process_sample(0, 0.0, &frame);
+        }
+        let impulse_peak = character.process_sample(0, 0.9, &frame).abs();
+        assert!(
+            impulse_peak < 4.0,
+            "howl impulse peak should be controlled: {impulse_peak}"
+        );
+
+        let mut late_peak = 0.0_f32;
+        for _ in 0..256 {
+            let sample = character.process_sample(0, 0.0, &frame).abs();
+            late_peak = late_peak.max(sample);
+        }
+        assert!(
+            late_peak < 0.08,
+            "howl impulse should decay to near silence, late_peak={late_peak}"
+        );
+    }
+
+    #[test]
+    fn howl_fuzz_howl_sweet_switch_without_click() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+
+        let fuzz = fuzz_frame(0.8, 0.5);
+        let howl = howl_frame(0.8, 0.5);
+        let sweet = sweet_frame(0.8, 0.5);
+
+        for _ in 0..64 {
+            character.process_sample(0, 0.3, &fuzz);
+        }
+        let pre_switch = character.process_sample(0, 0.3, &fuzz).abs();
+
+        for _ in 0..128 {
+            character.process_sample(0, 0.3, &howl);
+        }
+        let during_howl = character.process_sample(0, 0.3, &howl).abs();
+
+        for _ in 0..128 {
+            character.process_sample(0, 0.3, &sweet);
+        }
+        let during_sweet = character.process_sample(0, 0.3, &sweet).abs();
+
+        assert!(during_howl > 0.001, "howl should process signal");
+        assert!(during_sweet > 0.001, "sweet should process signal");
+
+        let max_jump = (pre_switch - during_howl)
+            .abs()
+            .max((during_howl - during_sweet).abs());
+        assert!(
+            max_jump < 0.8,
+            "switch clicks should be small, max_jump={max_jump}"
+        );
     }
 
     #[test]

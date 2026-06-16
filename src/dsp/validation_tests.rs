@@ -18,10 +18,10 @@ use crate::{
     meters::Meters,
     params::{
         Cc22Params, CharacterParams, DiffusionParams, EqParamRefs, EqParams, MovementParams,
-        TextureParams,
+        PreEqParams, TextureParams,
     },
 };
-use nih_plug::prelude::{BoolParam, EnumParam, FloatParam};
+use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, FloatRange};
 
 use super::{
     character::CharacterMode,
@@ -1409,4 +1409,610 @@ fn low_frequency_sine(frequency: f32, samples: usize, sample_rate: f32) -> [Vec<
         })
         .collect::<Vec<_>>();
     [channel.clone(), channel]
+}
+
+#[test]
+fn pre_and_post_eq_are_independent_in_processor() {
+    use crate::dsp::eq::EqBandType;
+
+    let pre_gain = 6.0;
+    let post_gain = -6.0;
+    let frequency = 1_000.0;
+
+    let mut params = Cc22Params::default();
+    params.character.bypass = BoolParam::new("Character Bypass", true);
+    params.movement.bypass = BoolParam::new("Movement Bypass", true);
+    params.diffusion.bypass = BoolParam::new("Diffusion Bypass", true);
+    params.texture.bypass = BoolParam::new("Texture Bypass", true);
+
+    disable_all_pre_eq_bands(&mut params.pre_eq);
+    disable_all_eq_bands(&mut params.post_eq);
+
+    params.pre_eq.band3_enabled = BoolParam::new("Pre Band 3 Enabled", true);
+    params.pre_eq.band3_type = EnumParam::new("Pre Band 3 Type", EqBandType::Bell);
+    params.pre_eq.band3_frequency = FloatParam::new(
+        "Pre Band 3 Freq",
+        frequency,
+        FloatRange::Linear {
+            min: 20.0,
+            max: 20_000.0,
+        },
+    );
+    params.pre_eq.band3_gain = FloatParam::new(
+        "Pre Band 3 Gain",
+        pre_gain,
+        FloatRange::Linear {
+            min: -24.0,
+            max: 24.0,
+        },
+    );
+    params.pre_eq.bypass = BoolParam::new("Pre EQ Bypass", false);
+
+    params.post_eq.band3_enabled = BoolParam::new("Post Band 3 Enabled", true);
+    params.post_eq.band3_type = EnumParam::new("Post Band 3 Type", EqBandType::Bell);
+    params.post_eq.band3_frequency = FloatParam::new(
+        "Post Band 3 Freq",
+        frequency,
+        FloatRange::Linear {
+            min: 20.0,
+            max: 20_000.0,
+        },
+    );
+    params.post_eq.band3_gain = FloatParam::new(
+        "Post Band 3 Gain",
+        post_gain,
+        FloatRange::Linear {
+            min: -24.0,
+            max: 24.0,
+        },
+    );
+    params.post_eq.bypass = BoolParam::new("Post EQ Bypass", false);
+
+    params.reset_smoothers();
+    let meters = Meters::default();
+    let mut processor = Processor::default();
+    processor.prepare(TEST_SAMPLE_RATE);
+    processor.reset(params.global_bypass.value());
+
+    let mut audio = make_sine(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE, frequency, 0.1);
+    with_stereo_buffer(&mut audio, |buffer| {
+        processor.process_block(buffer, &params, &meters);
+    });
+    assert_audio_sane("pre-post-eq-independent", &audio);
+    assert!(peak(&audio) < 2.0);
+}
+
+#[test]
+fn every_band_type_produces_valid_processor_output() {
+    for band_type in [
+        EqBandType::Off,
+        EqBandType::Bell,
+        EqBandType::LowShelf,
+        EqBandType::HighShelf,
+        EqBandType::HighPass,
+        EqBandType::LowPass,
+    ] {
+        let mut params = Cc22Params::default();
+        params.character.bypass = BoolParam::new("Character Bypass", true);
+        params.movement.bypass = BoolParam::new("Movement Bypass", true);
+        params.diffusion.bypass = BoolParam::new("Diffusion Bypass", true);
+        params.texture.bypass = BoolParam::new("Texture Bypass", true);
+        disable_all_pre_eq_bands(&mut params.pre_eq);
+        disable_all_eq_bands(&mut params.post_eq);
+
+        params.post_eq.band1_enabled = BoolParam::new("Post Band 1 Enabled", true);
+        params.post_eq.band1_type = EnumParam::new("Post Band 1 Type", band_type);
+        params.post_eq.band1_frequency = FloatParam::new(
+            "Post Band 1 Freq",
+            1_000.0,
+            FloatRange::Linear {
+                min: 20.0,
+                max: 20_000.0,
+            },
+        );
+        params.post_eq.band1_gain = FloatParam::new(
+            "Post Band 1 Gain",
+            6.0,
+            FloatRange::Linear {
+                min: -24.0,
+                max: 24.0,
+            },
+        );
+        params.post_eq.band1_q = FloatParam::new(
+            "Post Band 1 Q",
+            1.0,
+            FloatRange::Linear {
+                min: 0.1,
+                max: 12.0,
+            },
+        );
+        params.post_eq.bypass = BoolParam::new("Post EQ Bypass", false);
+        params.post_eq.mode = EnumParam::new("Post EQ Mode", EqMode::On);
+
+        params.reset_smoothers();
+        let meters = Meters::default();
+        let mut processor = Processor::default();
+        processor.prepare(TEST_SAMPLE_RATE);
+        processor.reset(params.global_bypass.value());
+
+        let mut audio = make_sine(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE, 440.0, 0.08);
+        with_stereo_buffer(&mut audio, |buffer| {
+            processor.process_block(buffer, &params, &meters);
+        });
+        assert_audio_sane(&format!("processor/band-type/{:?}", band_type), &audio);
+    }
+}
+
+#[test]
+fn pre_eq_off_band_does_not_process_audio() {
+    let mut params = Cc22Params::default();
+    disable_all_modules(&mut params);
+    disable_all_eq_bands(&mut params.post_eq);
+
+    params.pre_eq.band2_enabled = BoolParam::new("Pre Band 2 Enabled", true);
+    params.pre_eq.band2_type = EnumParam::new("Pre Band 2 Type", EqBandType::Off);
+    params.pre_eq.band2_frequency = FloatParam::new(
+        "Pre Band 2 Freq",
+        400.0,
+        FloatRange::Linear {
+            min: 20.0,
+            max: 20_000.0,
+        },
+    );
+    params.pre_eq.band2_gain = FloatParam::new(
+        "Pre Band 2 Gain",
+        0.0,
+        FloatRange::Linear {
+            min: -24.0,
+            max: 24.0,
+        },
+    );
+    params.pre_eq.band2_q = FloatParam::new(
+        "Pre Band 2 Q",
+        1.0,
+        FloatRange::Linear {
+            min: 0.1,
+            max: 12.0,
+        },
+    );
+    params.pre_eq.bypass = BoolParam::new("Pre EQ Bypass", false);
+    params.pre_eq.mode = EnumParam::new("Pre EQ Mode", EqMode::On);
+
+    params.reset_smoothers();
+    let meters = Meters::default();
+    let mut processor = Processor::default();
+    processor.prepare(TEST_SAMPLE_RATE);
+    processor.reset(params.global_bypass.value());
+
+    let audio = make_sine(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE, 440.0, 0.1);
+    let mut processed = audio.clone();
+    with_stereo_buffer(&mut processed, |buffer| {
+        processor.process_block(buffer, &params, &meters);
+    });
+    assert_audio_sane("pre-eq-off-band", &processed);
+    assert!(
+        max_abs_difference(&processed, &audio) < 0.002,
+        "Off band should not alter audio"
+    );
+}
+
+#[test]
+fn post_eq_off_band_does_not_process_audio() {
+    let mut params = Cc22Params::default();
+    disable_all_modules(&mut params);
+    disable_all_pre_eq_bands(&mut params.pre_eq);
+
+    params.post_eq.band5_enabled = BoolParam::new("Post Band 5 Enabled", true);
+    params.post_eq.band5_type = EnumParam::new("Post Band 5 Type", EqBandType::Off);
+    params.post_eq.band5_frequency = FloatParam::new(
+        "Post Band 5 Freq",
+        10_000.0,
+        FloatRange::Linear {
+            min: 20.0,
+            max: 20_000.0,
+        },
+    );
+    params.post_eq.band5_gain = FloatParam::new(
+        "Post Band 5 Gain",
+        0.0,
+        FloatRange::Linear {
+            min: -24.0,
+            max: 24.0,
+        },
+    );
+    params.post_eq.band5_q = FloatParam::new(
+        "Post Band 5 Q",
+        1.0,
+        FloatRange::Linear {
+            min: 0.1,
+            max: 12.0,
+        },
+    );
+    params.post_eq.bypass = BoolParam::new("Post EQ Bypass", false);
+    params.post_eq.mode = EnumParam::new("Post EQ Mode", EqMode::On);
+
+    params.reset_smoothers();
+    let meters = Meters::default();
+    let mut processor = Processor::default();
+    processor.prepare(TEST_SAMPLE_RATE);
+    processor.reset(params.global_bypass.value());
+
+    let audio = make_sine(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE, 440.0, 0.1);
+    let mut processed = audio.clone();
+    with_stereo_buffer(&mut processed, |buffer| {
+        processor.process_block(buffer, &params, &meters);
+    });
+    assert_audio_sane("post-eq-off-band", &processed);
+    assert!(
+        max_abs_difference(&processed, &audio) < 0.002,
+        "Off band should not alter audio"
+    );
+}
+
+#[test]
+fn pre_eq_high_pass_band_attenuates_low_frequencies() {
+    let frequency = 1_000.0;
+    let low_freq = 50.0;
+
+    let rms_boosted = compute_pre_eq_rms(frequency, EqBandType::Bell, 6.0);
+    let rms_hp = compute_pre_eq_rms(frequency, EqBandType::HighPass, 0.0);
+    let rms_hp_low = compute_pre_eq_rms(low_freq, EqBandType::HighPass, 0.0);
+
+    assert!(
+        rms_hp_low < rms_hp * 0.7,
+        "HighPass should attenuate low frequencies: low_rms={rms_hp_low}, mid_rms={rms_hp}"
+    );
+    assert!(
+        rms_hp < rms_boosted * 0.9,
+        "HighPass mid RMS {rms_hp} should be lower than Bell boost RMS {rms_boosted}"
+    );
+}
+
+#[test]
+fn post_eq_low_pass_band_attenuates_high_frequencies() {
+    let mid_freq = 500.0;
+    let high_freq = 8_000.0;
+
+    let rms_mid = compute_post_eq_rms(mid_freq, EqBandType::LowPass, 0.0);
+    let rms_high = compute_post_eq_rms(high_freq, EqBandType::LowPass, 0.0);
+
+    assert!(
+        rms_high < rms_mid * 0.7,
+        "LowPass should attenuate high frequencies: mid_rms={rms_mid}, high_rms={rms_high}"
+    );
+}
+
+#[test]
+fn pre_eq_disabled_band_passes_signal_unaffected() {
+    let freq = 1_000.0;
+
+    let rms_disabled = compute_pre_eq_rms_disabled(freq, EqBandType::Bell, 12.0);
+    let rms_reference = compute_pre_eq_rms_flat(freq);
+
+    assert!(
+        (rms_disabled - rms_reference).abs() < 0.002,
+        "Disabled band should not alter signal: disabled={rms_disabled}, ref={rms_reference}"
+    );
+}
+
+#[test]
+fn post_eq_disabled_band_passes_signal_unaffected() {
+    let freq = 1_000.0;
+
+    let rms_disabled = compute_post_eq_rms_disabled(freq, EqBandType::Bell, 12.0);
+    let rms_reference = compute_post_eq_rms_flat(freq);
+
+    assert!(
+        (rms_disabled - rms_reference).abs() < 0.002,
+        "Disabled POST band should not alter signal: disabled={rms_disabled}, ref={rms_reference}"
+    );
+}
+
+#[test]
+fn both_eqs_active_apply_cumulative_effect() {
+    let freq = 1_000.0;
+
+    let rms_both = compute_both_eq_rms(freq, 3.0, 3.0);
+    let rms_pre_only = compute_pre_eq_rms(freq, EqBandType::Bell, 3.0);
+    let rms_post_only = compute_post_eq_rms(freq, EqBandType::Bell, 3.0);
+
+    assert!(
+        rms_both > rms_pre_only * 1.1,
+        "Both EQs should boost more than PRE alone"
+    );
+    assert!(
+        rms_both > rms_post_only * 1.1,
+        "Both EQs should boost more than POST alone"
+    );
+}
+
+fn disable_all_eq_bands(eq: &mut EqParams) {
+    eq.band1_enabled = BoolParam::new("EB1E", false);
+    eq.band2_enabled = BoolParam::new("EB2E", false);
+    eq.band3_enabled = BoolParam::new("EB3E", false);
+    eq.band4_enabled = BoolParam::new("EB4E", false);
+    eq.band5_enabled = BoolParam::new("EB5E", false);
+    eq.bypass = BoolParam::new("EB", true);
+}
+
+fn disable_all_pre_eq_bands(eq: &mut PreEqParams) {
+    eq.band1_enabled = BoolParam::new("PE1E", false);
+    eq.band2_enabled = BoolParam::new("PE2E", false);
+    eq.band3_enabled = BoolParam::new("PE3E", false);
+    eq.band4_enabled = BoolParam::new("PE4E", false);
+    eq.band5_enabled = BoolParam::new("PE5E", false);
+    eq.bypass = BoolParam::new("PEB", true);
+}
+
+fn disable_all_modules(params: &mut Cc22Params) {
+    params.character.bypass = BoolParam::new("Character Bypass", true);
+    params.movement.bypass = BoolParam::new("Movement Bypass", true);
+    params.diffusion.bypass = BoolParam::new("Diffusion Bypass", true);
+    params.texture.bypass = BoolParam::new("Texture Bypass", true);
+}
+
+fn compute_pre_eq_rms(sine_freq: f32, band_type: EqBandType, gain_db: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_pre_eq_bands(&mut params.pre_eq);
+            params.pre_eq.band2_enabled = BoolParam::new("PB2E", true);
+            params.pre_eq.band2_type = EnumParam::new("PB2T", band_type);
+            params.pre_eq.band2_frequency = FloatParam::new(
+                "PB2F",
+                1_000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 20_000.0,
+                },
+            );
+            params.pre_eq.band2_gain = FloatParam::new(
+                "PB2G",
+                gain_db,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            );
+            params.pre_eq.band2_q = FloatParam::new(
+                "PB2Q",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.1,
+                    max: 12.0,
+                },
+            );
+            params.pre_eq.bypass = BoolParam::new("PB", false);
+            params.pre_eq.mode = EnumParam::new("PM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_post_eq_rms(sine_freq: f32, band_type: EqBandType, gain_db: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_eq_bands(&mut params.post_eq);
+            params.post_eq.band2_enabled = BoolParam::new("PB2E", true);
+            params.post_eq.band2_type = EnumParam::new("PB2T", band_type);
+            params.post_eq.band2_frequency = FloatParam::new(
+                "PB2F",
+                1_000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 20_000.0,
+                },
+            );
+            params.post_eq.band2_gain = FloatParam::new(
+                "PB2G",
+                gain_db,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            );
+            params.post_eq.band2_q = FloatParam::new(
+                "PB2Q",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.1,
+                    max: 12.0,
+                },
+            );
+            params.post_eq.bypass = BoolParam::new("PB", false);
+            params.post_eq.mode = EnumParam::new("PM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_pre_eq_rms_disabled(sine_freq: f32, band_type: EqBandType, gain_db: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_pre_eq_bands(&mut params.pre_eq);
+            params.pre_eq.band2_enabled = BoolParam::new("PB2E", false);
+            params.pre_eq.band2_type = EnumParam::new("PB2T", band_type);
+            params.pre_eq.band2_frequency = FloatParam::new(
+                "PB2F",
+                1_000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 20_000.0,
+                },
+            );
+            params.pre_eq.band2_gain = FloatParam::new(
+                "PB2G",
+                gain_db,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            );
+            params.pre_eq.band2_q = FloatParam::new(
+                "PB2Q",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.1,
+                    max: 12.0,
+                },
+            );
+            params.pre_eq.bypass = BoolParam::new("PB", false);
+            params.pre_eq.mode = EnumParam::new("PM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_post_eq_rms_disabled(sine_freq: f32, band_type: EqBandType, gain_db: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_eq_bands(&mut params.post_eq);
+            params.post_eq.band2_enabled = BoolParam::new("PB2E", false);
+            params.post_eq.band2_type = EnumParam::new("PB2T", band_type);
+            params.post_eq.band2_frequency = FloatParam::new(
+                "PB2F",
+                1_000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 20_000.0,
+                },
+            );
+            params.post_eq.band2_gain = FloatParam::new(
+                "PB2G",
+                gain_db,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            );
+            params.post_eq.band2_q = FloatParam::new(
+                "PB2Q",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.1,
+                    max: 12.0,
+                },
+            );
+            params.post_eq.bypass = BoolParam::new("PB", false);
+            params.post_eq.mode = EnumParam::new("PM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_pre_eq_rms_flat(sine_freq: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_pre_eq_bands(&mut params.pre_eq);
+            params.pre_eq.bypass = BoolParam::new("PB", false);
+            params.pre_eq.mode = EnumParam::new("PM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_post_eq_rms_flat(sine_freq: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_eq_bands(&mut params.post_eq);
+            params.post_eq.bypass = BoolParam::new("PB", false);
+            params.post_eq.mode = EnumParam::new("PM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_both_eq_rms(sine_freq: f32, pre_gain: f32, post_gain: f32) -> f32 {
+    compute_eq_rms_with_config(
+        |params| {
+            disable_all_pre_eq_bands(&mut params.pre_eq);
+            disable_all_eq_bands(&mut params.post_eq);
+
+            params.pre_eq.band2_enabled = BoolParam::new("PreE", true);
+            params.pre_eq.band2_type = EnumParam::new("PreT", EqBandType::Bell);
+            params.pre_eq.band2_frequency = FloatParam::new(
+                "PreF",
+                1_000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 20_000.0,
+                },
+            );
+            params.pre_eq.band2_gain = FloatParam::new(
+                "PreG",
+                pre_gain,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            );
+            params.pre_eq.band2_q = FloatParam::new(
+                "PreQ",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.1,
+                    max: 12.0,
+                },
+            );
+            params.pre_eq.bypass = BoolParam::new("PreB", false);
+            params.pre_eq.mode = EnumParam::new("PreM", EqMode::On);
+
+            params.post_eq.band2_enabled = BoolParam::new("PostE", true);
+            params.post_eq.band2_type = EnumParam::new("PostT", EqBandType::Bell);
+            params.post_eq.band2_frequency = FloatParam::new(
+                "PostF",
+                1_000.0,
+                FloatRange::Linear {
+                    min: 20.0,
+                    max: 20_000.0,
+                },
+            );
+            params.post_eq.band2_gain = FloatParam::new(
+                "PostG",
+                post_gain,
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
+            );
+            params.post_eq.band2_q = FloatParam::new(
+                "PostQ",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.1,
+                    max: 12.0,
+                },
+            );
+            params.post_eq.bypass = BoolParam::new("PostB", false);
+            params.post_eq.mode = EnumParam::new("PostM", EqMode::On);
+        },
+        sine_freq,
+    )
+}
+
+fn compute_eq_rms_with_config(configure: impl Fn(&mut Cc22Params), sine_freq: f32) -> f32 {
+    let mut params = Cc22Params::default();
+    disable_all_modules(&mut params);
+    disable_all_pre_eq_bands(&mut params.pre_eq);
+    disable_all_eq_bands(&mut params.post_eq);
+    configure(&mut params);
+    params.reset_smoothers();
+
+    let meters = Meters::default();
+    let mut processor = Processor::default();
+    processor.prepare(TEST_SAMPLE_RATE);
+    processor.reset(params.global_bypass.value());
+
+    let samples = 4_800;
+    let mut sum = 0.0_f32;
+    for index in 0..samples {
+        let phase = core::f32::consts::TAU * sine_freq * index as f32 / TEST_SAMPLE_RATE;
+        let sample = phase.sin() * 0.1;
+        let mut audio = [vec![sample; 1], vec![sample; 1]];
+        with_stereo_buffer(&mut audio, |buffer| {
+            processor.process_block(buffer, &params, &meters);
+        });
+        sum += audio[0][0] * audio[0][0];
+    }
+
+    (sum / samples as f32).sqrt()
 }

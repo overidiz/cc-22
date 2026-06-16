@@ -191,7 +191,6 @@ impl Movement {
                 other => other,
             },
             MovementMode::Tremolo => requested_shape,
-            // TODO: Character-22 inspired modes — placeholder LFO shape
             MovementMode::Doubler | MovementMode::Phaser | MovementMode::Pitch => LfoShape::Sine,
         };
         self.set_lfo_shape(frame_shape);

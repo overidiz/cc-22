@@ -6,7 +6,7 @@ impl Default for UiState {
             selected_preset: 0,
             random_seed: 0,
             selected_eq_stage: EqStageSelection::Post,
-            selected_eq_band: EqBandSelection::LowCut,
+            selected_eq_band: EqBandSelection::Band1,
             drag_source: None,
             drag_drop_slot: None,
             input_meter: MeterBallistics::default(),
@@ -44,39 +44,39 @@ pub(crate) enum EqStageSelection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EqBandSelection {
-    LowCut,
-    LowShelf,
-    Mid,
-    HighShelf,
-    HighCut,
+    Band1,
+    Band2,
+    Band3,
+    Band4,
+    Band5,
 }
 
 impl EqBandSelection {
     pub(crate) const ALL: [Self; 5] = [
-        Self::LowCut,
-        Self::LowShelf,
-        Self::Mid,
-        Self::HighShelf,
-        Self::HighCut,
+        Self::Band1,
+        Self::Band2,
+        Self::Band3,
+        Self::Band4,
+        Self::Band5,
     ];
 
     pub(crate) fn index(self) -> usize {
         match self {
-            Self::LowCut => 0,
-            Self::LowShelf => 1,
-            Self::Mid => 2,
-            Self::HighShelf => 3,
-            Self::HighCut => 4,
+            Self::Band1 => 0,
+            Self::Band2 => 1,
+            Self::Band3 => 2,
+            Self::Band4 => 3,
+            Self::Band5 => 4,
         }
     }
 
     pub(crate) fn from_index(index: usize) -> Self {
         match index {
-            0 => Self::LowCut,
-            1 => Self::LowShelf,
-            2 => Self::Mid,
-            3 => Self::HighShelf,
-            _ => Self::HighCut,
+            0 => Self::Band1,
+            1 => Self::Band2,
+            2 => Self::Band3,
+            3 => Self::Band4,
+            _ => Self::Band5,
         }
     }
 }
