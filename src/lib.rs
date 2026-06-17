@@ -49,7 +49,7 @@ impl Cc22 {
 impl Plugin for Cc22 {
     const NAME: &'static str = "CC-22";
     const VENDOR: &'static str = "Rafa Audio";
-    const URL: &'static str = "https://github.com/rafatoledoreis/cc-22";
+    const URL: &'static str = "https://github.com/overidiz/cc-22";
     const EMAIL: &'static str = "rafatoledoreis@gmail.com";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 

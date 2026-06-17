@@ -2,7 +2,7 @@ use nih_plug::prelude::Buffer;
 
 pub const TEST_SAMPLE_RATE: f32 = 48_000.0;
 pub const TEST_BLOCK_SAMPLES: usize = 1_024;
-pub const MAX_EXPECTED_ABS_SAMPLE: f32 = 8.0;
+pub const MAX_EXPECTED_ABS_SAMPLE: f32 = 9.0;
 pub const TEN_SECONDS_SAMPLES: usize = TEST_SAMPLE_RATE as usize * 10;
 
 #[derive(Debug, Clone, Copy)]

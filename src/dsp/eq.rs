@@ -53,19 +53,19 @@ pub struct Eq {
 
 #[derive(Debug, Clone, Copy)]
 pub struct EqFrame {
-    mode: EqMode,
-    active_mix: f32,
-    mode_fade: f32,
-    bands: [EqBandFrame; NUM_BANDS],
+    pub mode: EqMode,
+    pub active_mix: f32,
+    pub mode_fade: f32,
+    pub bands: [EqBandFrame; NUM_BANDS],
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct EqBandFrame {
-    enabled: bool,
-    band_type: EqBandType,
-    frequency: f32,
-    gain: f32,
-    q: f32,
+    pub enabled: bool,
+    pub band_type: EqBandType,
+    pub frequency: f32,
+    pub gain: f32,
+    pub q: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -325,10 +325,10 @@ fn coefficients_for_band(band: EqBandFrame, sample_rate: f32) -> BiquadCoefficie
             BiquadCoefficients::peaking(band.frequency, band.gain, band.q, sample_rate)
         }
         EqBandType::LowShelf => {
-            BiquadCoefficients::low_shelf(band.frequency, band.gain, sample_rate)
+            BiquadCoefficients::low_shelf(band.frequency, band.gain, band.q, sample_rate)
         }
         EqBandType::HighShelf => {
-            BiquadCoefficients::high_shelf(band.frequency, band.gain, sample_rate)
+            BiquadCoefficients::high_shelf(band.frequency, band.gain, band.q, sample_rate)
         }
         EqBandType::HighPass => BiquadCoefficients::high_pass(band.frequency, band.q, sample_rate),
         EqBandType::LowPass => BiquadCoefficients::low_pass(band.frequency, band.q, sample_rate),
@@ -427,12 +427,12 @@ impl BiquadCoefficients {
         normalize(b0, b1, b2, a0, a1, a2)
     }
 
-    fn low_shelf(frequency: f32, gain_db: f32, sample_rate: f32) -> Self {
-        shelf(frequency, gain_db, sample_rate, false)
+    fn low_shelf(frequency: f32, gain_db: f32, q: f32, sample_rate: f32) -> Self {
+        shelf(frequency, gain_db, q, sample_rate, false)
     }
 
-    fn high_shelf(frequency: f32, gain_db: f32, sample_rate: f32) -> Self {
-        shelf(frequency, gain_db, sample_rate, true)
+    fn high_shelf(frequency: f32, gain_db: f32, q: f32, sample_rate: f32) -> Self {
+        shelf(frequency, gain_db, q, sample_rate, true)
     }
 
     fn sanitized(self) -> Self {
@@ -449,7 +449,7 @@ impl BiquadCoefficients {
     }
 }
 
-fn shelf(frequency: f32, gain_db: f32, sample_rate: f32, high: bool) -> BiquadCoefficients {
+fn shelf(frequency: f32, gain_db: f32, q: f32, sample_rate: f32, high: bool) -> BiquadCoefficients {
     if gain_db.abs() < 0.000_1 {
         return BiquadCoefficients::identity();
     }
@@ -459,7 +459,7 @@ fn shelf(frequency: f32, gain_db: f32, sample_rate: f32, high: bool) -> BiquadCo
     let cos = omega.cos();
     let a = 10.0_f32.powf(gain_db / 40.0);
     let sqrt_a = a.sqrt();
-    let alpha = sin * core::f32::consts::FRAC_1_SQRT_2;
+    let alpha = sin / (2.0 * q.max(0.1));
     let two_sqrt_a_alpha = 2.0 * sqrt_a * alpha;
 
     let (b0, b1, b2, a0, a1, a2) = if high {
@@ -511,7 +511,7 @@ fn clamp_frequency(frequency: f32, min: f32, max: f32, sample_rate: f32) -> f32 
 mod tests {
     use super::{
         clamp_frequency, coefficients_for_band, Biquad, BiquadCoefficients, Eq, EqBandFrame,
-        EqBandType, EqFrame, EqMode,
+        EqBandType, EqFrame, EqMode, NUM_BANDS,
     };
 
     #[test]
@@ -523,9 +523,9 @@ mod tests {
     fn biquad_coefficients_are_finite() {
         let filters = [
             BiquadCoefficients::high_pass(20.0, 0.707, 48_000.0),
-            BiquadCoefficients::low_shelf(120.0, 18.0, 48_000.0),
+            BiquadCoefficients::low_shelf(120.0, 18.0, 1.0, 48_000.0),
             BiquadCoefficients::peaking(1_000.0, -18.0, 0.1, 48_000.0),
-            BiquadCoefficients::high_shelf(8_000.0, 18.0, 48_000.0),
+            BiquadCoefficients::high_shelf(8_000.0, 18.0, 1.0, 48_000.0),
             BiquadCoefficients::low_pass(20_000.0, 0.707, 48_000.0),
         ];
 
@@ -753,6 +753,196 @@ mod tests {
         }
 
         assert!(peak < 8.0, "eq impulse response peak was {peak}");
+    }
+
+    #[test]
+    fn shelf_q_affects_coefficients() {
+        let narrow = coefficients_for_band(
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::LowShelf,
+                frequency: 1_000.0,
+                gain: 12.0,
+                q: 4.0,
+            },
+            48_000.0,
+        );
+        let wide = coefficients_for_band(
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::LowShelf,
+                frequency: 1_000.0,
+                gain: 12.0,
+                q: 0.5,
+            },
+            48_000.0,
+        );
+
+        let diff = (narrow.b0 - wide.b0).abs()
+            + (narrow.b1 - wide.b1).abs()
+            + (narrow.b2 - wide.b2).abs()
+            + (narrow.a1 - wide.a1).abs()
+            + (narrow.a2 - wide.a2).abs();
+        assert!(diff > 0.000_1, "Shelf Q should affect coefficients");
+    }
+
+    #[test]
+    fn high_shelf_q_affects_coefficients() {
+        let narrow = coefficients_for_band(
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::HighShelf,
+                frequency: 5_000.0,
+                gain: 12.0,
+                q: 4.0,
+            },
+            48_000.0,
+        );
+        let wide = coefficients_for_band(
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::HighShelf,
+                frequency: 5_000.0,
+                gain: 12.0,
+                q: 0.5,
+            },
+            48_000.0,
+        );
+
+        let diff = (narrow.b0 - wide.b0).abs()
+            + (narrow.b1 - wide.b1).abs()
+            + (narrow.b2 - wide.b2).abs()
+            + (narrow.a1 - wide.a1).abs()
+            + (narrow.a2 - wide.a2).abs();
+        assert!(diff > 0.000_1, "High shelf Q should affect coefficients");
+    }
+
+    #[test]
+    fn off_band_is_transparent_in_full_eq() {
+        let mut eq = Eq::default();
+        eq.prepare(48_000.0);
+        let frame = EqFrame {
+            mode: EqMode::On,
+            active_mix: 1.0,
+            mode_fade: 1.0,
+            bands: [EqBandFrame::off(1_000.0); NUM_BANDS],
+        };
+        eq.update_coefficients(&frame);
+
+        for index in 0..512 {
+            let input = (index as f32 * 0.01).sin();
+            let output = eq.process_sample_for_channel(0, input, &frame);
+            assert!((output - input).abs() < 0.000_001);
+        }
+    }
+
+    #[test]
+    fn ten_eqs_flat_in_series_are_transparent() {
+        let mut eqs: [Eq; 10] = Default::default();
+        for eq in &mut eqs {
+            eq.prepare(48_000.0);
+        }
+
+        let flat_bands: [EqBandFrame; NUM_BANDS] = core::array::from_fn(|_| EqBandFrame {
+            enabled: true,
+            band_type: EqBandType::Bell,
+            frequency: 1_000.0,
+            gain: 0.0,
+            q: 1.0,
+        });
+
+        let frame = EqFrame {
+            mode: EqMode::On,
+            active_mix: 1.0,
+            mode_fade: 1.0,
+            bands: flat_bands,
+        };
+
+        for eq in &mut eqs {
+            eq.update_coefficients(&frame);
+        }
+
+        for index in 0..512 {
+            let input = (index as f32 * 0.01).sin() * 0.5;
+            let mut sample = input;
+            for eq in &mut eqs {
+                sample = eq.process_sample_for_channel(0, sample, &frame);
+            }
+            assert!(
+                (sample - input).abs() < 0.000_1,
+                "10 flat EQs should be transparent. input={input}, output={sample}"
+            );
+        }
+    }
+
+    #[test]
+    fn ten_eqs_with_active_bands_dont_explode() {
+        let mut eqs: [Eq; 10] = Default::default();
+        for eq in &mut eqs {
+            eq.prepare(48_000.0);
+        }
+
+        let active_bands: [EqBandFrame; NUM_BANDS] = [
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::HighPass,
+                frequency: 40.0,
+                gain: 0.0,
+                q: 0.707,
+            },
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::LowShelf,
+                frequency: 120.0,
+                gain: 6.0,
+                q: 1.0,
+            },
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::Bell,
+                frequency: 800.0,
+                gain: -3.0,
+                q: 2.0,
+            },
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::Bell,
+                frequency: 3_000.0,
+                gain: 4.0,
+                q: 0.7,
+            },
+            EqBandFrame {
+                enabled: true,
+                band_type: EqBandType::HighShelf,
+                frequency: 8_000.0,
+                gain: -2.0,
+                q: 1.0,
+            },
+        ];
+
+        let frame = EqFrame {
+            mode: EqMode::On,
+            active_mix: 1.0,
+            mode_fade: 1.0,
+            bands: active_bands,
+        };
+
+        for eq in &mut eqs {
+            eq.update_coefficients(&frame);
+        }
+
+        let mut peak = 0.0_f32;
+        for index in 0..4_000 {
+            let input = if index == 0 { 1.0 } else { 0.0 };
+            let mut sample = input;
+            for eq in &mut eqs {
+                sample = eq.process_sample_for_channel(0, sample, &frame);
+            }
+            assert!(sample.is_finite());
+            peak = peak.max(sample.abs());
+        }
+
+        assert!(peak < 8.0, "10 active EQs peak was {peak}");
     }
 
     fn assert_coefficients_finite(coefficients: BiquadCoefficients) {

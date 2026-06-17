@@ -21,23 +21,47 @@ pub struct Cc22Params {
     #[id = "input_gain"]
     pub input_gain: FloatParam,
 
-    #[nested(group = "Pre EQ")]
-    pub pre_eq: PreEqParams,
+    #[nested(group = "Global Pre EQ")]
+    pub global_pre_eq: GlobalPreEqParams,
 
     #[nested(group = "Character")]
     pub character: CharacterParams,
 
+    #[nested(group = "Character Pre EQ")]
+    pub character_pre_eq: CharacterPreEq,
+
+    #[nested(group = "Character Post EQ")]
+    pub character_post_eq: CharacterPostEq,
+
     #[nested(group = "Movement")]
     pub movement: MovementParams,
+
+    #[nested(group = "Movement Pre EQ")]
+    pub movement_pre_eq: MovementPreEq,
+
+    #[nested(group = "Movement Post EQ")]
+    pub movement_post_eq: MovementPostEq,
 
     #[nested(group = "Diffusion")]
     pub diffusion: DiffusionParams,
 
+    #[nested(group = "Diffusion Pre EQ")]
+    pub diffusion_pre_eq: DiffusionPreEq,
+
+    #[nested(group = "Diffusion Post EQ")]
+    pub diffusion_post_eq: DiffusionPostEq,
+
     #[nested(group = "Texture")]
     pub texture: TextureParams,
 
-    #[nested(group = "Post EQ")]
-    pub post_eq: EqParams,
+    #[nested(group = "Texture Pre EQ")]
+    pub texture_pre_eq: TexturePreEq,
+
+    #[nested(group = "Texture Post EQ")]
+    pub texture_post_eq: TexturePostEq,
+
+    #[nested(group = "Global Post EQ")]
+    pub global_post_eq: GlobalPostEqParams,
 
     #[id = "output_gain"]
     pub output_gain: FloatParam,
@@ -66,12 +90,20 @@ impl Default for Cc22Params {
         Self {
             editor_state: EguiState::from_size(BASE_WIDTH as u32, BASE_HEIGHT as u32),
             input_gain: gain_param("Input Gain"),
-            pre_eq: PreEqParams::default(),
+            global_pre_eq: GlobalPreEqParams::default(),
             character: CharacterParams::default(),
+            character_pre_eq: CharacterPreEq::default(),
+            character_post_eq: CharacterPostEq::default(),
             movement: MovementParams::default(),
+            movement_pre_eq: MovementPreEq::default(),
+            movement_post_eq: MovementPostEq::default(),
             diffusion: DiffusionParams::default(),
+            diffusion_pre_eq: DiffusionPreEq::default(),
+            diffusion_post_eq: DiffusionPostEq::default(),
             texture: TextureParams::default(),
-            post_eq: EqParams::default(),
+            texture_pre_eq: TexturePreEq::default(),
+            texture_post_eq: TexturePostEq::default(),
+            global_post_eq: GlobalPostEqParams::default(),
             output_gain: gain_param("Output Gain"),
             dry_wet: FloatParam::new("Dry/Wet", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(30.0))
@@ -102,12 +134,20 @@ impl Cc22Params {
 
     pub fn reset_smoothers(&self) {
         self.input_gain.smoothed.reset(self.input_gain.value());
-        self.pre_eq.reset_smoothers();
+        self.global_pre_eq.reset_smoothers();
         self.character.reset_smoothers();
+        self.character_pre_eq.reset_smoothers();
+        self.character_post_eq.reset_smoothers();
         self.movement.reset_smoothers();
+        self.movement_pre_eq.reset_smoothers();
+        self.movement_post_eq.reset_smoothers();
         self.diffusion.reset_smoothers();
+        self.diffusion_pre_eq.reset_smoothers();
+        self.diffusion_post_eq.reset_smoothers();
         self.texture.reset_smoothers();
-        self.post_eq.reset_smoothers();
+        self.texture_pre_eq.reset_smoothers();
+        self.texture_post_eq.reset_smoothers();
+        self.global_post_eq.reset_smoothers();
         self.output_gain.smoothed.reset(self.output_gain.value());
         self.dry_wet.smoothed.reset(self.dry_wet.value());
     }
@@ -485,100 +525,12 @@ impl TextureParams {
     }
 }
 
-#[derive(Params)]
-pub struct EqParams {
-    #[id = "eq_mode"]
-    pub mode: EnumParam<EqMode>,
-    #[id = "eq_bypass"]
-    pub bypass: BoolParam,
-    #[id = "eq_band1_enabled"]
-    pub band1_enabled: BoolParam,
-    #[id = "eq_band1_type"]
-    pub band1_type: EnumParam<EqBandType>,
-    #[id = "eq_low_cut_frequency"]
-    pub band1_frequency: FloatParam,
-    #[id = "eq_band1_gain"]
-    pub band1_gain: FloatParam,
-    #[id = "eq_band1_q"]
-    pub band1_q: FloatParam,
-    #[id = "eq_band2_enabled"]
-    pub band2_enabled: BoolParam,
-    #[id = "eq_band2_type"]
-    pub band2_type: EnumParam<EqBandType>,
-    #[id = "eq_low_shelf_frequency"]
-    pub band2_frequency: FloatParam,
-    #[id = "eq_low_shelf_gain"]
-    pub band2_gain: FloatParam,
-    #[id = "eq_band2_q"]
-    pub band2_q: FloatParam,
-    #[id = "eq_band3_enabled"]
-    pub band3_enabled: BoolParam,
-    #[id = "eq_band3_type"]
-    pub band3_type: EnumParam<EqBandType>,
-    #[id = "eq_mid_frequency"]
-    pub band3_frequency: FloatParam,
-    #[id = "eq_mid_gain"]
-    pub band3_gain: FloatParam,
-    #[id = "eq_mid_q"]
-    pub band3_q: FloatParam,
-    #[id = "eq_band4_enabled"]
-    pub band4_enabled: BoolParam,
-    #[id = "eq_band4_type"]
-    pub band4_type: EnumParam<EqBandType>,
-    #[id = "eq_high_shelf_frequency"]
-    pub band4_frequency: FloatParam,
-    #[id = "eq_high_shelf_gain"]
-    pub band4_gain: FloatParam,
-    #[id = "eq_band4_q"]
-    pub band4_q: FloatParam,
-    #[id = "eq_band5_enabled"]
-    pub band5_enabled: BoolParam,
-    #[id = "eq_band5_type"]
-    pub band5_type: EnumParam<EqBandType>,
-    #[id = "eq_high_cut_frequency"]
-    pub band5_frequency: FloatParam,
-    #[id = "eq_band5_gain"]
-    pub band5_gain: FloatParam,
-    #[id = "eq_band5_q"]
-    pub band5_q: FloatParam,
-}
-
-impl Default for EqParams {
-    fn default() -> Self {
-        Self {
-            mode: EnumParam::new("EQ Mode", EqMode::On),
-            bypass: module_bypass_param("EQ Bypass"),
-            band1_enabled: eq_band_enabled_param("Band 1 Enabled", true),
-            band1_type: EnumParam::new("Band 1 Type", EqBandType::Bell),
-            band1_frequency: frequency_param("Band 1 Frequency", 80.0, 20.0, 20_000.0, 80.0),
-            band1_gain: eq_gain_param("Band 1 Gain"),
-            band1_q: eq_q_param("Band 1 Q"),
-            band2_enabled: eq_band_enabled_param("Band 2 Enabled", true),
-            band2_type: EnumParam::new("Band 2 Type", EqBandType::Bell),
-            band2_frequency: frequency_param("Band 2 Frequency", 250.0, 20.0, 20_000.0, 80.0),
-            band2_gain: eq_gain_param("Band 2 Gain"),
-            band2_q: eq_q_param("Band 2 Q"),
-            band3_enabled: eq_band_enabled_param("Band 3 Enabled", true),
-            band3_type: EnumParam::new("Band 3 Type", EqBandType::Bell),
-            band3_frequency: frequency_param("Band 3 Frequency", 1_000.0, 20.0, 20_000.0, 80.0),
-            band3_gain: eq_gain_param("Band 3 Gain"),
-            band3_q: eq_q_param("Band 3 Q"),
-            band4_enabled: eq_band_enabled_param("Band 4 Enabled", true),
-            band4_type: EnumParam::new("Band 4 Type", EqBandType::Bell),
-            band4_frequency: frequency_param("Band 4 Frequency", 4_000.0, 20.0, 20_000.0, 80.0),
-            band4_gain: eq_gain_param("Band 4 Gain"),
-            band4_q: eq_q_param("Band 4 Q"),
-            band5_enabled: eq_band_enabled_param("Band 5 Enabled", true),
-            band5_type: EnumParam::new("Band 5 Type", EqBandType::Bell),
-            band5_frequency: frequency_param("Band 5 Frequency", 12_000.0, 20.0, 20_000.0, 80.0),
-            band5_gain: eq_gain_param("Band 5 Gain"),
-            band5_q: eq_q_param("Band 5 Q"),
-        }
-    }
-}
+// ═══════════════════════════════════════════════════════════════════
+// Global Pre EQ — keeps legacy pre_eq_* IDs for backward compat
+// ═══════════════════════════════════════════════════════════════════
 
 #[derive(Params)]
-pub struct PreEqParams {
+pub struct GlobalPreEqParams {
     #[id = "pre_eq_mode"]
     pub mode: EnumParam<EqMode>,
     #[id = "pre_eq_bypass"]
@@ -635,7 +587,7 @@ pub struct PreEqParams {
     pub band5_q: FloatParam,
 }
 
-impl Default for PreEqParams {
+impl Default for GlobalPreEqParams {
     fn default() -> Self {
         Self {
             mode: EnumParam::new("Pre EQ Mode", EqMode::On),
@@ -676,6 +628,546 @@ impl Default for PreEqParams {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Global Post EQ — keeps legacy eq_* IDs for backward compat
+// ═══════════════════════════════════════════════════════════════════
+
+#[derive(Params)]
+pub struct GlobalPostEqParams {
+    #[id = "eq_mode"]
+    pub mode: EnumParam<EqMode>,
+    #[id = "eq_bypass"]
+    pub bypass: BoolParam,
+    #[id = "eq_band1_enabled"]
+    pub band1_enabled: BoolParam,
+    #[id = "eq_band1_type"]
+    pub band1_type: EnumParam<EqBandType>,
+    #[id = "eq_low_cut_frequency"]
+    pub band1_frequency: FloatParam,
+    #[id = "eq_band1_gain"]
+    pub band1_gain: FloatParam,
+    #[id = "eq_band1_q"]
+    pub band1_q: FloatParam,
+    #[id = "eq_band2_enabled"]
+    pub band2_enabled: BoolParam,
+    #[id = "eq_band2_type"]
+    pub band2_type: EnumParam<EqBandType>,
+    #[id = "eq_low_shelf_frequency"]
+    pub band2_frequency: FloatParam,
+    #[id = "eq_low_shelf_gain"]
+    pub band2_gain: FloatParam,
+    #[id = "eq_band2_q"]
+    pub band2_q: FloatParam,
+    #[id = "eq_band3_enabled"]
+    pub band3_enabled: BoolParam,
+    #[id = "eq_band3_type"]
+    pub band3_type: EnumParam<EqBandType>,
+    #[id = "eq_mid_frequency"]
+    pub band3_frequency: FloatParam,
+    #[id = "eq_mid_gain"]
+    pub band3_gain: FloatParam,
+    #[id = "eq_mid_q"]
+    pub band3_q: FloatParam,
+    #[id = "eq_band4_enabled"]
+    pub band4_enabled: BoolParam,
+    #[id = "eq_band4_type"]
+    pub band4_type: EnumParam<EqBandType>,
+    #[id = "eq_high_shelf_frequency"]
+    pub band4_frequency: FloatParam,
+    #[id = "eq_high_shelf_gain"]
+    pub band4_gain: FloatParam,
+    #[id = "eq_band4_q"]
+    pub band4_q: FloatParam,
+    #[id = "eq_band5_enabled"]
+    pub band5_enabled: BoolParam,
+    #[id = "eq_band5_type"]
+    pub band5_type: EnumParam<EqBandType>,
+    #[id = "eq_high_cut_frequency"]
+    pub band5_frequency: FloatParam,
+    #[id = "eq_band5_gain"]
+    pub band5_gain: FloatParam,
+    #[id = "eq_band5_q"]
+    pub band5_q: FloatParam,
+}
+
+impl Default for GlobalPostEqParams {
+    fn default() -> Self {
+        Self {
+            mode: EnumParam::new("EQ Mode", EqMode::On),
+            bypass: module_bypass_param("EQ Bypass"),
+            band1_enabled: eq_band_enabled_param("Band 1 Enabled", true),
+            band1_type: EnumParam::new("Band 1 Type", EqBandType::Bell),
+            band1_frequency: frequency_param("Band 1 Frequency", 80.0, 20.0, 20_000.0, 80.0),
+            band1_gain: eq_gain_param("Band 1 Gain"),
+            band1_q: eq_q_param("Band 1 Q"),
+            band2_enabled: eq_band_enabled_param("Band 2 Enabled", true),
+            band2_type: EnumParam::new("Band 2 Type", EqBandType::Bell),
+            band2_frequency: frequency_param("Band 2 Frequency", 250.0, 20.0, 20_000.0, 80.0),
+            band2_gain: eq_gain_param("Band 2 Gain"),
+            band2_q: eq_q_param("Band 2 Q"),
+            band3_enabled: eq_band_enabled_param("Band 3 Enabled", true),
+            band3_type: EnumParam::new("Band 3 Type", EqBandType::Bell),
+            band3_frequency: frequency_param("Band 3 Frequency", 1_000.0, 20.0, 20_000.0, 80.0),
+            band3_gain: eq_gain_param("Band 3 Gain"),
+            band3_q: eq_q_param("Band 3 Q"),
+            band4_enabled: eq_band_enabled_param("Band 4 Enabled", true),
+            band4_type: EnumParam::new("Band 4 Type", EqBandType::Bell),
+            band4_frequency: frequency_param("Band 4 Frequency", 4_000.0, 20.0, 20_000.0, 80.0),
+            band4_gain: eq_gain_param("Band 4 Gain"),
+            band4_q: eq_q_param("Band 4 Q"),
+            band5_enabled: eq_band_enabled_param("Band 5 Enabled", true),
+            band5_type: EnumParam::new("Band 5 Type", EqBandType::Bell),
+            band5_frequency: frequency_param("Band 5 Frequency", 12_000.0, 20.0, 20_000.0, 80.0),
+            band5_gain: eq_gain_param("Band 5 Gain"),
+            band5_q: eq_q_param("Band 5 Q"),
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Module EQ macro — full explicit ID convention
+// ═══════════════════════════════════════════════════════════════════
+
+macro_rules! define_module_eq {
+    ($name:ident,
+     $mode_id:literal, $bypass_id:literal,
+     $b1_en:literal, $b1_ty:literal, $b1_freq:literal, $b1_gain:literal, $b1_q:literal,
+     $b2_en:literal, $b2_ty:literal, $b2_freq:literal, $b2_gain:literal, $b2_q:literal,
+     $b3_en:literal, $b3_ty:literal, $b3_freq:literal, $b3_gain:literal, $b3_q:literal,
+     $b4_en:literal, $b4_ty:literal, $b4_freq:literal, $b4_gain:literal, $b4_q:literal,
+     $b5_en:literal, $b5_ty:literal, $b5_freq:literal, $b5_gain:literal, $b5_q:literal $(,)?) => {
+        #[derive(Params)]
+        pub struct $name {
+            #[id = $mode_id]
+            pub mode: EnumParam<EqMode>,
+            #[id = $bypass_id]
+            pub bypass: BoolParam,
+            #[id = $b1_en]
+            pub band1_enabled: BoolParam,
+            #[id = $b1_ty]
+            pub band1_type: EnumParam<EqBandType>,
+            #[id = $b1_freq]
+            pub band1_frequency: FloatParam,
+            #[id = $b1_gain]
+            pub band1_gain: FloatParam,
+            #[id = $b1_q]
+            pub band1_q: FloatParam,
+            #[id = $b2_en]
+            pub band2_enabled: BoolParam,
+            #[id = $b2_ty]
+            pub band2_type: EnumParam<EqBandType>,
+            #[id = $b2_freq]
+            pub band2_frequency: FloatParam,
+            #[id = $b2_gain]
+            pub band2_gain: FloatParam,
+            #[id = $b2_q]
+            pub band2_q: FloatParam,
+            #[id = $b3_en]
+            pub band3_enabled: BoolParam,
+            #[id = $b3_ty]
+            pub band3_type: EnumParam<EqBandType>,
+            #[id = $b3_freq]
+            pub band3_frequency: FloatParam,
+            #[id = $b3_gain]
+            pub band3_gain: FloatParam,
+            #[id = $b3_q]
+            pub band3_q: FloatParam,
+            #[id = $b4_en]
+            pub band4_enabled: BoolParam,
+            #[id = $b4_ty]
+            pub band4_type: EnumParam<EqBandType>,
+            #[id = $b4_freq]
+            pub band4_frequency: FloatParam,
+            #[id = $b4_gain]
+            pub band4_gain: FloatParam,
+            #[id = $b4_q]
+            pub band4_q: FloatParam,
+            #[id = $b5_en]
+            pub band5_enabled: BoolParam,
+            #[id = $b5_ty]
+            pub band5_type: EnumParam<EqBandType>,
+            #[id = $b5_freq]
+            pub band5_frequency: FloatParam,
+            #[id = $b5_gain]
+            pub band5_gain: FloatParam,
+            #[id = $b5_q]
+            pub band5_q: FloatParam,
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self {
+                    mode: EnumParam::new("EQ Mode", EqMode::On),
+                    bypass: module_bypass_param("EQ Bypass"),
+                    band1_enabled: eq_band_enabled_param("Band 1 Enabled", true),
+                    band1_type: EnumParam::new("Band 1 Type", EqBandType::Bell),
+                    band1_frequency: frequency_param(
+                        "Band 1 Frequency",
+                        80.0,
+                        20.0,
+                        20_000.0,
+                        80.0,
+                    ),
+                    band1_gain: eq_gain_param("Band 1 Gain"),
+                    band1_q: eq_q_param("Band 1 Q"),
+                    band2_enabled: eq_band_enabled_param("Band 2 Enabled", true),
+                    band2_type: EnumParam::new("Band 2 Type", EqBandType::Bell),
+                    band2_frequency: frequency_param(
+                        "Band 2 Frequency",
+                        250.0,
+                        20.0,
+                        20_000.0,
+                        80.0,
+                    ),
+                    band2_gain: eq_gain_param("Band 2 Gain"),
+                    band2_q: eq_q_param("Band 2 Q"),
+                    band3_enabled: eq_band_enabled_param("Band 3 Enabled", true),
+                    band3_type: EnumParam::new("Band 3 Type", EqBandType::Bell),
+                    band3_frequency: frequency_param(
+                        "Band 3 Frequency",
+                        1_000.0,
+                        20.0,
+                        20_000.0,
+                        80.0,
+                    ),
+                    band3_gain: eq_gain_param("Band 3 Gain"),
+                    band3_q: eq_q_param("Band 3 Q"),
+                    band4_enabled: eq_band_enabled_param("Band 4 Enabled", true),
+                    band4_type: EnumParam::new("Band 4 Type", EqBandType::Bell),
+                    band4_frequency: frequency_param(
+                        "Band 4 Frequency",
+                        4_000.0,
+                        20.0,
+                        20_000.0,
+                        80.0,
+                    ),
+                    band4_gain: eq_gain_param("Band 4 Gain"),
+                    band4_q: eq_q_param("Band 4 Q"),
+                    band5_enabled: eq_band_enabled_param("Band 5 Enabled", true),
+                    band5_type: EnumParam::new("Band 5 Type", EqBandType::Bell),
+                    band5_frequency: frequency_param(
+                        "Band 5 Frequency",
+                        12_000.0,
+                        20.0,
+                        20_000.0,
+                        80.0,
+                    ),
+                    band5_gain: eq_gain_param("Band 5 Gain"),
+                    band5_q: eq_q_param("Band 5 Q"),
+                }
+            }
+        }
+
+        impl EqParamRefs for $name {
+            fn mode(&self) -> &EnumParam<EqMode> {
+                &self.mode
+            }
+            fn bypass(&self) -> &BoolParam {
+                &self.bypass
+            }
+            fn band_enabled(&self, band: usize) -> &BoolParam {
+                match band {
+                    0 => &self.band1_enabled,
+                    1 => &self.band2_enabled,
+                    2 => &self.band3_enabled,
+                    3 => &self.band4_enabled,
+                    _ => &self.band5_enabled,
+                }
+            }
+            fn band_type(&self, band: usize) -> &EnumParam<EqBandType> {
+                match band {
+                    0 => &self.band1_type,
+                    1 => &self.band2_type,
+                    2 => &self.band3_type,
+                    3 => &self.band4_type,
+                    _ => &self.band5_type,
+                }
+            }
+            fn band_frequency(&self, band: usize) -> &FloatParam {
+                match band {
+                    0 => &self.band1_frequency,
+                    1 => &self.band2_frequency,
+                    2 => &self.band3_frequency,
+                    3 => &self.band4_frequency,
+                    _ => &self.band5_frequency,
+                }
+            }
+            fn band_gain(&self, band: usize) -> &FloatParam {
+                match band {
+                    0 => &self.band1_gain,
+                    1 => &self.band2_gain,
+                    2 => &self.band3_gain,
+                    3 => &self.band4_gain,
+                    _ => &self.band5_gain,
+                }
+            }
+            fn band_q(&self, band: usize) -> &FloatParam {
+                match band {
+                    0 => &self.band1_q,
+                    1 => &self.band2_q,
+                    2 => &self.band3_q,
+                    3 => &self.band4_q,
+                    _ => &self.band5_q,
+                }
+            }
+        }
+
+        impl $name {
+            pub fn reset_smoothers(&self) {
+                reset_eq_smoothers(self);
+            }
+        }
+    };
+}
+
+define_module_eq!(
+    CharacterPreEq,
+    "character_pre_eq_mode",
+    "character_pre_eq_bypass",
+    "character_pre_eq_band_1_enabled",
+    "character_pre_eq_band_1_type",
+    "character_pre_eq_band_1_frequency",
+    "character_pre_eq_band_1_gain",
+    "character_pre_eq_band_1_q",
+    "character_pre_eq_band_2_enabled",
+    "character_pre_eq_band_2_type",
+    "character_pre_eq_band_2_frequency",
+    "character_pre_eq_band_2_gain",
+    "character_pre_eq_band_2_q",
+    "character_pre_eq_band_3_enabled",
+    "character_pre_eq_band_3_type",
+    "character_pre_eq_band_3_frequency",
+    "character_pre_eq_band_3_gain",
+    "character_pre_eq_band_3_q",
+    "character_pre_eq_band_4_enabled",
+    "character_pre_eq_band_4_type",
+    "character_pre_eq_band_4_frequency",
+    "character_pre_eq_band_4_gain",
+    "character_pre_eq_band_4_q",
+    "character_pre_eq_band_5_enabled",
+    "character_pre_eq_band_5_type",
+    "character_pre_eq_band_5_frequency",
+    "character_pre_eq_band_5_gain",
+    "character_pre_eq_band_5_q",
+);
+
+define_module_eq!(
+    CharacterPostEq,
+    "character_post_eq_mode",
+    "character_post_eq_bypass",
+    "character_post_eq_band_1_enabled",
+    "character_post_eq_band_1_type",
+    "character_post_eq_band_1_frequency",
+    "character_post_eq_band_1_gain",
+    "character_post_eq_band_1_q",
+    "character_post_eq_band_2_enabled",
+    "character_post_eq_band_2_type",
+    "character_post_eq_band_2_frequency",
+    "character_post_eq_band_2_gain",
+    "character_post_eq_band_2_q",
+    "character_post_eq_band_3_enabled",
+    "character_post_eq_band_3_type",
+    "character_post_eq_band_3_frequency",
+    "character_post_eq_band_3_gain",
+    "character_post_eq_band_3_q",
+    "character_post_eq_band_4_enabled",
+    "character_post_eq_band_4_type",
+    "character_post_eq_band_4_frequency",
+    "character_post_eq_band_4_gain",
+    "character_post_eq_band_4_q",
+    "character_post_eq_band_5_enabled",
+    "character_post_eq_band_5_type",
+    "character_post_eq_band_5_frequency",
+    "character_post_eq_band_5_gain",
+    "character_post_eq_band_5_q",
+);
+
+define_module_eq!(
+    MovementPreEq,
+    "movement_pre_eq_mode",
+    "movement_pre_eq_bypass",
+    "movement_pre_eq_band_1_enabled",
+    "movement_pre_eq_band_1_type",
+    "movement_pre_eq_band_1_frequency",
+    "movement_pre_eq_band_1_gain",
+    "movement_pre_eq_band_1_q",
+    "movement_pre_eq_band_2_enabled",
+    "movement_pre_eq_band_2_type",
+    "movement_pre_eq_band_2_frequency",
+    "movement_pre_eq_band_2_gain",
+    "movement_pre_eq_band_2_q",
+    "movement_pre_eq_band_3_enabled",
+    "movement_pre_eq_band_3_type",
+    "movement_pre_eq_band_3_frequency",
+    "movement_pre_eq_band_3_gain",
+    "movement_pre_eq_band_3_q",
+    "movement_pre_eq_band_4_enabled",
+    "movement_pre_eq_band_4_type",
+    "movement_pre_eq_band_4_frequency",
+    "movement_pre_eq_band_4_gain",
+    "movement_pre_eq_band_4_q",
+    "movement_pre_eq_band_5_enabled",
+    "movement_pre_eq_band_5_type",
+    "movement_pre_eq_band_5_frequency",
+    "movement_pre_eq_band_5_gain",
+    "movement_pre_eq_band_5_q",
+);
+
+define_module_eq!(
+    MovementPostEq,
+    "movement_post_eq_mode",
+    "movement_post_eq_bypass",
+    "movement_post_eq_band_1_enabled",
+    "movement_post_eq_band_1_type",
+    "movement_post_eq_band_1_frequency",
+    "movement_post_eq_band_1_gain",
+    "movement_post_eq_band_1_q",
+    "movement_post_eq_band_2_enabled",
+    "movement_post_eq_band_2_type",
+    "movement_post_eq_band_2_frequency",
+    "movement_post_eq_band_2_gain",
+    "movement_post_eq_band_2_q",
+    "movement_post_eq_band_3_enabled",
+    "movement_post_eq_band_3_type",
+    "movement_post_eq_band_3_frequency",
+    "movement_post_eq_band_3_gain",
+    "movement_post_eq_band_3_q",
+    "movement_post_eq_band_4_enabled",
+    "movement_post_eq_band_4_type",
+    "movement_post_eq_band_4_frequency",
+    "movement_post_eq_band_4_gain",
+    "movement_post_eq_band_4_q",
+    "movement_post_eq_band_5_enabled",
+    "movement_post_eq_band_5_type",
+    "movement_post_eq_band_5_frequency",
+    "movement_post_eq_band_5_gain",
+    "movement_post_eq_band_5_q",
+);
+
+define_module_eq!(
+    DiffusionPreEq,
+    "diffusion_pre_eq_mode",
+    "diffusion_pre_eq_bypass",
+    "diffusion_pre_eq_band_1_enabled",
+    "diffusion_pre_eq_band_1_type",
+    "diffusion_pre_eq_band_1_frequency",
+    "diffusion_pre_eq_band_1_gain",
+    "diffusion_pre_eq_band_1_q",
+    "diffusion_pre_eq_band_2_enabled",
+    "diffusion_pre_eq_band_2_type",
+    "diffusion_pre_eq_band_2_frequency",
+    "diffusion_pre_eq_band_2_gain",
+    "diffusion_pre_eq_band_2_q",
+    "diffusion_pre_eq_band_3_enabled",
+    "diffusion_pre_eq_band_3_type",
+    "diffusion_pre_eq_band_3_frequency",
+    "diffusion_pre_eq_band_3_gain",
+    "diffusion_pre_eq_band_3_q",
+    "diffusion_pre_eq_band_4_enabled",
+    "diffusion_pre_eq_band_4_type",
+    "diffusion_pre_eq_band_4_frequency",
+    "diffusion_pre_eq_band_4_gain",
+    "diffusion_pre_eq_band_4_q",
+    "diffusion_pre_eq_band_5_enabled",
+    "diffusion_pre_eq_band_5_type",
+    "diffusion_pre_eq_band_5_frequency",
+    "diffusion_pre_eq_band_5_gain",
+    "diffusion_pre_eq_band_5_q",
+);
+
+define_module_eq!(
+    DiffusionPostEq,
+    "diffusion_post_eq_mode",
+    "diffusion_post_eq_bypass",
+    "diffusion_post_eq_band_1_enabled",
+    "diffusion_post_eq_band_1_type",
+    "diffusion_post_eq_band_1_frequency",
+    "diffusion_post_eq_band_1_gain",
+    "diffusion_post_eq_band_1_q",
+    "diffusion_post_eq_band_2_enabled",
+    "diffusion_post_eq_band_2_type",
+    "diffusion_post_eq_band_2_frequency",
+    "diffusion_post_eq_band_2_gain",
+    "diffusion_post_eq_band_2_q",
+    "diffusion_post_eq_band_3_enabled",
+    "diffusion_post_eq_band_3_type",
+    "diffusion_post_eq_band_3_frequency",
+    "diffusion_post_eq_band_3_gain",
+    "diffusion_post_eq_band_3_q",
+    "diffusion_post_eq_band_4_enabled",
+    "diffusion_post_eq_band_4_type",
+    "diffusion_post_eq_band_4_frequency",
+    "diffusion_post_eq_band_4_gain",
+    "diffusion_post_eq_band_4_q",
+    "diffusion_post_eq_band_5_enabled",
+    "diffusion_post_eq_band_5_type",
+    "diffusion_post_eq_band_5_frequency",
+    "diffusion_post_eq_band_5_gain",
+    "diffusion_post_eq_band_5_q",
+);
+
+define_module_eq!(
+    TexturePreEq,
+    "texture_pre_eq_mode",
+    "texture_pre_eq_bypass",
+    "texture_pre_eq_band_1_enabled",
+    "texture_pre_eq_band_1_type",
+    "texture_pre_eq_band_1_frequency",
+    "texture_pre_eq_band_1_gain",
+    "texture_pre_eq_band_1_q",
+    "texture_pre_eq_band_2_enabled",
+    "texture_pre_eq_band_2_type",
+    "texture_pre_eq_band_2_frequency",
+    "texture_pre_eq_band_2_gain",
+    "texture_pre_eq_band_2_q",
+    "texture_pre_eq_band_3_enabled",
+    "texture_pre_eq_band_3_type",
+    "texture_pre_eq_band_3_frequency",
+    "texture_pre_eq_band_3_gain",
+    "texture_pre_eq_band_3_q",
+    "texture_pre_eq_band_4_enabled",
+    "texture_pre_eq_band_4_type",
+    "texture_pre_eq_band_4_frequency",
+    "texture_pre_eq_band_4_gain",
+    "texture_pre_eq_band_4_q",
+    "texture_pre_eq_band_5_enabled",
+    "texture_pre_eq_band_5_type",
+    "texture_pre_eq_band_5_frequency",
+    "texture_pre_eq_band_5_gain",
+    "texture_pre_eq_band_5_q",
+);
+
+define_module_eq!(
+    TexturePostEq,
+    "texture_post_eq_mode",
+    "texture_post_eq_bypass",
+    "texture_post_eq_band_1_enabled",
+    "texture_post_eq_band_1_type",
+    "texture_post_eq_band_1_frequency",
+    "texture_post_eq_band_1_gain",
+    "texture_post_eq_band_1_q",
+    "texture_post_eq_band_2_enabled",
+    "texture_post_eq_band_2_type",
+    "texture_post_eq_band_2_frequency",
+    "texture_post_eq_band_2_gain",
+    "texture_post_eq_band_2_q",
+    "texture_post_eq_band_3_enabled",
+    "texture_post_eq_band_3_type",
+    "texture_post_eq_band_3_frequency",
+    "texture_post_eq_band_3_gain",
+    "texture_post_eq_band_3_q",
+    "texture_post_eq_band_4_enabled",
+    "texture_post_eq_band_4_type",
+    "texture_post_eq_band_4_frequency",
+    "texture_post_eq_band_4_gain",
+    "texture_post_eq_band_4_q",
+    "texture_post_eq_band_5_enabled",
+    "texture_post_eq_band_5_type",
+    "texture_post_eq_band_5_frequency",
+    "texture_post_eq_band_5_gain",
+    "texture_post_eq_band_5_q",
+);
 
 pub trait EqParamRefs {
     fn mode(&self) -> &EnumParam<EqMode>;
@@ -763,16 +1255,16 @@ macro_rules! impl_eq_param_refs {
     };
 }
 
-impl_eq_param_refs!(EqParams);
-impl_eq_param_refs!(PreEqParams);
+impl_eq_param_refs!(GlobalPreEqParams);
+impl_eq_param_refs!(GlobalPostEqParams);
 
-impl EqParams {
+impl GlobalPreEqParams {
     pub fn reset_smoothers(&self) {
         reset_eq_smoothers(self);
     }
 }
 
-impl PreEqParams {
+impl GlobalPostEqParams {
     pub fn reset_smoothers(&self) {
         reset_eq_smoothers(self);
     }

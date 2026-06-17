@@ -6,11 +6,11 @@ use nih_plug_egui::egui::{
 
 use crate::{
     dsp::eq::{EqBandType, EqMode},
-    params::{Cc22Params, EqParams, PreEqParams},
+    params::{Cc22Params, EqParamRefs},
 };
 
 use super::{
-    meters::{EqBandSelection, EqStageSelection},
+    meters::{EqBandSelection, EqPositionSelection, EqTargetSelection},
     theme::{ModuleColors, Theme},
     widgets::{mini_slider, set_param, value_string},
 };
@@ -31,111 +31,36 @@ const EQ_Q_MIN: f32 = 0.1;
 const EQ_Q_MAX: f32 = 12.0;
 const EQ_RESET_FREQUENCIES: [f32; EQ_NODE_COUNT] = [80.0, 250.0, 1_000.0, 4_000.0, 12_000.0];
 
-#[derive(Clone, Copy)]
-enum EqParamSelection<'a> {
-    Pre(&'a PreEqParams),
-    Post(&'a EqParams),
-}
-
-impl<'a> EqParamSelection<'a> {
-    fn mode(self) -> &'a EnumParam<EqMode> {
-        match self {
-            Self::Pre(params) => &params.mode,
-            Self::Post(params) => &params.mode,
-        }
-    }
-
-    fn bypass(self) -> &'a BoolParam {
-        match self {
-            Self::Pre(params) => &params.bypass,
-            Self::Post(params) => &params.bypass,
-        }
-    }
-
-    fn band_enabled(self, band: usize) -> &'a BoolParam {
-        match (self, band) {
-            (Self::Pre(params), 0) => &params.band1_enabled,
-            (Self::Pre(params), 1) => &params.band2_enabled,
-            (Self::Pre(params), 2) => &params.band3_enabled,
-            (Self::Pre(params), 3) => &params.band4_enabled,
-            (Self::Pre(params), _) => &params.band5_enabled,
-            (Self::Post(params), 0) => &params.band1_enabled,
-            (Self::Post(params), 1) => &params.band2_enabled,
-            (Self::Post(params), 2) => &params.band3_enabled,
-            (Self::Post(params), 3) => &params.band4_enabled,
-            (Self::Post(params), _) => &params.band5_enabled,
-        }
-    }
-
-    fn band_type(self, band: usize) -> &'a EnumParam<EqBandType> {
-        match (self, band) {
-            (Self::Pre(params), 0) => &params.band1_type,
-            (Self::Pre(params), 1) => &params.band2_type,
-            (Self::Pre(params), 2) => &params.band3_type,
-            (Self::Pre(params), 3) => &params.band4_type,
-            (Self::Pre(params), _) => &params.band5_type,
-            (Self::Post(params), 0) => &params.band1_type,
-            (Self::Post(params), 1) => &params.band2_type,
-            (Self::Post(params), 2) => &params.band3_type,
-            (Self::Post(params), 3) => &params.band4_type,
-            (Self::Post(params), _) => &params.band5_type,
-        }
-    }
-
-    fn band_frequency(self, band: usize) -> &'a FloatParam {
-        match (self, band) {
-            (Self::Pre(params), 0) => &params.band1_frequency,
-            (Self::Pre(params), 1) => &params.band2_frequency,
-            (Self::Pre(params), 2) => &params.band3_frequency,
-            (Self::Pre(params), 3) => &params.band4_frequency,
-            (Self::Pre(params), _) => &params.band5_frequency,
-            (Self::Post(params), 0) => &params.band1_frequency,
-            (Self::Post(params), 1) => &params.band2_frequency,
-            (Self::Post(params), 2) => &params.band3_frequency,
-            (Self::Post(params), 3) => &params.band4_frequency,
-            (Self::Post(params), _) => &params.band5_frequency,
-        }
-    }
-
-    fn band_gain(self, band: usize) -> &'a FloatParam {
-        match (self, band) {
-            (Self::Pre(params), 0) => &params.band1_gain,
-            (Self::Pre(params), 1) => &params.band2_gain,
-            (Self::Pre(params), 2) => &params.band3_gain,
-            (Self::Pre(params), 3) => &params.band4_gain,
-            (Self::Pre(params), _) => &params.band5_gain,
-            (Self::Post(params), 0) => &params.band1_gain,
-            (Self::Post(params), 1) => &params.band2_gain,
-            (Self::Post(params), 2) => &params.band3_gain,
-            (Self::Post(params), 3) => &params.band4_gain,
-            (Self::Post(params), _) => &params.band5_gain,
-        }
-    }
-
-    fn band_q(self, band: usize) -> &'a FloatParam {
-        match (self, band) {
-            (Self::Pre(params), 0) => &params.band1_q,
-            (Self::Pre(params), 1) => &params.band2_q,
-            (Self::Pre(params), 2) => &params.band3_q,
-            (Self::Pre(params), 3) => &params.band4_q,
-            (Self::Pre(params), _) => &params.band5_q,
-            (Self::Post(params), 0) => &params.band1_q,
-            (Self::Post(params), 1) => &params.band2_q,
-            (Self::Post(params), 2) => &params.band3_q,
-            (Self::Post(params), 3) => &params.band4_q,
-            (Self::Post(params), _) => &params.band5_q,
-        }
+fn target_color(target: EqTargetSelection, colors: ModuleColors) -> Color32 {
+    match target {
+        EqTargetSelection::Global => colors.eq,
+        EqTargetSelection::Character => colors.character,
+        EqTargetSelection::Movement => colors.movement,
+        EqTargetSelection::Diffusion => colors.diffusion,
+        EqTargetSelection::Texture => colors.texture,
     }
 }
 
-fn eq_params_for_stage(params: &Cc22Params, stage: EqStageSelection) -> EqParamSelection<'_> {
-    match stage {
-        EqStageSelection::Pre => EqParamSelection::Pre(&params.pre_eq),
-        EqStageSelection::Post => EqParamSelection::Post(&params.post_eq),
+fn eq_params_for<'a>(
+    params: &'a Cc22Params,
+    target: EqTargetSelection,
+    position: EqPositionSelection,
+) -> &'a dyn EqParamRefs {
+    match (target, position) {
+        (EqTargetSelection::Global, EqPositionSelection::Pre) => &params.global_pre_eq,
+        (EqTargetSelection::Global, EqPositionSelection::Post) => &params.global_post_eq,
+        (EqTargetSelection::Character, EqPositionSelection::Pre) => &params.character_pre_eq,
+        (EqTargetSelection::Character, EqPositionSelection::Post) => &params.character_post_eq,
+        (EqTargetSelection::Movement, EqPositionSelection::Pre) => &params.movement_pre_eq,
+        (EqTargetSelection::Movement, EqPositionSelection::Post) => &params.movement_post_eq,
+        (EqTargetSelection::Diffusion, EqPositionSelection::Pre) => &params.diffusion_pre_eq,
+        (EqTargetSelection::Diffusion, EqPositionSelection::Post) => &params.diffusion_post_eq,
+        (EqTargetSelection::Texture, EqPositionSelection::Pre) => &params.texture_pre_eq,
+        (EqTargetSelection::Texture, EqPositionSelection::Post) => &params.texture_post_eq,
     }
 }
 
-fn eq_active(params: EqParamSelection<'_>) -> bool {
+fn eq_active(params: &dyn EqParamRefs) -> bool {
     !params.bypass().value() && params.mode().value() == EqMode::On
 }
 
@@ -143,7 +68,8 @@ pub(crate) fn eq_workbench(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
-    selected_eq_stage: &mut EqStageSelection,
+    selected_eq_target: &mut EqTargetSelection,
+    selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
     colors: ModuleColors,
     theme: Theme,
@@ -170,20 +96,26 @@ pub(crate) fn eq_workbench(
                         (workbench_width - f32::from(EQ_INNER_PADDING) * 2.0).max(0.0);
                     ui.set_width(content_width);
                     ui.set_min_height(EQ_WORKBENCH_HEIGHT - f32::from(EQ_INNER_PADDING) * 2.0);
-                    let eq_params = eq_params_for_stage(params, *selected_eq_stage);
+                    let eq_params =
+                        eq_params_for(params, *selected_eq_target, *selected_eq_position);
+                    let eq_accent = target_color(*selected_eq_target, colors);
                     eq_header(
                         ui,
                         setter,
                         eq_params,
-                        selected_eq_stage,
+                        params,
+                        selected_eq_target,
+                        selected_eq_position,
                         selected_eq_band,
+                        eq_accent,
                         colors,
                         theme,
                     );
                     ui.add_space(3.0);
                     eq_separator(ui, theme);
                     ui.add_space(4.0);
-                    let eq_params = eq_params_for_stage(params, *selected_eq_stage);
+                    let eq_params =
+                        eq_params_for(params, *selected_eq_target, *selected_eq_position);
                     eq_body(ui, setter, eq_params, selected_eq_band, colors, theme);
                 });
         },
@@ -193,9 +125,12 @@ pub(crate) fn eq_workbench(
 fn eq_header(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    eq_params: EqParamSelection<'_>,
-    selected_eq_stage: &mut EqStageSelection,
+    eq_params: &dyn EqParamRefs,
+    params: &Cc22Params,
+    selected_eq_target: &mut EqTargetSelection,
+    selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
+    eq_accent: Color32,
     colors: ModuleColors,
     theme: Theme,
 ) {
@@ -208,10 +143,12 @@ fn eq_header(
                 .color(theme.text_dark),
         );
         ui.add_space(6.0);
-        eq_stage_tabs(ui, selected_eq_stage, colors, theme);
+        eq_target_tabs(ui, selected_eq_target, colors, theme);
+        eq_toolbar_divider(ui, theme);
+        eq_position_tabs(ui, selected_eq_position, eq_accent, colors, theme);
         eq_toolbar_divider(ui, theme);
         let active = eq_active(eq_params);
-        if eq_toggle_button(ui, active, colors.eq, theme).clicked() {
+        if eq_toggle_button(ui, active, eq_accent, theme).clicked() {
             if active {
                 set_param(setter, eq_params.bypass(), true);
             } else {
@@ -222,8 +159,8 @@ fn eq_header(
         eq_toolbar_divider(ui, theme);
         eq_band_tabs(ui, selected_eq_band, colors, theme);
         eq_toolbar_divider(ui, theme);
-        if eq_reset_button(ui, colors.eq, theme).clicked() {
-            reset_eq_params_to_defaults(setter, eq_params);
+        if eq_reset_button(ui, eq_accent, theme).clicked() {
+            reset_eq_params_to_defaults(setter, params, *selected_eq_target, *selected_eq_position);
             *selected_eq_band = EqBandSelection::Band1;
         }
     });
@@ -341,32 +278,35 @@ fn eq_band_tabs(
     }
 }
 
-fn eq_stage_tabs(
+fn eq_target_tabs(
     ui: &mut egui::Ui,
-    selected_eq_stage: &mut EqStageSelection,
+    selected_eq_target: &mut EqTargetSelection,
     colors: ModuleColors,
     theme: Theme,
 ) {
-    for (stage, label) in [
-        (EqStageSelection::Pre, "PRE"),
-        (EqStageSelection::Post, "POST"),
-    ] {
-        let active = *selected_eq_stage == stage;
-        let (rect, response) = ui.allocate_exact_size(Vec2::new(42.0, 20.0), Sense::click());
+    for target in EqTargetSelection::ALL {
+        let active = *selected_eq_target == target;
+        let label = target.label();
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(48.0, 20.0), Sense::click());
         if response.clicked() {
-            *selected_eq_stage = stage;
+            *selected_eq_target = target;
         }
         let fill = if active {
-            colors.eq
+            target_color(target, colors)
         } else if response.hovered() {
-            Color32::from_rgb(230, 224, 213)
+            Color32::from_rgba_premultiplied(
+                target_color(target, colors).r(),
+                target_color(target, colors).g(),
+                target_color(target, colors).b(),
+                58,
+            )
         } else {
             Color32::from_rgb(244, 239, 229)
         };
-        ui.painter().rect_filled(rect, CornerRadius::same(9), fill);
+        ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(9),
+            CornerRadius::same(7),
             Stroke::new(1.0, theme.card_edge.gamma_multiply(0.72)),
             StrokeKind::Inside,
         );
@@ -374,7 +314,53 @@ fn eq_stage_tabs(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            FontId::monospace(8.5),
+            FontId::monospace(7.5),
+            if active {
+                Color32::WHITE
+            } else {
+                theme.muted_dark
+            },
+        );
+    }
+}
+
+fn eq_position_tabs(
+    ui: &mut egui::Ui,
+    selected_eq_position: &mut EqPositionSelection,
+    eq_accent: Color32,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    let _ = colors;
+    for position in EqPositionSelection::ALL {
+        let active = *selected_eq_position == position;
+        let label = position.label();
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(32.0, 20.0), Sense::click());
+        if response.clicked() {
+            *selected_eq_position = position;
+        }
+        if response.secondary_clicked() {
+            *selected_eq_position = position.toggle();
+        }
+        let fill = if active {
+            Color32::from_rgba_premultiplied(eq_accent.r(), eq_accent.g(), eq_accent.b(), 200)
+        } else if response.hovered() {
+            Color32::from_rgb(230, 224, 213)
+        } else {
+            Color32::from_rgb(244, 239, 229)
+        };
+        ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(5),
+            Stroke::new(1.0, theme.card_edge.gamma_multiply(0.72)),
+            StrokeKind::Inside,
+        );
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            FontId::monospace(7.2),
             if active {
                 Color32::WHITE
             } else {
@@ -476,7 +462,7 @@ fn eq_separator(ui: &mut egui::Ui, theme: Theme) {
 fn eq_canvas(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     selected_eq_band: &mut EqBandSelection,
     colors: ModuleColors,
     theme: Theme,
@@ -662,24 +648,22 @@ fn eq_canvas(
                 set_eq_band_type(setter, params, node.index, band_type);
             }
         }
-        if direct_right_click_band_type(node.index).is_none() {
-            node_response.context_menu(|ui| {
-                *selected_eq_band = node_band;
-                for band_type in [
-                    EqBandType::Bell,
-                    EqBandType::LowShelf,
-                    EqBandType::HighShelf,
-                    EqBandType::HighPass,
-                    EqBandType::LowPass,
-                    EqBandType::Off,
-                ] {
-                    if ui.button(eq_band_type_menu_label(band_type)).clicked() {
-                        set_eq_band_type(setter, params, node.index, band_type);
-                        ui.close_menu();
-                    }
+        node_response.context_menu(|ui| {
+            *selected_eq_band = node_band;
+            let default_for_band = direct_right_click_band_type(node.index);
+            let ordered_types = eq_band_type_menu_order(default_for_band);
+            for band_type in ordered_types {
+                let label = if Some(band_type) == default_for_band {
+                    format!("{} (default)", eq_band_type_menu_label(band_type))
+                } else {
+                    eq_band_type_menu_label(band_type).to_string()
+                };
+                if ui.button(label).clicked() {
+                    set_eq_band_type(setter, params, node.index, band_type);
+                    ui.close_menu();
                 }
-            });
-        }
+            }
+        });
         let (scroll_y, fine_scroll) =
             ui.input(|input| (input.raw_scroll_delta.y, input.modifiers.shift));
         if node_response.hovered() && scroll_y.abs() > 0.0 {
@@ -811,7 +795,7 @@ fn eq_canvas(
 fn eq_body(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     selected_eq_band: &mut EqBandSelection,
     colors: ModuleColors,
     theme: Theme,
@@ -849,7 +833,7 @@ fn eq_body(
 fn eq_inspector(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     band: EqBandSelection,
     colors: ModuleColors,
     theme: Theme,
@@ -1031,7 +1015,7 @@ fn eq_band_name(band: EqBandSelection) -> &'static str {
     }
 }
 
-fn eq_band_summary(params: EqParamSelection<'_>, band: EqBandSelection) -> String {
+fn eq_band_summary(params: &dyn EqParamRefs, band: EqBandSelection) -> String {
     let index = band.index();
     let band_type = params.band_type(index).value();
     if !params.band_enabled(index).value() || band_type == EqBandType::Off {
@@ -1133,7 +1117,7 @@ struct EqNodeSpec {
 }
 
 fn eq_node_specs(
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     colors: ModuleColors,
     rect: egui::Rect,
 ) -> [EqNodeSpec; EQ_NODE_COUNT] {
@@ -1193,9 +1177,27 @@ pub(crate) fn direct_right_click_band_type(band: usize) -> Option<EqBandType> {
     }
 }
 
+fn eq_band_type_menu_order(default: Option<EqBandType>) -> [EqBandType; 6] {
+    let all = [
+        EqBandType::Bell,
+        EqBandType::LowShelf,
+        EqBandType::HighShelf,
+        EqBandType::HighPass,
+        EqBandType::LowPass,
+        EqBandType::Off,
+    ];
+    let mut result = all;
+    if let Some(d) = default {
+        if let Some(pos) = result.iter().position(|&t| t == d) {
+            result[0..=pos].rotate_right(1);
+        }
+    }
+    result
+}
+
 fn set_eq_band_type(
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     band: usize,
     band_type: EqBandType,
 ) {
@@ -1210,7 +1212,7 @@ fn set_eq_band_type(
     }
 }
 
-fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: EqParamSelection<'_>, band: usize) {
+fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: &dyn EqParamRefs, band: usize) {
     if params.band_type(band).value() == EqBandType::Off || !params.band_enabled(band).value() {
         return;
     }
@@ -1223,7 +1225,7 @@ fn begin_selected_band_setter(setter: &ParamSetter<'_>, params: EqParamSelection
     }
 }
 
-fn end_selected_band_setter(setter: &ParamSetter<'_>, params: EqParamSelection<'_>, band: usize) {
+fn end_selected_band_setter(setter: &ParamSetter<'_>, params: &dyn EqParamRefs, band: usize) {
     if params.band_type(band).value() == EqBandType::Off || !params.band_enabled(band).value() {
         return;
     }
@@ -1238,7 +1240,7 @@ fn end_selected_band_setter(setter: &ParamSetter<'_>, params: EqParamSelection<'
 
 fn set_selected_band_from_pos(
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     band: usize,
     rect: egui::Rect,
     pos: Pos2,
@@ -1263,7 +1265,7 @@ fn q_from_y(y: f32) -> f32 {
 
 fn offset_selected_band_from_delta(
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     band: usize,
     rect: egui::Rect,
     delta: Vec2,
@@ -1297,7 +1299,7 @@ fn offset_selected_band_from_delta(
 
 fn scroll_eq_band_width(
     setter: &ParamSetter<'_>,
-    params: EqParamSelection<'_>,
+    params: &dyn EqParamRefs,
     band: usize,
     scroll_y: f32,
     fine: bool,
@@ -1346,7 +1348,7 @@ fn scroll_frequency(
     .clamp(min, max)
 }
 
-fn reset_eq_band(setter: &ParamSetter<'_>, params: EqParamSelection<'_>, band: usize) {
+fn reset_eq_band(setter: &ParamSetter<'_>, params: &dyn EqParamRefs, band: usize) {
     set_param(setter, params.band_enabled(band), true);
     set_param(setter, params.band_type(band), EqBandType::Bell);
     set_param(
@@ -1358,11 +1360,17 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: EqParamSelection<'_>, band: u
     set_param(setter, params.band_q(band), 1.0);
 }
 
-fn reset_eq_params_to_defaults(setter: &ParamSetter<'_>, params: EqParamSelection<'_>) {
-    set_param(setter, params.mode(), EqMode::On);
-    set_param(setter, params.bypass(), false);
+fn reset_eq_params_to_defaults(
+    setter: &ParamSetter<'_>,
+    params: &Cc22Params,
+    target: EqTargetSelection,
+    position: EqPositionSelection,
+) {
+    let eq_params = eq_params_for(params, target, position);
+    set_param(setter, eq_params.mode(), EqMode::On);
+    set_param(setter, eq_params.bypass(), false);
     for band in 0..EQ_NODE_COUNT {
-        reset_eq_band(setter, params, band);
+        reset_eq_band(setter, eq_params, band);
     }
 }
 
@@ -1389,7 +1397,7 @@ struct DisplayBiquad {
 }
 
 impl EqDisplayResponse {
-    fn from_params(params: EqParamSelection<'_>, active: bool) -> Self {
+    fn from_params(params: &dyn EqParamRefs, active: bool) -> Self {
         Self {
             active,
             filters: core::array::from_fn(|band| {
@@ -1408,11 +1416,13 @@ impl EqDisplayResponse {
                     EqBandType::LowShelf => DisplayBiquad::low_shelf(
                         params.band_frequency(band).value(),
                         params.band_gain(band).value(),
+                        params.band_q(band).value(),
                         EQ_DISPLAY_SAMPLE_RATE,
                     ),
                     EqBandType::HighShelf => DisplayBiquad::high_shelf(
                         params.band_frequency(band).value(),
                         params.band_gain(band).value(),
+                        params.band_q(band).value(),
                         EQ_DISPLAY_SAMPLE_RATE,
                     ),
                     EqBandType::HighPass => DisplayBiquad::high_pass(
@@ -1504,12 +1514,12 @@ impl DisplayBiquad {
         normalize_biquad(b0, b1, b2, a0, a1, a2)
     }
 
-    fn low_shelf(frequency: f32, gain_db: f32, sample_rate: f32) -> Self {
-        shelf_biquad(frequency, gain_db, sample_rate, false)
+    fn low_shelf(frequency: f32, gain_db: f32, q: f32, sample_rate: f32) -> Self {
+        shelf_biquad(frequency, gain_db, q, sample_rate, false)
     }
 
-    fn high_shelf(frequency: f32, gain_db: f32, sample_rate: f32) -> Self {
-        shelf_biquad(frequency, gain_db, sample_rate, true)
+    fn high_shelf(frequency: f32, gain_db: f32, q: f32, sample_rate: f32) -> Self {
+        shelf_biquad(frequency, gain_db, q, sample_rate, true)
     }
 
     fn magnitude_at(self, frequency: f32, sample_rate: f32) -> f32 {
@@ -1530,22 +1540,15 @@ impl DisplayBiquad {
 
         (numerator / denominator).sqrt()
     }
-
-    fn sanitized(self) -> Self {
-        if self.b0.is_finite()
-            && self.b1.is_finite()
-            && self.b2.is_finite()
-            && self.a1.is_finite()
-            && self.a2.is_finite()
-        {
-            self
-        } else {
-            Self::identity()
-        }
-    }
 }
 
-fn shelf_biquad(frequency: f32, gain_db: f32, sample_rate: f32, high: bool) -> DisplayBiquad {
+fn shelf_biquad(
+    frequency: f32,
+    gain_db: f32,
+    q: f32,
+    sample_rate: f32,
+    high: bool,
+) -> DisplayBiquad {
     if gain_db.abs() < 0.000_1 {
         return DisplayBiquad::identity();
     }
@@ -1555,7 +1558,7 @@ fn shelf_biquad(frequency: f32, gain_db: f32, sample_rate: f32, high: bool) -> D
     let cos = omega.cos();
     let a = 10.0_f32.powf(gain_db / 40.0);
     let sqrt_a = a.sqrt();
-    let alpha = sin * core::f32::consts::FRAC_1_SQRT_2;
+    let alpha = sin / (2.0 * q.max(0.1));
     let two_sqrt_a_alpha = 2.0 * sqrt_a * alpha;
 
     let (b0, b1, b2, a0, a1, a2) = if high {
@@ -1581,39 +1584,6 @@ fn shelf_biquad(frequency: f32, gain_db: f32, sample_rate: f32, high: bool) -> D
     normalize_biquad(b0, b1, b2, a0, a1, a2)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{direct_right_click_band_type, safe_eq_reset_frequency, EqBandType};
-
-    #[test]
-    fn direct_right_click_maps_edge_bands_to_filters() {
-        assert_eq!(direct_right_click_band_type(0), Some(EqBandType::HighPass));
-        assert_eq!(direct_right_click_band_type(4), Some(EqBandType::LowPass));
-        assert_eq!(direct_right_click_band_type(1), None);
-        assert_eq!(direct_right_click_band_type(2), None);
-        assert_eq!(direct_right_click_band_type(3), None);
-    }
-
-    #[test]
-    fn band_1_right_click_turns_into_high_pass() {
-        assert_eq!(direct_right_click_band_type(0), Some(EqBandType::HighPass));
-    }
-
-    #[test]
-    fn band_5_right_click_turns_into_low_pass() {
-        assert_eq!(direct_right_click_band_type(4), Some(EqBandType::LowPass));
-    }
-
-    #[test]
-    fn eq_reset_frequencies_are_musically_distributed() {
-        assert_eq!(safe_eq_reset_frequency(0), 80.0);
-        assert_eq!(safe_eq_reset_frequency(1), 250.0);
-        assert_eq!(safe_eq_reset_frequency(2), 1_000.0);
-        assert_eq!(safe_eq_reset_frequency(3), 4_000.0);
-        assert_eq!(safe_eq_reset_frequency(4), 12_000.0);
-    }
-}
-
 fn normalize_biquad(b0: f32, b1: f32, b2: f32, a0: f32, a1: f32, a2: f32) -> DisplayBiquad {
     let a0 = if a0.abs() < 0.000_001 { 1.0 } else { a0 };
     DisplayBiquad {
@@ -1626,43 +1596,67 @@ fn normalize_biquad(b0: f32, b1: f32, b2: f32, a0: f32, a1: f32, a2: f32) -> Dis
     .sanitized()
 }
 
+impl DisplayBiquad {
+    fn sanitized(self) -> Self {
+        if self.b0.is_finite()
+            && self.b1.is_finite()
+            && self.b2.is_finite()
+            && self.a1.is_finite()
+            && self.a2.is_finite()
+        {
+            self
+        } else {
+            Self::identity()
+        }
+    }
+}
+
 fn omega(frequency: f32, sample_rate: f32) -> f32 {
-    core::f32::consts::TAU * clamp_display_frequency(frequency) / sample_rate.max(1.0)
-}
-
-fn clamp_display_frequency(frequency: f32) -> f32 {
-    frequency.clamp(
-        EQ_DISPLAY_MIN_HZ,
-        EQ_DISPLAY_MAX_HZ.min(EQ_DISPLAY_SAMPLE_RATE * 0.49),
-    )
-}
-
-fn frequency_from_x(x: f32) -> f32 {
-    let min_log = EQ_DISPLAY_MIN_HZ.log10();
-    let max_log = EQ_DISPLAY_MAX_HZ.log10();
-    10.0_f32.powf(min_log + ((max_log - min_log) * x.clamp(0.0, 1.0)))
+    let frequency = frequency.clamp(EQ_DISPLAY_MIN_HZ, EQ_DISPLAY_MAX_HZ);
+    core::f32::consts::TAU * frequency / sample_rate.max(1.0)
 }
 
 fn x_from_frequency(frequency: f32) -> f32 {
-    let min_log = EQ_DISPLAY_MIN_HZ.log10();
-    let max_log = EQ_DISPLAY_MAX_HZ.log10();
-    ((clamp_display_frequency(frequency).log10() - min_log) / (max_log - min_log)).clamp(0.0, 1.0)
+    let clamped = frequency.clamp(EQ_DISPLAY_MIN_HZ, EQ_DISPLAY_MAX_HZ);
+    ((clamped / EQ_DISPLAY_MIN_HZ).ln() / (EQ_DISPLAY_MAX_HZ / EQ_DISPLAY_MIN_HZ).ln())
+        .clamp(0.0, 1.0)
 }
 
-fn y_from_gain_db(rect: egui::Rect, gain_db: f32) -> f32 {
-    let normalized = 0.5
-        - (gain_db.clamp(-EQ_DISPLAY_DB_RANGE, EQ_DISPLAY_DB_RANGE) / (EQ_DISPLAY_DB_RANGE * 2.0));
-    rect.top() + (rect.height() * normalized)
-}
-
-fn y_from_real_gain_db(rect: egui::Rect, gain_db: f32) -> f32 {
-    let normalized = 1.0
-        - ((gain_db.clamp(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB) - EQ_GAIN_MIN_DB)
-            / (EQ_GAIN_MAX_DB - EQ_GAIN_MIN_DB));
-    rect.top() + (rect.height() * normalized.clamp(0.0, 1.0))
+fn frequency_from_x(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    EQ_DISPLAY_MIN_HZ * (EQ_DISPLAY_MAX_HZ / EQ_DISPLAY_MIN_HZ).powf(x)
 }
 
 fn gain_from_y(y: f32) -> f32 {
-    (EQ_GAIN_MAX_DB - (y.clamp(0.0, 1.0) * (EQ_GAIN_MAX_DB - EQ_GAIN_MIN_DB)))
-        .clamp(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB)
+    let y = y.clamp(0.0, 1.0);
+    EQ_GAIN_MAX_DB - y * 2.0 * EQ_GAIN_MAX_DB
+}
+
+fn y_from_gain_db(rect: egui::Rect, gain_db: f32) -> f32 {
+    let gain_db = gain_db.clamp(-EQ_DISPLAY_DB_RANGE, EQ_DISPLAY_DB_RANGE);
+    rect.bottom() - ((gain_db + EQ_DISPLAY_DB_RANGE) / (2.0 * EQ_DISPLAY_DB_RANGE)) * rect.height()
+}
+
+fn y_from_real_gain_db(rect: egui::Rect, gain_db: f32) -> f32 {
+    y_from_gain_db(rect, gain_db.clamp(-EQ_GAIN_MAX_DB, EQ_GAIN_MAX_DB))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{direct_right_click_band_type, safe_eq_reset_frequency, EqBandType};
+
+    #[test]
+    fn direct_right_click_maps_edge_bands_to_filters() {
+        assert_eq!(direct_right_click_band_type(0), Some(EqBandType::HighPass));
+        assert_eq!(direct_right_click_band_type(4), Some(EqBandType::LowPass));
+        assert_eq!(direct_right_click_band_type(2), None);
+    }
+
+    #[test]
+    fn reset_frequencies_are_in_expected_ranges() {
+        for band in 0..5 {
+            let frequency = safe_eq_reset_frequency(band);
+            assert!((20.0..=20_000.0).contains(&frequency));
+        }
+    }
 }

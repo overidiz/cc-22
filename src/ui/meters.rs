@@ -5,7 +5,8 @@ impl Default for UiState {
         Self {
             selected_preset: 0,
             random_seed: 0,
-            selected_eq_stage: EqStageSelection::Post,
+            selected_eq_target: EqTargetSelection::Global,
+            selected_eq_position: EqPositionSelection::Post,
             selected_eq_band: EqBandSelection::Band1,
             drag_source: None,
             drag_drop_slot: None,
@@ -23,7 +24,8 @@ impl Default for UiState {
 pub(crate) struct UiState {
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
-    pub(crate) selected_eq_stage: EqStageSelection,
+    pub(crate) selected_eq_target: EqTargetSelection,
+    pub(crate) selected_eq_position: EqPositionSelection,
     pub(crate) selected_eq_band: EqBandSelection,
     pub(crate) drag_source: Option<usize>,
     pub(crate) drag_drop_slot: Option<usize>,
@@ -37,9 +39,56 @@ pub(crate) struct UiState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EqStageSelection {
+pub(crate) enum EqTargetSelection {
+    Global,
+    Character,
+    Movement,
+    Diffusion,
+    Texture,
+}
+
+impl EqTargetSelection {
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Global,
+        Self::Character,
+        Self::Movement,
+        Self::Diffusion,
+        Self::Texture,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Global => "GLOBAL",
+            Self::Character => "CHAR",
+            Self::Movement => "MOV",
+            Self::Diffusion => "DIF",
+            Self::Texture => "TEX",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EqPositionSelection {
     Pre,
     Post,
+}
+
+impl EqPositionSelection {
+    pub(crate) const ALL: [Self; 2] = [Self::Pre, Self::Post];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Pre => "PRE",
+            Self::Post => "POST",
+        }
+    }
+
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            Self::Pre => Self::Post,
+            Self::Post => Self::Pre,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

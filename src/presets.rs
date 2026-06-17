@@ -9,7 +9,7 @@ use crate::{
         movement::MovementMode,
         texture::TextureMode,
     },
-    params::Cc22Params,
+    params::{Cc22Params, EqParamRefs},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +30,12 @@ pub enum PresetId {
     ReversePsychedelic,
     SoftSwellSpace,
     PreEqSculpted,
+    GlobalTonePolish,
+    CharacterSculptedDrive,
+    MovementWidePolish,
+    DiffusionCleanRepeats,
+    TextureLoFiCurve,
+    FullChainMaster,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +53,14 @@ pub struct PresetValues {
     pub texture: TexturePreset,
     pub eq: EqPreset,
     pub pre_eq: Option<EqPreset>,
+    pub character_pre_eq: Option<ModuleEqPreset>,
+    pub character_post_eq: Option<ModuleEqPreset>,
+    pub movement_pre_eq: Option<ModuleEqPreset>,
+    pub movement_post_eq: Option<ModuleEqPreset>,
+    pub diffusion_pre_eq: Option<ModuleEqPreset>,
+    pub diffusion_post_eq: Option<ModuleEqPreset>,
+    pub texture_pre_eq: Option<ModuleEqPreset>,
+    pub texture_post_eq: Option<ModuleEqPreset>,
     pub input_gain_db: f32,
     pub output_gain_db: f32,
     pub dry_wet: f32,
@@ -121,7 +135,95 @@ pub struct EqPreset {
     pub high_cut_hz: f32,
 }
 
-pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleEqPreset {
+    pub mode: EqMode,
+    pub bands: [ModuleEqBand; 5],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleEqBand {
+    pub enabled: bool,
+    pub band_type: EqBandType,
+    pub frequency: f32,
+    pub gain_db: f32,
+    pub q: f32,
+}
+
+impl Default for ModuleEqPreset {
+    fn default() -> Self {
+        Self {
+            mode: EqMode::Off,
+            bands: [ModuleEqBand::off(); 5],
+        }
+    }
+}
+
+impl ModuleEqBand {
+    const fn off() -> Self {
+        Self {
+            enabled: false,
+            band_type: EqBandType::Off,
+            frequency: 1_000.0,
+            gain_db: 0.0,
+            q: 1.0,
+        }
+    }
+
+    const fn bell(frequency: f32, gain_db: f32, q: f32) -> Self {
+        Self {
+            enabled: true,
+            band_type: EqBandType::Bell,
+            frequency,
+            gain_db,
+            q,
+        }
+    }
+
+    #[allow(dead_code)]
+    const fn low_shelf(frequency: f32, gain_db: f32) -> Self {
+        Self {
+            enabled: true,
+            band_type: EqBandType::LowShelf,
+            frequency,
+            gain_db,
+            q: 1.0,
+        }
+    }
+
+    #[allow(dead_code)]
+    const fn high_shelf(frequency: f32, gain_db: f32) -> Self {
+        Self {
+            enabled: true,
+            band_type: EqBandType::HighShelf,
+            frequency,
+            gain_db,
+            q: 1.0,
+        }
+    }
+
+    const fn high_pass(frequency: f32, q: f32) -> Self {
+        Self {
+            enabled: true,
+            band_type: EqBandType::HighPass,
+            frequency,
+            gain_db: 0.0,
+            q,
+        }
+    }
+
+    const fn low_pass(frequency: f32, q: f32) -> Self {
+        Self {
+            enabled: true,
+            band_type: EqBandType::LowPass,
+            frequency,
+            gain_db: 0.0,
+            q,
+        }
+    }
+}
+
+pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
     InternalPreset {
         id: PresetId::WarmTapeChorus,
         name: "Warm Tape Chorus",
@@ -186,6 +288,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 16_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: 0.0,
             output_gain_db: 0.0,
             dry_wet: 1.0,
@@ -255,6 +365,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 15_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: 0.0,
             output_gain_db: -0.5,
             dry_wet: 1.0,
@@ -324,6 +442,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 17_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -1.0,
             dry_wet: 1.0,
@@ -393,6 +519,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 9_500.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -1.0,
             dry_wet: 1.0,
@@ -462,6 +596,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 20_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: 0.0,
             output_gain_db: 0.0,
             dry_wet: 1.0,
@@ -531,6 +673,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 17_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.0,
             dry_wet: 1.0,
@@ -600,6 +750,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 14_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -2.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -669,6 +827,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 16_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.2,
             dry_wet: 1.0,
@@ -738,6 +904,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 13_500.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.5,
             dry_wet: 1.0,
@@ -807,6 +981,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 15_500.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -876,6 +1058,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 16_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -945,6 +1135,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 16_500.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -1014,6 +1212,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 13_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.5,
             dry_wet: 1.0,
@@ -1083,6 +1289,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 15_500.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -2.0,
             dry_wet: 1.0,
@@ -1152,6 +1366,14 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_cut_hz: 16_000.0,
             },
             pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.8,
             dry_wet: 1.0,
@@ -1232,8 +1454,600 @@ pub const INTERNAL_PRESETS: [InternalPreset; 16] = [
                 high_shelf_hz: 5_500.0,
                 high_cut_hz: 15_000.0,
             }),
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
             input_gain_db: -1.0,
             output_gain_db: -1.5,
+            dry_wet: 1.0,
+        },
+    },
+    // ── NOVOS PRESETS COM MODULE EQs ──
+    InternalPreset {
+        id: PresetId::GlobalTonePolish,
+        name: "Global Tone Polish",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Clean,
+                drive: 0.0,
+                age: 0.0,
+                tone: 0.5,
+                noise: 0.0,
+                mix: 0.0,
+                output_trim_db: 0.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Off,
+                rate_hz: 0.45,
+                depth: 0.0,
+                shape: LfoShape::Sine,
+                delay_ms: 16.0,
+                feedback: 0.0,
+                width: 0.0,
+                phase_degrees: 0.0,
+                tone: 0.5,
+                mix: 0.0,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Off,
+                time_ms: 350.0,
+                feedback: 0.0,
+                size: 0.0,
+                decay: 0.0,
+                pre_delay_ms: 0.0,
+                damping: 0.0,
+                mix: 0.0,
+                tone: 0.5,
+                stereo_offset: 0.0,
+                width: 0.0,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Off,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.0,
+                noise_amount: 0.0,
+                noise_color: 0.5,
+                degrade: 0.0,
+                stereo_spread: 0.0,
+                mix: 0.0,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 30.0,
+                low_shelf_gain_db: 1.5,
+                low_shelf_hz: 100.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: -1.0,
+                high_shelf_hz: 10_000.0,
+                high_cut_hz: 20_000.0,
+            },
+            pre_eq: Some(EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 25.0,
+                low_shelf_gain_db: -2.0,
+                low_shelf_hz: 80.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: 2.0,
+                high_shelf_hz: 12_000.0,
+                high_cut_hz: 20_000.0,
+            }),
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: 0.0,
+            output_gain_db: 0.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::CharacterSculptedDrive,
+        name: "Character Sculpted Drive",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Drive,
+                drive: 0.48,
+                age: 0.0,
+                tone: 0.52,
+                noise: 0.0,
+                mix: 0.82,
+                output_trim_db: -2.5,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Off,
+                rate_hz: 0.45,
+                depth: 0.0,
+                shape: LfoShape::Sine,
+                delay_ms: 16.0,
+                feedback: 0.0,
+                width: 0.0,
+                phase_degrees: 0.0,
+                tone: 0.5,
+                mix: 0.0,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Off,
+                time_ms: 350.0,
+                feedback: 0.0,
+                size: 0.0,
+                decay: 0.0,
+                pre_delay_ms: 0.0,
+                damping: 0.0,
+                mix: 0.0,
+                tone: 0.5,
+                stereo_offset: 0.0,
+                width: 0.0,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Off,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.0,
+                noise_amount: 0.0,
+                noise_color: 0.5,
+                degrade: 0.0,
+                stereo_spread: 0.0,
+                mix: 0.0,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 20.0,
+                low_shelf_gain_db: 0.0,
+                low_shelf_hz: 120.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: 0.0,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 20_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::high_pass(100.0, 0.9),
+                    ModuleEqBand::bell(250.0, -2.0, 1.0),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            character_post_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::low_pass(8_000.0, 0.8),
+                    ModuleEqBand::bell(3_000.0, -1.5, 1.2),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: -1.0,
+            output_gain_db: 0.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::MovementWidePolish,
+        name: "Movement Wide Polish",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Clean,
+                drive: 0.0,
+                age: 0.0,
+                tone: 0.5,
+                noise: 0.0,
+                mix: 0.0,
+                output_trim_db: 0.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Chorus,
+                rate_hz: 0.32,
+                depth: 0.30,
+                shape: LfoShape::Sine,
+                delay_ms: 18.0,
+                feedback: 0.08,
+                width: 0.92,
+                phase_degrees: 180.0,
+                tone: 0.58,
+                mix: 0.40,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Off,
+                time_ms: 350.0,
+                feedback: 0.0,
+                size: 0.0,
+                decay: 0.0,
+                pre_delay_ms: 0.0,
+                damping: 0.0,
+                mix: 0.0,
+                tone: 0.5,
+                stereo_offset: 0.0,
+                width: 0.0,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Off,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.0,
+                noise_amount: 0.0,
+                noise_color: 0.5,
+                degrade: 0.0,
+                stereo_spread: 0.0,
+                mix: 0.0,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 20.0,
+                low_shelf_gain_db: 0.0,
+                low_shelf_hz: 120.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: 0.0,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 20_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::high_pass(120.0, 0.7),
+                    ModuleEqBand::bell(800.0, 2.0, 0.8),
+                    ModuleEqBand::bell(4_000.0, 2.0, 1.0),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            movement_post_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::off(),
+                    ModuleEqBand::bell(600.0, -1.8, 0.9),
+                    ModuleEqBand::bell(6_000.0, -1.5, 1.0),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: 0.0,
+            output_gain_db: 0.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::DiffusionCleanRepeats,
+        name: "Diffusion Clean Repeats",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Clean,
+                drive: 0.0,
+                age: 0.0,
+                tone: 0.5,
+                noise: 0.0,
+                mix: 0.0,
+                output_trim_db: 0.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Off,
+                rate_hz: 0.45,
+                depth: 0.0,
+                shape: LfoShape::Sine,
+                delay_ms: 16.0,
+                feedback: 0.0,
+                width: 0.0,
+                phase_degrees: 0.0,
+                tone: 0.5,
+                mix: 0.0,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Delay,
+                time_ms: 380.0,
+                feedback: 0.38,
+                size: 0.3,
+                decay: 0.3,
+                pre_delay_ms: 14.0,
+                damping: 0.55,
+                mix: 0.35,
+                tone: 0.48,
+                stereo_offset: 0.16,
+                width: 0.82,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Off,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.4,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.0,
+                noise_amount: 0.0,
+                noise_color: 0.5,
+                degrade: 0.0,
+                stereo_spread: 0.0,
+                mix: 0.0,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 20.0,
+                low_shelf_gain_db: 0.0,
+                low_shelf_hz: 120.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: 0.0,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 20_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::high_pass(160.0, 0.8),
+                    ModuleEqBand::bell(400.0, -2.5, 1.2),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            diffusion_post_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::low_pass(5_000.0, 0.7),
+                    ModuleEqBand::bell(2_000.0, -2.0, 0.8),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: 0.0,
+            output_gain_db: 0.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::TextureLoFiCurve,
+        name: "Texture Lo-Fi Curve",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Clean,
+                drive: 0.0,
+                age: 0.0,
+                tone: 0.5,
+                noise: 0.0,
+                mix: 0.0,
+                output_trim_db: 0.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Off,
+                rate_hz: 0.45,
+                depth: 0.0,
+                shape: LfoShape::Sine,
+                delay_ms: 16.0,
+                feedback: 0.0,
+                width: 0.0,
+                phase_degrees: 0.0,
+                tone: 0.5,
+                mix: 0.0,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Off,
+                time_ms: 350.0,
+                feedback: 0.0,
+                size: 0.0,
+                decay: 0.0,
+                pre_delay_ms: 0.0,
+                damping: 0.0,
+                mix: 0.0,
+                tone: 0.5,
+                stereo_offset: 0.0,
+                width: 0.0,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Tape,
+                wow_depth: 0.20,
+                wow_rate_hz: 0.38,
+                flutter_depth: 0.08,
+                flutter_rate_hz: 8.0,
+                random_drift: 0.12,
+                noise_amount: 0.18,
+                noise_color: 0.38,
+                degrade: 0.28,
+                stereo_spread: 0.74,
+                mix: 0.36,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 20.0,
+                low_shelf_gain_db: 0.0,
+                low_shelf_hz: 120.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: 0.0,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 20_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::high_pass(60.0, 0.7),
+                    ModuleEqBand::bell(500.0, 2.5, 1.5),
+                    ModuleEqBand::bell(3_000.0, -3.0, 1.0),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            texture_post_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::low_pass(6_000.0, 0.6),
+                    ModuleEqBand::bell(800.0, -1.5, 1.0),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            input_gain_db: 0.0,
+            output_gain_db: -1.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::FullChainMaster,
+        name: "Full Chain Master",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Sweet,
+                drive: 0.24,
+                age: 0.0,
+                tone: 0.56,
+                noise: 0.0,
+                mix: 0.64,
+                output_trim_db: -1.2,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Doubler,
+                rate_hz: 0.28,
+                depth: 0.14,
+                shape: LfoShape::Sine,
+                delay_ms: 22.0,
+                feedback: 0.05,
+                width: 0.76,
+                phase_degrees: 140.0,
+                tone: 0.56,
+                mix: 0.26,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Space,
+                time_ms: 420.0,
+                feedback: 0.22,
+                size: 0.54,
+                decay: 0.50,
+                pre_delay_ms: 20.0,
+                damping: 0.52,
+                mix: 0.26,
+                tone: 0.52,
+                stereo_offset: 0.10,
+                width: 0.84,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Cassette,
+                wow_depth: 0.14,
+                wow_rate_hz: 0.36,
+                flutter_depth: 0.06,
+                flutter_rate_hz: 7.5,
+                random_drift: 0.09,
+                noise_amount: 0.10,
+                noise_color: 0.40,
+                degrade: 0.14,
+                stereo_spread: 0.76,
+                mix: 0.20,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 35.0,
+                low_shelf_gain_db: 0.5,
+                low_shelf_hz: 140.0,
+                mid_gain_db: -0.6,
+                mid_hz: 2_500.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: -0.5,
+                high_shelf_hz: 9_000.0,
+                high_cut_hz: 18_000.0,
+            },
+            pre_eq: Some(EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 30.0,
+                low_shelf_gain_db: -1.5,
+                low_shelf_hz: 90.0,
+                mid_gain_db: 0.0,
+                mid_hz: 1_000.0,
+                mid_q: 1.0,
+                high_shelf_gain_db: 1.0,
+                high_shelf_hz: 11_000.0,
+                high_cut_hz: 20_000.0,
+            }),
+            character_pre_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::high_pass(85.0, 0.8),
+                    ModuleEqBand::bell(300.0, -1.5, 1.0),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::high_pass(140.0, 0.75),
+                    ModuleEqBand::bell(350.0, -1.8, 1.2),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            diffusion_post_eq: Some(ModuleEqPreset {
+                mode: EqMode::On,
+                bands: [
+                    ModuleEqBand::low_pass(7_000.0, 0.7),
+                    ModuleEqBand::bell(3_000.0, -1.5, 0.8),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                    ModuleEqBand::off(),
+                ],
+            }),
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: -0.5,
+            output_gain_db: -1.0,
             dry_wet: 1.0,
         },
     },
@@ -1259,14 +2073,73 @@ impl PresetValues {
         set_param(setter, &params.output_gain, self.output_gain_db);
         set_param(setter, &params.dry_wet, self.dry_wet);
 
+        reset_module_eq_to_off(setter, &params.character_pre_eq);
+        reset_module_eq_to_off(setter, &params.character_post_eq);
+        reset_module_eq_to_off(setter, &params.movement_pre_eq);
+        reset_module_eq_to_off(setter, &params.movement_post_eq);
+        reset_module_eq_to_off(setter, &params.diffusion_pre_eq);
+        reset_module_eq_to_off(setter, &params.diffusion_post_eq);
+        reset_module_eq_to_off(setter, &params.texture_pre_eq);
+        reset_module_eq_to_off(setter, &params.texture_post_eq);
+
         self.character.apply_with_setter(setter, params);
         self.movement.apply_with_setter(setter, params);
         self.diffusion.apply_with_setter(setter, params);
         self.texture.apply_with_setter(setter, params);
+
         self.eq.apply_with_setter(setter, params);
         if let Some(pre_eq) = &self.pre_eq {
             pre_eq.apply_to_pre_eq(setter, params);
         }
+
+        if let Some(mep) = &self.character_pre_eq {
+            apply_module_eq(setter, &params.character_pre_eq, *mep);
+        }
+        if let Some(mep) = &self.character_post_eq {
+            apply_module_eq(setter, &params.character_post_eq, *mep);
+        }
+        if let Some(mep) = &self.movement_pre_eq {
+            apply_module_eq(setter, &params.movement_pre_eq, *mep);
+        }
+        if let Some(mep) = &self.movement_post_eq {
+            apply_module_eq(setter, &params.movement_post_eq, *mep);
+        }
+        if let Some(mep) = &self.diffusion_pre_eq {
+            apply_module_eq(setter, &params.diffusion_pre_eq, *mep);
+        }
+        if let Some(mep) = &self.diffusion_post_eq {
+            apply_module_eq(setter, &params.diffusion_post_eq, *mep);
+        }
+        if let Some(mep) = &self.texture_pre_eq {
+            apply_module_eq(setter, &params.texture_pre_eq, *mep);
+        }
+        if let Some(mep) = &self.texture_post_eq {
+            apply_module_eq(setter, &params.texture_post_eq, *mep);
+        }
+    }
+}
+
+fn reset_module_eq_to_off(setter: &ParamSetter<'_>, eq: &impl EqParamRefs) {
+    set_param(setter, eq.mode(), EqMode::On);
+    set_param(setter, eq.bypass(), false);
+    for band in 0..5 {
+        set_param(setter, eq.band_enabled(band), true);
+        set_param(setter, eq.band_type(band), EqBandType::Bell);
+        set_param(setter, eq.band_frequency(band), 1_000.0);
+        set_param(setter, eq.band_gain(band), 0.0);
+        set_param(setter, eq.band_q(band), 1.0);
+    }
+}
+
+fn apply_module_eq(setter: &ParamSetter<'_>, eq: &impl EqParamRefs, preset: ModuleEqPreset) {
+    set_param(setter, eq.mode(), preset.mode);
+    set_param(setter, eq.bypass(), false);
+    for (band_index, band) in preset.bands.iter().enumerate() {
+        set_param(setter, eq.band_enabled(band_index), band.enabled);
+        set_param(setter, eq.band_type(band_index), band.band_type);
+        set_param(setter, eq.band_frequency(band_index), band.frequency);
+        set_param(setter, eq.band_gain(band_index), band.gain_db);
+        set_param(setter, eq.band_q(band_index), band.q);
     }
 }
 
@@ -1339,7 +2212,7 @@ impl TexturePreset {
 
 impl EqPreset {
     fn apply_with_setter(&self, setter: &ParamSetter<'_>, params: &Cc22Params) {
-        let eq = &params.post_eq;
+        let eq = &params.global_post_eq;
         set_param(setter, &eq.mode, self.mode);
         set_param(setter, &eq.bypass, false);
         set_param(setter, &eq.band1_enabled, true);
@@ -1370,7 +2243,7 @@ impl EqPreset {
     }
 
     fn apply_to_pre_eq(&self, setter: &ParamSetter<'_>, params: &Cc22Params) {
-        let eq = &params.pre_eq;
+        let eq = &params.global_pre_eq;
         set_param(setter, &eq.mode, self.mode);
         set_param(setter, &eq.bypass, false);
         set_param(setter, &eq.band1_enabled, true);
@@ -1419,13 +2292,15 @@ mod tests {
     fn exposes_named_presets_without_reordering_existing_ones() {
         let presets = internal_presets();
 
-        assert_eq!(presets.len(), 16);
+        assert_eq!(presets.len(), 22);
         assert_eq!(presets[0].name, "Warm Tape Chorus");
         assert_eq!(presets[4].name, "Clean Widen");
         assert_eq!(presets[5].name, "Sweet Console");
         assert_eq!(presets[9].name, "Interference Swell");
         assert_eq!(presets[10].name, "Howling Tape Lead");
         assert_eq!(presets[14].name, "Soft Swell Space");
+        assert_eq!(presets[16].name, "Global Tone Polish");
+        assert_eq!(presets[21].name, "Full Chain Master");
     }
 
     #[test]
@@ -1531,69 +2406,96 @@ mod tests {
 
         let howling_tape_lead = find_preset(PresetId::HowlingTapeLead).expect("preset exists");
         assert_eq!(howling_tape_lead.values.character.mode, CharacterMode::Howl);
-        assert_eq!(howling_tape_lead.values.movement.mode, MovementMode::Phaser);
-        assert_eq!(
-            howling_tape_lead.values.diffusion.mode,
-            DiffusionMode::Reels
-        );
-        assert_eq!(howling_tape_lead.values.texture.mode, TextureMode::Cassette);
-
-        let swell_reverse_bloom = find_preset(PresetId::SwellReverseBloom).expect("preset exists");
-        assert_eq!(
-            swell_reverse_bloom.values.character.mode,
-            CharacterMode::Swell
-        );
-        assert_eq!(
-            swell_reverse_bloom.values.movement.mode,
-            MovementMode::Vibrato
-        );
-        assert_eq!(
-            swell_reverse_bloom.values.diffusion.mode,
-            DiffusionMode::Reverse
-        );
-        assert_eq!(
-            swell_reverse_bloom.values.texture.mode,
-            TextureMode::Cassette
-        );
-
-        let reels_dub_echo = find_preset(PresetId::ReelsDubEcho).expect("preset exists");
-        assert_eq!(reels_dub_echo.values.character.mode, CharacterMode::Sweet);
-        assert_eq!(reels_dub_echo.values.movement.mode, MovementMode::Doubler);
-        assert_eq!(reels_dub_echo.values.diffusion.mode, DiffusionMode::Reels);
-        assert_eq!(reels_dub_echo.values.texture.mode, TextureMode::Broken);
-
-        let reverse_psychedelic = find_preset(PresetId::ReversePsychedelic).expect("preset exists");
-        assert_eq!(
-            reverse_psychedelic.values.character.mode,
-            CharacterMode::Drive
-        );
-        assert_eq!(
-            reverse_psychedelic.values.movement.mode,
-            MovementMode::Phaser
-        );
-        assert_eq!(
-            reverse_psychedelic.values.diffusion.mode,
-            DiffusionMode::Reverse
-        );
-        assert_eq!(
-            reverse_psychedelic.values.texture.mode,
-            TextureMode::Interference
-        );
-
-        let soft_swell_space = find_preset(PresetId::SoftSwellSpace).expect("preset exists");
-        assert_eq!(soft_swell_space.values.character.mode, CharacterMode::Swell);
-        assert_eq!(soft_swell_space.values.movement.mode, MovementMode::Chorus);
-        assert_eq!(soft_swell_space.values.diffusion.mode, DiffusionMode::Space);
-        assert_eq!(soft_swell_space.values.texture.mode, TextureMode::Tape);
     }
 
     #[test]
     fn pre_eq_sculpted_preset_sets_pre_and_post_eq() {
         let preset = find_preset(PresetId::PreEqSculpted).expect("preset exists");
-        assert!(preset.values.pre_eq.is_some(), "should have pre_eq");
-        assert_eq!(preset.values.character.mode, CharacterMode::Saturation);
-        assert_eq!(preset.values.movement.mode, MovementMode::Chorus);
-        assert_eq!(preset.values.diffusion.mode, DiffusionMode::Space);
-        assert_eq!(preset.values.texture.mode, TextureMode::Filter);
+
+        assert!(preset.values.pre_eq.is_some());
+        let pre = preset.values.pre_eq.unwrap();
+        assert_eq!(pre.mode, crate::dsp::eq::EqMode::On);
+    }
+
+    #[test]
+    fn new_module_eq_presets_exist_and_have_module_eqs() {
+        let sculpted = find_preset(PresetId::CharacterSculptedDrive).expect("preset exists");
+        assert!(sculpted.values.character_pre_eq.is_some());
+        assert!(sculpted.values.character_post_eq.is_some());
+
+        let wide = find_preset(PresetId::MovementWidePolish).expect("preset exists");
+        assert!(wide.values.movement_pre_eq.is_some());
+        assert!(wide.values.movement_post_eq.is_some());
+
+        let clean = find_preset(PresetId::DiffusionCleanRepeats).expect("preset exists");
+        assert!(clean.values.diffusion_pre_eq.is_some());
+        assert!(clean.values.diffusion_post_eq.is_some());
+
+        let lofi = find_preset(PresetId::TextureLoFiCurve).expect("preset exists");
+        assert!(lofi.values.texture_pre_eq.is_some());
+        assert!(lofi.values.texture_post_eq.is_some());
+
+        let master = find_preset(PresetId::FullChainMaster).expect("preset exists");
+        assert!(master.values.pre_eq.is_some());
+        assert!(master.values.character_pre_eq.is_some());
+        assert!(master.values.diffusion_pre_eq.is_some());
+        assert!(master.values.diffusion_post_eq.is_some());
+    }
+
+    #[test]
+    fn legacy_presets_have_no_module_eqs() {
+        for preset in internal_presets() {
+            if preset.id as usize >= 16 {
+                continue;
+            }
+            assert!(
+                preset.values.character_pre_eq.is_none(),
+                "legacy {} should not have char_pre",
+                preset.name
+            );
+            assert!(
+                preset.values.character_post_eq.is_none(),
+                "legacy {} should not have char_post",
+                preset.name
+            );
+            assert!(
+                preset.values.movement_pre_eq.is_none(),
+                "legacy {} should not have mov_pre",
+                preset.name
+            );
+            assert!(
+                preset.values.movement_post_eq.is_none(),
+                "legacy {} should not have mov_post",
+                preset.name
+            );
+            assert!(
+                preset.values.diffusion_pre_eq.is_none(),
+                "legacy {} should not have dif_pre",
+                preset.name
+            );
+            assert!(
+                preset.values.diffusion_post_eq.is_none(),
+                "legacy {} should not have dif_post",
+                preset.name
+            );
+            assert!(
+                preset.values.texture_pre_eq.is_none(),
+                "legacy {} should not have tex_pre",
+                preset.name
+            );
+            assert!(
+                preset.values.texture_post_eq.is_none(),
+                "legacy {} should not have tex_post",
+                preset.name
+            );
+        }
+    }
+
+    #[test]
+    fn global_tone_polish_has_global_eqs_only() {
+        let preset = find_preset(PresetId::GlobalTonePolish).expect("preset exists");
+        assert!(preset.values.pre_eq.is_some());
+        assert!(preset.values.character_pre_eq.is_none());
+        assert!(preset.values.diffusion_pre_eq.is_none());
     }
 }
