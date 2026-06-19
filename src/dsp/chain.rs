@@ -24,6 +24,18 @@ pub enum ChainModule {
     Texture = 3,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqRackTarget {
+    Global,
+    Module(ChainModule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqRackPosition {
+    Pre,
+    Post,
+}
+
 pub fn default_chain_order() -> [ChainModule; 4] {
     [
         ChainModule::Character,
@@ -153,7 +165,7 @@ impl EqRack {
         }
     }
 
-    pub fn pre_eq_mut(&mut self, module: ChainModule) -> &mut Eq {
+    pub fn pre_eq_for_module(&mut self, module: ChainModule) -> &mut Eq {
         match module {
             ChainModule::Character => &mut self.character_pre,
             ChainModule::Movement => &mut self.movement_pre,
@@ -162,7 +174,7 @@ impl EqRack {
         }
     }
 
-    pub fn post_eq_mut(&mut self, module: ChainModule) -> &mut Eq {
+    pub fn post_eq_for_module(&mut self, module: ChainModule) -> &mut Eq {
         match module {
             ChainModule::Character => &mut self.character_post,
             ChainModule::Movement => &mut self.movement_post,
@@ -171,25 +183,40 @@ impl EqRack {
         }
     }
 
-    pub fn pre_eq_frame<'a>(&self, frame: &'a EqRackFrame, module: ChainModule) -> &'a EqFrame {
-        match module {
-            ChainModule::Character => &frame.character_pre,
-            ChainModule::Movement => &frame.movement_pre,
-            ChainModule::Diffusion => &frame.diffusion_pre,
-            ChainModule::Texture => &frame.texture_pre,
+    pub fn eq_frame_for_target(
+        frame: &EqRackFrame,
+        target: EqRackTarget,
+        position: EqRackPosition,
+    ) -> &EqFrame {
+        match (target, position) {
+            (EqRackTarget::Global, EqRackPosition::Pre) => &frame.global_pre,
+            (EqRackTarget::Global, EqRackPosition::Post) => &frame.global_post,
+            (EqRackTarget::Module(ChainModule::Character), EqRackPosition::Pre) => {
+                &frame.character_pre
+            }
+            (EqRackTarget::Module(ChainModule::Character), EqRackPosition::Post) => {
+                &frame.character_post
+            }
+            (EqRackTarget::Module(ChainModule::Movement), EqRackPosition::Pre) => {
+                &frame.movement_pre
+            }
+            (EqRackTarget::Module(ChainModule::Movement), EqRackPosition::Post) => {
+                &frame.movement_post
+            }
+            (EqRackTarget::Module(ChainModule::Diffusion), EqRackPosition::Pre) => {
+                &frame.diffusion_pre
+            }
+            (EqRackTarget::Module(ChainModule::Diffusion), EqRackPosition::Post) => {
+                &frame.diffusion_post
+            }
+            (EqRackTarget::Module(ChainModule::Texture), EqRackPosition::Pre) => &frame.texture_pre,
+            (EqRackTarget::Module(ChainModule::Texture), EqRackPosition::Post) => {
+                &frame.texture_post
+            }
         }
     }
 
-    pub fn post_eq_frame<'a>(&self, frame: &'a EqRackFrame, module: ChainModule) -> &'a EqFrame {
-        match module {
-            ChainModule::Character => &frame.character_post,
-            ChainModule::Movement => &frame.movement_post,
-            ChainModule::Diffusion => &frame.diffusion_post,
-            ChainModule::Texture => &frame.texture_post,
-        }
-    }
-
-    pub fn process_module_with_eqs(
+    pub fn process_module_with_own_eqs(
         &mut self,
         channel: usize,
         sample: f32,
@@ -204,11 +231,12 @@ impl EqRack {
         diffusion_frame: &DiffusionFrame,
         texture_frame: &TextureFrame,
     ) -> f32 {
-        let pre_frame = self.pre_eq_frame(frame, module);
-        let post_frame = self.post_eq_frame(frame, module);
+        let target = EqRackTarget::Module(module);
+        let pre_frame = Self::eq_frame_for_target(frame, target, EqRackPosition::Pre);
+        let post_frame = Self::eq_frame_for_target(frame, target, EqRackPosition::Post);
 
         let sample = self
-            .pre_eq_mut(module)
+            .pre_eq_for_module(module)
             .process_sample_for_channel(channel, sample, pre_frame);
 
         let sample = match module {
@@ -224,7 +252,7 @@ impl EqRack {
             }
         };
 
-        self.post_eq_mut(module)
+        self.post_eq_for_module(module)
             .process_sample_for_channel(channel, sample, post_frame)
     }
 }
@@ -342,14 +370,15 @@ impl EffectChain {
         frame: &ChainFrame,
         order: &[ChainModule; 4],
     ) -> f32 {
-        let mut sample = self.eq_rack.global_pre.process_sample_for_channel(
-            channel,
-            sample,
-            &frame.eq_rack.global_pre,
-        );
+        let global_pre_frame =
+            EqRack::eq_frame_for_target(&frame.eq_rack, EqRackTarget::Global, EqRackPosition::Pre);
+        let mut sample =
+            self.eq_rack
+                .global_pre
+                .process_sample_for_channel(channel, sample, global_pre_frame);
 
         for &module in order.iter() {
-            sample = self.eq_rack.process_module_with_eqs(
+            sample = self.eq_rack.process_module_with_own_eqs(
                 channel,
                 sample,
                 module,
@@ -365,11 +394,11 @@ impl EffectChain {
             );
         }
 
-        self.eq_rack.global_post.process_sample_for_channel(
-            channel,
-            sample,
-            &frame.eq_rack.global_post,
-        )
+        let global_post_frame =
+            EqRack::eq_frame_for_target(&frame.eq_rack, EqRackTarget::Global, EqRackPosition::Post);
+        self.eq_rack
+            .global_post
+            .process_sample_for_channel(channel, sample, global_post_frame)
     }
 
     pub fn process_block(
@@ -422,11 +451,12 @@ mod tests {
     use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, FloatRange};
 
     use crate::dsp::{character::CharacterMode, eq::EqBandType, movement::MovementMode};
-    use crate::params::Cc22Params;
+    use crate::params::{Cc22Params, MovementPreEq};
 
     use super::{
         default_chain_order, reorder_module, safety_limit_sample, sanitize_sample,
-        soft_clip_sample, validate_chain_order, ChainModule, EffectChain, ModuleCore,
+        soft_clip_sample, validate_chain_order, ChainModule, EffectChain, EqRack, EqRackPosition,
+        EqRackTarget, ModuleCore,
     };
 
     #[test]
@@ -658,23 +688,21 @@ mod tests {
 
     #[test]
     fn all_10_eqs_are_independent() {
-        let params = Cc22Params::default();
-        let post_gain = params.global_post_eq.band3_gain.value();
-        let post_type = params.global_post_eq.band3_type.value();
+        let mut params = Cc22Params::default();
+        let before = collect_all_eq_band1_gains(&params);
 
-        assert_eq!(params.global_pre_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.global_pre_eq.band3_type.value(), EqBandType::Bell);
-        assert_eq!(params.character_pre_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.character_post_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.movement_pre_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.movement_post_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.diffusion_pre_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.diffusion_post_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.texture_pre_eq.band3_gain.value(), 0.0);
-        assert_eq!(params.texture_post_eq.band3_gain.value(), 0.0);
+        params.global_pre_eq.band1_gain = FloatParam::new(
+            "Global Pre Band 1 Gain",
+            9.0,
+            FloatRange::Linear {
+                min: -24.0,
+                max: 24.0,
+            },
+        );
 
-        assert_eq!(post_gain, 0.0);
-        assert_eq!(post_type, EqBandType::Bell);
+        let after = collect_all_eq_band1_gains(&params);
+        assert_eq!(after[0], 9.0);
+        assert_eq!(&after[1..], &before[1..]);
     }
 
     #[test]
@@ -997,6 +1025,29 @@ mod tests {
     }
 
     #[test]
+    fn character_pre_is_the_only_eq_affecting_the_render_when_soloed() {
+        let flat_rms =
+            process_eq_chain_rms(None, None, None, None, None, None, None, None, None, None);
+        let character_pre_rms = process_eq_chain_rms(
+            None,
+            Some((1_000.0, 12.0)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let params = Cc22Params::default();
+
+        assert!(character_pre_rms > flat_rms * 1.5);
+        assert_eq!(params.global_post_eq.band3_gain.value(), 0.0);
+        assert_eq!(params.global_post_eq.band3_type.value(), EqBandType::Bell);
+    }
+
+    #[test]
     fn character_post_alters_only_after_character() {
         let mut flat_params = Cc22Params::default();
         bypass_modules(&mut flat_params);
@@ -1231,13 +1282,17 @@ mod tests {
             target_values.dif_post
         );
         assert_eq!(
+            params.texture_pre_eq.band3_gain.value(),
+            target_values.tex_pre
+        );
+        assert_eq!(
             params.texture_post_eq.band3_gain.value(),
             target_values.tex_post
         );
     }
 
     #[test]
-    fn reset_of_one_eq_does_not_reset_others() {
+    fn reset_of_movement_pre_does_not_reset_others() {
         let mut params = Cc22Params::default();
 
         params.global_pre_eq.band3_gain = FloatParam::new(
@@ -1248,7 +1303,7 @@ mod tests {
                 max: 24.0,
             },
         );
-        params.character_pre_eq.band3_gain = FloatParam::new(
+        params.movement_pre_eq.band3_gain = FloatParam::new(
             "Gain",
             -6.0,
             FloatRange::Linear {
@@ -1273,17 +1328,10 @@ mod tests {
             },
         );
 
-        params.character_pre_eq.band3_gain = FloatParam::new(
-            "Gain",
-            0.0,
-            FloatRange::Linear {
-                min: -24.0,
-                max: 24.0,
-            },
-        );
+        params.movement_pre_eq = MovementPreEq::default();
 
         assert!((params.global_pre_eq.band3_gain.value() - 12.0).abs() < 0.001);
-        assert!((params.character_pre_eq.band3_gain.value() - 0.0).abs() < 0.001);
+        assert!((params.movement_pre_eq.band3_gain.value() - 0.0).abs() < 0.001);
         assert!((params.movement_post_eq.band3_gain.value() - 8.0).abs() < 0.001);
         assert!((params.global_post_eq.band3_gain.value() - (-3.0)).abs() < 0.001);
     }
@@ -1371,6 +1419,45 @@ mod tests {
         assert!(
             (default_out - swapped_out).abs() > 0.000_01,
             "Reordering should produce different output when EQs differ"
+        );
+    }
+
+    #[test]
+    fn diffusion_post_frame_follows_diffusion_when_moved_first() {
+        let mut params = Cc22Params::default();
+        let character_post_before = params.character_post_eq.band3_gain.value();
+        params.diffusion_post_eq.band3_gain = FloatParam::new(
+            "Diffusion Post Gain",
+            10.0,
+            FloatRange::Linear {
+                min: -24.0,
+                max: 24.0,
+            },
+        );
+        params.reset_smoothers();
+
+        let order = reorder_module(default_chain_order(), 2, 0);
+        assert_eq!(order[0], ChainModule::Diffusion);
+
+        let mut rack = EqRack::default();
+        rack.prepare(48_000.0);
+        let frames = rack.next_frame(&params);
+        let diffusion_post = EqRack::eq_frame_for_target(
+            &frames,
+            EqRackTarget::Module(order[0]),
+            EqRackPosition::Post,
+        );
+        let character_post = EqRack::eq_frame_for_target(
+            &frames,
+            EqRackTarget::Module(ChainModule::Character),
+            EqRackPosition::Post,
+        );
+
+        assert_eq!(diffusion_post.bands[2].gain, 10.0);
+        assert_eq!(character_post.bands[2].gain, character_post_before);
+        assert_eq!(
+            params.character_post_eq.band3_gain.value(),
+            character_post_before
         );
     }
 
@@ -1649,6 +1736,21 @@ mod tests {
         dif_post: f32,
         tex_pre: f32,
         tex_post: f32,
+    }
+
+    fn collect_all_eq_band1_gains(params: &Cc22Params) -> [f32; 10] {
+        [
+            params.global_pre_eq.band1_gain.value(),
+            params.global_post_eq.band1_gain.value(),
+            params.character_pre_eq.band1_gain.value(),
+            params.character_post_eq.band1_gain.value(),
+            params.movement_pre_eq.band1_gain.value(),
+            params.movement_post_eq.band1_gain.value(),
+            params.diffusion_pre_eq.band1_gain.value(),
+            params.diffusion_post_eq.band1_gain.value(),
+            params.texture_pre_eq.band1_gain.value(),
+            params.texture_post_eq.band1_gain.value(),
+        ]
     }
 
     fn collect_all_eq_band3_gains(params: &Cc22Params) -> AllEqBand3Gains {

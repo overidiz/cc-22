@@ -41,7 +41,7 @@ fn target_color(target: EqTargetSelection, colors: ModuleColors) -> Color32 {
     }
 }
 
-fn eq_params_for<'a>(
+pub(crate) fn selected_eq_params<'a>(
     params: &'a Cc22Params,
     target: EqTargetSelection,
     position: EqPositionSelection,
@@ -96,13 +96,10 @@ pub(crate) fn eq_workbench(
                         (workbench_width - f32::from(EQ_INNER_PADDING) * 2.0).max(0.0);
                     ui.set_width(content_width);
                     ui.set_min_height(EQ_WORKBENCH_HEIGHT - f32::from(EQ_INNER_PADDING) * 2.0);
-                    let eq_params =
-                        eq_params_for(params, *selected_eq_target, *selected_eq_position);
                     let eq_accent = target_color(*selected_eq_target, colors);
                     eq_header(
                         ui,
                         setter,
-                        eq_params,
                         params,
                         selected_eq_target,
                         selected_eq_position,
@@ -115,7 +112,7 @@ pub(crate) fn eq_workbench(
                     eq_separator(ui, theme);
                     ui.add_space(4.0);
                     let eq_params =
-                        eq_params_for(params, *selected_eq_target, *selected_eq_position);
+                        selected_eq_params(params, *selected_eq_target, *selected_eq_position);
                     eq_body(ui, setter, eq_params, selected_eq_band, colors, theme);
                 });
         },
@@ -125,7 +122,6 @@ pub(crate) fn eq_workbench(
 fn eq_header(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    eq_params: &dyn EqParamRefs,
     params: &Cc22Params,
     selected_eq_target: &mut EqTargetSelection,
     selected_eq_position: &mut EqPositionSelection,
@@ -147,6 +143,7 @@ fn eq_header(
         eq_toolbar_divider(ui, theme);
         eq_position_tabs(ui, selected_eq_position, eq_accent, colors, theme);
         eq_toolbar_divider(ui, theme);
+        let eq_params = selected_eq_params(params, *selected_eq_target, *selected_eq_position);
         let active = eq_active(eq_params);
         if eq_toggle_button(ui, active, eq_accent, theme).clicked() {
             if active {
@@ -1366,7 +1363,7 @@ fn reset_eq_params_to_defaults(
     target: EqTargetSelection,
     position: EqPositionSelection,
 ) {
-    let eq_params = eq_params_for(params, target, position);
+    let eq_params = selected_eq_params(params, target, position);
     set_param(setter, eq_params.mode(), EqMode::On);
     set_param(setter, eq_params.bypass(), false);
     for band in 0..EQ_NODE_COUNT {
@@ -1643,7 +1640,18 @@ fn y_from_real_gain_db(rect: egui::Rect, gain_db: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{direct_right_click_band_type, safe_eq_reset_frequency, EqBandType};
+    use std::collections::BTreeSet;
+
+    use nih_plug::prelude::EnumParam;
+
+    use crate::{
+        params::Cc22Params,
+        ui::meters::{EqPositionSelection, EqTargetSelection},
+    };
+
+    use super::{
+        direct_right_click_band_type, safe_eq_reset_frequency, selected_eq_params, EqBandType,
+    };
 
     #[test]
     fn direct_right_click_maps_edge_bands_to_filters() {
@@ -1658,5 +1666,85 @@ mod tests {
             let frequency = safe_eq_reset_frequency(band);
             assert!((20.0..=20_000.0).contains(&frequency));
         }
+    }
+
+    #[test]
+    fn every_target_and_position_selects_a_distinct_eq_bank() {
+        let params = Cc22Params::default();
+        let targets = [
+            EqTargetSelection::Global,
+            EqTargetSelection::Character,
+            EqTargetSelection::Movement,
+            EqTargetSelection::Diffusion,
+            EqTargetSelection::Texture,
+        ];
+        let positions = [EqPositionSelection::Pre, EqPositionSelection::Post];
+        let expected = [
+            &params.global_pre_eq.band1_gain as *const _ as usize,
+            &params.global_post_eq.band1_gain as *const _ as usize,
+            &params.character_pre_eq.band1_gain as *const _ as usize,
+            &params.character_post_eq.band1_gain as *const _ as usize,
+            &params.movement_pre_eq.band1_gain as *const _ as usize,
+            &params.movement_post_eq.band1_gain as *const _ as usize,
+            &params.diffusion_pre_eq.band1_gain as *const _ as usize,
+            &params.diffusion_post_eq.band1_gain as *const _ as usize,
+            &params.texture_pre_eq.band1_gain as *const _ as usize,
+            &params.texture_post_eq.band1_gain as *const _ as usize,
+        ];
+        let mut band1_gain_addresses = BTreeSet::new();
+        let mut index = 0;
+
+        for target in targets {
+            for position in positions {
+                let eq = selected_eq_params(&params, target, position);
+                let address = eq.band_gain(0) as *const _ as usize;
+                assert_eq!(
+                    address, expected[index],
+                    "resolver returned the wrong EQ bank"
+                );
+                index += 1;
+                assert!(
+                    band1_gain_addresses.insert(address),
+                    "selection reused an EQ parameter bank"
+                );
+            }
+        }
+
+        assert_eq!(band1_gain_addresses.len(), 10);
+    }
+
+    #[test]
+    fn texture_post_band5_right_click_does_not_change_other_eqs() {
+        let mut params = Cc22Params::default();
+        let before = [
+            params.global_pre_eq.band5_type.value(),
+            params.global_post_eq.band5_type.value(),
+            params.character_pre_eq.band5_type.value(),
+            params.character_post_eq.band5_type.value(),
+            params.movement_pre_eq.band5_type.value(),
+            params.movement_post_eq.band5_type.value(),
+            params.diffusion_pre_eq.band5_type.value(),
+            params.diffusion_post_eq.band5_type.value(),
+            params.texture_pre_eq.band5_type.value(),
+        ];
+        let right_click_type = direct_right_click_band_type(4).unwrap();
+        params.texture_post_eq.band5_type = EnumParam::new("Type", right_click_type);
+
+        assert_eq!(
+            params.texture_post_eq.band5_type.value(),
+            EqBandType::LowPass
+        );
+        let after = [
+            params.global_pre_eq.band5_type.value(),
+            params.global_post_eq.band5_type.value(),
+            params.character_pre_eq.band5_type.value(),
+            params.character_post_eq.band5_type.value(),
+            params.movement_pre_eq.band5_type.value(),
+            params.movement_post_eq.band5_type.value(),
+            params.diffusion_pre_eq.band5_type.value(),
+            params.diffusion_post_eq.band5_type.value(),
+            params.texture_pre_eq.band5_type.value(),
+        ];
+        assert_eq!(after, before);
     }
 }

@@ -509,6 +509,8 @@ fn clamp_frequency(frequency: f32, min: f32, max: f32, sample_rate: f32) -> f32 
 
 #[cfg(test)]
 mod tests {
+    use crate::dsp::chain::EqRack;
+
     use super::{
         clamp_frequency, coefficients_for_band, Biquad, BiquadCoefficients, Eq, EqBandFrame,
         EqBandType, EqFrame, EqMode, NUM_BANDS,
@@ -517,6 +519,40 @@ mod tests {
     #[test]
     fn clamps_frequency_below_nyquist() {
         assert!(clamp_frequency(20_000.0, 2_000.0, 20_000.0, 44_100.0) < 22_050.0);
+    }
+
+    #[test]
+    fn updating_one_rack_eq_does_not_change_other_coefficient_states() {
+        let mut rack = EqRack::default();
+        rack.prepare(48_000.0);
+        let mut changed = EqFrame::neutral(48_000.0);
+        changed.bands[2] = EqBandFrame {
+            enabled: true,
+            band_type: EqBandType::Bell,
+            frequency: 1_200.0,
+            gain: 12.0,
+            q: 1.5,
+        };
+
+        rack.character_pre.update_coefficients(&changed);
+
+        assert_eq!(
+            rack.character_pre.coefficient_state.unwrap().bands[2].gain,
+            12.0
+        );
+        for eq in [
+            &rack.global_pre,
+            &rack.global_post,
+            &rack.character_post,
+            &rack.movement_pre,
+            &rack.movement_post,
+            &rack.diffusion_pre,
+            &rack.diffusion_post,
+            &rack.texture_pre,
+            &rack.texture_post,
+        ] {
+            assert_eq!(eq.coefficient_state.unwrap().bands[2].gain, 0.0);
+        }
     }
 
     #[test]

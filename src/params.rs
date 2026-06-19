@@ -531,59 +531,59 @@ impl TextureParams {
 
 #[derive(Params)]
 pub struct GlobalPreEqParams {
-    #[id = "pre_eq_mode"]
+    #[id = "global_pre_eq_mode"]
     pub mode: EnumParam<EqMode>,
-    #[id = "pre_eq_bypass"]
+    #[id = "global_pre_eq_bypass"]
     pub bypass: BoolParam,
-    #[id = "pre_eq_band_1_enabled"]
+    #[id = "global_pre_eq_b1_enabled"]
     pub band1_enabled: BoolParam,
-    #[id = "pre_eq_band_1_type"]
+    #[id = "global_pre_eq_b1_type"]
     pub band1_type: EnumParam<EqBandType>,
-    #[id = "pre_eq_band_1_frequency"]
+    #[id = "global_pre_eq_b1_freq"]
     pub band1_frequency: FloatParam,
-    #[id = "pre_eq_band_1_gain"]
+    #[id = "global_pre_eq_b1_gain"]
     pub band1_gain: FloatParam,
-    #[id = "pre_eq_band_1_q"]
+    #[id = "global_pre_eq_b1_q"]
     pub band1_q: FloatParam,
-    #[id = "pre_eq_band_2_enabled"]
+    #[id = "global_pre_eq_b2_enabled"]
     pub band2_enabled: BoolParam,
-    #[id = "pre_eq_band_2_type"]
+    #[id = "global_pre_eq_b2_type"]
     pub band2_type: EnumParam<EqBandType>,
-    #[id = "pre_eq_band_2_frequency"]
+    #[id = "global_pre_eq_b2_freq"]
     pub band2_frequency: FloatParam,
-    #[id = "pre_eq_band_2_gain"]
+    #[id = "global_pre_eq_b2_gain"]
     pub band2_gain: FloatParam,
-    #[id = "pre_eq_band_2_q"]
+    #[id = "global_pre_eq_b2_q"]
     pub band2_q: FloatParam,
-    #[id = "pre_eq_band_3_enabled"]
+    #[id = "global_pre_eq_b3_enabled"]
     pub band3_enabled: BoolParam,
-    #[id = "pre_eq_band_3_type"]
+    #[id = "global_pre_eq_b3_type"]
     pub band3_type: EnumParam<EqBandType>,
-    #[id = "pre_eq_band_3_frequency"]
+    #[id = "global_pre_eq_b3_freq"]
     pub band3_frequency: FloatParam,
-    #[id = "pre_eq_band_3_gain"]
+    #[id = "global_pre_eq_b3_gain"]
     pub band3_gain: FloatParam,
-    #[id = "pre_eq_band_3_q"]
+    #[id = "global_pre_eq_b3_q"]
     pub band3_q: FloatParam,
-    #[id = "pre_eq_band_4_enabled"]
+    #[id = "global_pre_eq_b4_enabled"]
     pub band4_enabled: BoolParam,
-    #[id = "pre_eq_band_4_type"]
+    #[id = "global_pre_eq_b4_type"]
     pub band4_type: EnumParam<EqBandType>,
-    #[id = "pre_eq_band_4_frequency"]
+    #[id = "global_pre_eq_b4_freq"]
     pub band4_frequency: FloatParam,
-    #[id = "pre_eq_band_4_gain"]
+    #[id = "global_pre_eq_b4_gain"]
     pub band4_gain: FloatParam,
-    #[id = "pre_eq_band_4_q"]
+    #[id = "global_pre_eq_b4_q"]
     pub band4_q: FloatParam,
-    #[id = "pre_eq_band_5_enabled"]
+    #[id = "global_pre_eq_b5_enabled"]
     pub band5_enabled: BoolParam,
-    #[id = "pre_eq_band_5_type"]
+    #[id = "global_pre_eq_b5_type"]
     pub band5_type: EnumParam<EqBandType>,
-    #[id = "pre_eq_band_5_frequency"]
+    #[id = "global_pre_eq_b5_freq"]
     pub band5_frequency: FloatParam,
-    #[id = "pre_eq_band_5_gain"]
+    #[id = "global_pre_eq_b5_gain"]
     pub band5_gain: FloatParam,
-    #[id = "pre_eq_band_5_q"]
+    #[id = "global_pre_eq_b5_q"]
     pub band5_q: FloatParam,
 }
 
@@ -633,6 +633,9 @@ impl Default for GlobalPreEqParams {
 // Global Post EQ — keeps legacy eq_* IDs for backward compat
 // ═══════════════════════════════════════════════════════════════════
 
+/// Keeps the legacy `eq_*` IDs for backward compatibility. This bank is the
+/// migration destination for EQ state saved before independent PRE/POST and
+/// per-module EQ banks were introduced.
 #[derive(Params)]
 pub struct GlobalPostEqParams {
     #[id = "eq_mode"]
@@ -925,248 +928,248 @@ define_module_eq!(
     CharacterPreEq,
     "character_pre_eq_mode",
     "character_pre_eq_bypass",
-    "character_pre_eq_band_1_enabled",
-    "character_pre_eq_band_1_type",
-    "character_pre_eq_band_1_frequency",
-    "character_pre_eq_band_1_gain",
-    "character_pre_eq_band_1_q",
-    "character_pre_eq_band_2_enabled",
-    "character_pre_eq_band_2_type",
-    "character_pre_eq_band_2_frequency",
-    "character_pre_eq_band_2_gain",
-    "character_pre_eq_band_2_q",
-    "character_pre_eq_band_3_enabled",
-    "character_pre_eq_band_3_type",
-    "character_pre_eq_band_3_frequency",
-    "character_pre_eq_band_3_gain",
-    "character_pre_eq_band_3_q",
-    "character_pre_eq_band_4_enabled",
-    "character_pre_eq_band_4_type",
-    "character_pre_eq_band_4_frequency",
-    "character_pre_eq_band_4_gain",
-    "character_pre_eq_band_4_q",
-    "character_pre_eq_band_5_enabled",
-    "character_pre_eq_band_5_type",
-    "character_pre_eq_band_5_frequency",
-    "character_pre_eq_band_5_gain",
-    "character_pre_eq_band_5_q",
+    "character_pre_eq_b1_enabled",
+    "character_pre_eq_b1_type",
+    "character_pre_eq_b1_freq",
+    "character_pre_eq_b1_gain",
+    "character_pre_eq_b1_q",
+    "character_pre_eq_b2_enabled",
+    "character_pre_eq_b2_type",
+    "character_pre_eq_b2_freq",
+    "character_pre_eq_b2_gain",
+    "character_pre_eq_b2_q",
+    "character_pre_eq_b3_enabled",
+    "character_pre_eq_b3_type",
+    "character_pre_eq_b3_freq",
+    "character_pre_eq_b3_gain",
+    "character_pre_eq_b3_q",
+    "character_pre_eq_b4_enabled",
+    "character_pre_eq_b4_type",
+    "character_pre_eq_b4_freq",
+    "character_pre_eq_b4_gain",
+    "character_pre_eq_b4_q",
+    "character_pre_eq_b5_enabled",
+    "character_pre_eq_b5_type",
+    "character_pre_eq_b5_freq",
+    "character_pre_eq_b5_gain",
+    "character_pre_eq_b5_q",
 );
 
 define_module_eq!(
     CharacterPostEq,
     "character_post_eq_mode",
     "character_post_eq_bypass",
-    "character_post_eq_band_1_enabled",
-    "character_post_eq_band_1_type",
-    "character_post_eq_band_1_frequency",
-    "character_post_eq_band_1_gain",
-    "character_post_eq_band_1_q",
-    "character_post_eq_band_2_enabled",
-    "character_post_eq_band_2_type",
-    "character_post_eq_band_2_frequency",
-    "character_post_eq_band_2_gain",
-    "character_post_eq_band_2_q",
-    "character_post_eq_band_3_enabled",
-    "character_post_eq_band_3_type",
-    "character_post_eq_band_3_frequency",
-    "character_post_eq_band_3_gain",
-    "character_post_eq_band_3_q",
-    "character_post_eq_band_4_enabled",
-    "character_post_eq_band_4_type",
-    "character_post_eq_band_4_frequency",
-    "character_post_eq_band_4_gain",
-    "character_post_eq_band_4_q",
-    "character_post_eq_band_5_enabled",
-    "character_post_eq_band_5_type",
-    "character_post_eq_band_5_frequency",
-    "character_post_eq_band_5_gain",
-    "character_post_eq_band_5_q",
+    "character_post_eq_b1_enabled",
+    "character_post_eq_b1_type",
+    "character_post_eq_b1_freq",
+    "character_post_eq_b1_gain",
+    "character_post_eq_b1_q",
+    "character_post_eq_b2_enabled",
+    "character_post_eq_b2_type",
+    "character_post_eq_b2_freq",
+    "character_post_eq_b2_gain",
+    "character_post_eq_b2_q",
+    "character_post_eq_b3_enabled",
+    "character_post_eq_b3_type",
+    "character_post_eq_b3_freq",
+    "character_post_eq_b3_gain",
+    "character_post_eq_b3_q",
+    "character_post_eq_b4_enabled",
+    "character_post_eq_b4_type",
+    "character_post_eq_b4_freq",
+    "character_post_eq_b4_gain",
+    "character_post_eq_b4_q",
+    "character_post_eq_b5_enabled",
+    "character_post_eq_b5_type",
+    "character_post_eq_b5_freq",
+    "character_post_eq_b5_gain",
+    "character_post_eq_b5_q",
 );
 
 define_module_eq!(
     MovementPreEq,
     "movement_pre_eq_mode",
     "movement_pre_eq_bypass",
-    "movement_pre_eq_band_1_enabled",
-    "movement_pre_eq_band_1_type",
-    "movement_pre_eq_band_1_frequency",
-    "movement_pre_eq_band_1_gain",
-    "movement_pre_eq_band_1_q",
-    "movement_pre_eq_band_2_enabled",
-    "movement_pre_eq_band_2_type",
-    "movement_pre_eq_band_2_frequency",
-    "movement_pre_eq_band_2_gain",
-    "movement_pre_eq_band_2_q",
-    "movement_pre_eq_band_3_enabled",
-    "movement_pre_eq_band_3_type",
-    "movement_pre_eq_band_3_frequency",
-    "movement_pre_eq_band_3_gain",
-    "movement_pre_eq_band_3_q",
-    "movement_pre_eq_band_4_enabled",
-    "movement_pre_eq_band_4_type",
-    "movement_pre_eq_band_4_frequency",
-    "movement_pre_eq_band_4_gain",
-    "movement_pre_eq_band_4_q",
-    "movement_pre_eq_band_5_enabled",
-    "movement_pre_eq_band_5_type",
-    "movement_pre_eq_band_5_frequency",
-    "movement_pre_eq_band_5_gain",
-    "movement_pre_eq_band_5_q",
+    "movement_pre_eq_b1_enabled",
+    "movement_pre_eq_b1_type",
+    "movement_pre_eq_b1_freq",
+    "movement_pre_eq_b1_gain",
+    "movement_pre_eq_b1_q",
+    "movement_pre_eq_b2_enabled",
+    "movement_pre_eq_b2_type",
+    "movement_pre_eq_b2_freq",
+    "movement_pre_eq_b2_gain",
+    "movement_pre_eq_b2_q",
+    "movement_pre_eq_b3_enabled",
+    "movement_pre_eq_b3_type",
+    "movement_pre_eq_b3_freq",
+    "movement_pre_eq_b3_gain",
+    "movement_pre_eq_b3_q",
+    "movement_pre_eq_b4_enabled",
+    "movement_pre_eq_b4_type",
+    "movement_pre_eq_b4_freq",
+    "movement_pre_eq_b4_gain",
+    "movement_pre_eq_b4_q",
+    "movement_pre_eq_b5_enabled",
+    "movement_pre_eq_b5_type",
+    "movement_pre_eq_b5_freq",
+    "movement_pre_eq_b5_gain",
+    "movement_pre_eq_b5_q",
 );
 
 define_module_eq!(
     MovementPostEq,
     "movement_post_eq_mode",
     "movement_post_eq_bypass",
-    "movement_post_eq_band_1_enabled",
-    "movement_post_eq_band_1_type",
-    "movement_post_eq_band_1_frequency",
-    "movement_post_eq_band_1_gain",
-    "movement_post_eq_band_1_q",
-    "movement_post_eq_band_2_enabled",
-    "movement_post_eq_band_2_type",
-    "movement_post_eq_band_2_frequency",
-    "movement_post_eq_band_2_gain",
-    "movement_post_eq_band_2_q",
-    "movement_post_eq_band_3_enabled",
-    "movement_post_eq_band_3_type",
-    "movement_post_eq_band_3_frequency",
-    "movement_post_eq_band_3_gain",
-    "movement_post_eq_band_3_q",
-    "movement_post_eq_band_4_enabled",
-    "movement_post_eq_band_4_type",
-    "movement_post_eq_band_4_frequency",
-    "movement_post_eq_band_4_gain",
-    "movement_post_eq_band_4_q",
-    "movement_post_eq_band_5_enabled",
-    "movement_post_eq_band_5_type",
-    "movement_post_eq_band_5_frequency",
-    "movement_post_eq_band_5_gain",
-    "movement_post_eq_band_5_q",
+    "movement_post_eq_b1_enabled",
+    "movement_post_eq_b1_type",
+    "movement_post_eq_b1_freq",
+    "movement_post_eq_b1_gain",
+    "movement_post_eq_b1_q",
+    "movement_post_eq_b2_enabled",
+    "movement_post_eq_b2_type",
+    "movement_post_eq_b2_freq",
+    "movement_post_eq_b2_gain",
+    "movement_post_eq_b2_q",
+    "movement_post_eq_b3_enabled",
+    "movement_post_eq_b3_type",
+    "movement_post_eq_b3_freq",
+    "movement_post_eq_b3_gain",
+    "movement_post_eq_b3_q",
+    "movement_post_eq_b4_enabled",
+    "movement_post_eq_b4_type",
+    "movement_post_eq_b4_freq",
+    "movement_post_eq_b4_gain",
+    "movement_post_eq_b4_q",
+    "movement_post_eq_b5_enabled",
+    "movement_post_eq_b5_type",
+    "movement_post_eq_b5_freq",
+    "movement_post_eq_b5_gain",
+    "movement_post_eq_b5_q",
 );
 
 define_module_eq!(
     DiffusionPreEq,
     "diffusion_pre_eq_mode",
     "diffusion_pre_eq_bypass",
-    "diffusion_pre_eq_band_1_enabled",
-    "diffusion_pre_eq_band_1_type",
-    "diffusion_pre_eq_band_1_frequency",
-    "diffusion_pre_eq_band_1_gain",
-    "diffusion_pre_eq_band_1_q",
-    "diffusion_pre_eq_band_2_enabled",
-    "diffusion_pre_eq_band_2_type",
-    "diffusion_pre_eq_band_2_frequency",
-    "diffusion_pre_eq_band_2_gain",
-    "diffusion_pre_eq_band_2_q",
-    "diffusion_pre_eq_band_3_enabled",
-    "diffusion_pre_eq_band_3_type",
-    "diffusion_pre_eq_band_3_frequency",
-    "diffusion_pre_eq_band_3_gain",
-    "diffusion_pre_eq_band_3_q",
-    "diffusion_pre_eq_band_4_enabled",
-    "diffusion_pre_eq_band_4_type",
-    "diffusion_pre_eq_band_4_frequency",
-    "diffusion_pre_eq_band_4_gain",
-    "diffusion_pre_eq_band_4_q",
-    "diffusion_pre_eq_band_5_enabled",
-    "diffusion_pre_eq_band_5_type",
-    "diffusion_pre_eq_band_5_frequency",
-    "diffusion_pre_eq_band_5_gain",
-    "diffusion_pre_eq_band_5_q",
+    "diffusion_pre_eq_b1_enabled",
+    "diffusion_pre_eq_b1_type",
+    "diffusion_pre_eq_b1_freq",
+    "diffusion_pre_eq_b1_gain",
+    "diffusion_pre_eq_b1_q",
+    "diffusion_pre_eq_b2_enabled",
+    "diffusion_pre_eq_b2_type",
+    "diffusion_pre_eq_b2_freq",
+    "diffusion_pre_eq_b2_gain",
+    "diffusion_pre_eq_b2_q",
+    "diffusion_pre_eq_b3_enabled",
+    "diffusion_pre_eq_b3_type",
+    "diffusion_pre_eq_b3_freq",
+    "diffusion_pre_eq_b3_gain",
+    "diffusion_pre_eq_b3_q",
+    "diffusion_pre_eq_b4_enabled",
+    "diffusion_pre_eq_b4_type",
+    "diffusion_pre_eq_b4_freq",
+    "diffusion_pre_eq_b4_gain",
+    "diffusion_pre_eq_b4_q",
+    "diffusion_pre_eq_b5_enabled",
+    "diffusion_pre_eq_b5_type",
+    "diffusion_pre_eq_b5_freq",
+    "diffusion_pre_eq_b5_gain",
+    "diffusion_pre_eq_b5_q",
 );
 
 define_module_eq!(
     DiffusionPostEq,
     "diffusion_post_eq_mode",
     "diffusion_post_eq_bypass",
-    "diffusion_post_eq_band_1_enabled",
-    "diffusion_post_eq_band_1_type",
-    "diffusion_post_eq_band_1_frequency",
-    "diffusion_post_eq_band_1_gain",
-    "diffusion_post_eq_band_1_q",
-    "diffusion_post_eq_band_2_enabled",
-    "diffusion_post_eq_band_2_type",
-    "diffusion_post_eq_band_2_frequency",
-    "diffusion_post_eq_band_2_gain",
-    "diffusion_post_eq_band_2_q",
-    "diffusion_post_eq_band_3_enabled",
-    "diffusion_post_eq_band_3_type",
-    "diffusion_post_eq_band_3_frequency",
-    "diffusion_post_eq_band_3_gain",
-    "diffusion_post_eq_band_3_q",
-    "diffusion_post_eq_band_4_enabled",
-    "diffusion_post_eq_band_4_type",
-    "diffusion_post_eq_band_4_frequency",
-    "diffusion_post_eq_band_4_gain",
-    "diffusion_post_eq_band_4_q",
-    "diffusion_post_eq_band_5_enabled",
-    "diffusion_post_eq_band_5_type",
-    "diffusion_post_eq_band_5_frequency",
-    "diffusion_post_eq_band_5_gain",
-    "diffusion_post_eq_band_5_q",
+    "diffusion_post_eq_b1_enabled",
+    "diffusion_post_eq_b1_type",
+    "diffusion_post_eq_b1_freq",
+    "diffusion_post_eq_b1_gain",
+    "diffusion_post_eq_b1_q",
+    "diffusion_post_eq_b2_enabled",
+    "diffusion_post_eq_b2_type",
+    "diffusion_post_eq_b2_freq",
+    "diffusion_post_eq_b2_gain",
+    "diffusion_post_eq_b2_q",
+    "diffusion_post_eq_b3_enabled",
+    "diffusion_post_eq_b3_type",
+    "diffusion_post_eq_b3_freq",
+    "diffusion_post_eq_b3_gain",
+    "diffusion_post_eq_b3_q",
+    "diffusion_post_eq_b4_enabled",
+    "diffusion_post_eq_b4_type",
+    "diffusion_post_eq_b4_freq",
+    "diffusion_post_eq_b4_gain",
+    "diffusion_post_eq_b4_q",
+    "diffusion_post_eq_b5_enabled",
+    "diffusion_post_eq_b5_type",
+    "diffusion_post_eq_b5_freq",
+    "diffusion_post_eq_b5_gain",
+    "diffusion_post_eq_b5_q",
 );
 
 define_module_eq!(
     TexturePreEq,
     "texture_pre_eq_mode",
     "texture_pre_eq_bypass",
-    "texture_pre_eq_band_1_enabled",
-    "texture_pre_eq_band_1_type",
-    "texture_pre_eq_band_1_frequency",
-    "texture_pre_eq_band_1_gain",
-    "texture_pre_eq_band_1_q",
-    "texture_pre_eq_band_2_enabled",
-    "texture_pre_eq_band_2_type",
-    "texture_pre_eq_band_2_frequency",
-    "texture_pre_eq_band_2_gain",
-    "texture_pre_eq_band_2_q",
-    "texture_pre_eq_band_3_enabled",
-    "texture_pre_eq_band_3_type",
-    "texture_pre_eq_band_3_frequency",
-    "texture_pre_eq_band_3_gain",
-    "texture_pre_eq_band_3_q",
-    "texture_pre_eq_band_4_enabled",
-    "texture_pre_eq_band_4_type",
-    "texture_pre_eq_band_4_frequency",
-    "texture_pre_eq_band_4_gain",
-    "texture_pre_eq_band_4_q",
-    "texture_pre_eq_band_5_enabled",
-    "texture_pre_eq_band_5_type",
-    "texture_pre_eq_band_5_frequency",
-    "texture_pre_eq_band_5_gain",
-    "texture_pre_eq_band_5_q",
+    "texture_pre_eq_b1_enabled",
+    "texture_pre_eq_b1_type",
+    "texture_pre_eq_b1_freq",
+    "texture_pre_eq_b1_gain",
+    "texture_pre_eq_b1_q",
+    "texture_pre_eq_b2_enabled",
+    "texture_pre_eq_b2_type",
+    "texture_pre_eq_b2_freq",
+    "texture_pre_eq_b2_gain",
+    "texture_pre_eq_b2_q",
+    "texture_pre_eq_b3_enabled",
+    "texture_pre_eq_b3_type",
+    "texture_pre_eq_b3_freq",
+    "texture_pre_eq_b3_gain",
+    "texture_pre_eq_b3_q",
+    "texture_pre_eq_b4_enabled",
+    "texture_pre_eq_b4_type",
+    "texture_pre_eq_b4_freq",
+    "texture_pre_eq_b4_gain",
+    "texture_pre_eq_b4_q",
+    "texture_pre_eq_b5_enabled",
+    "texture_pre_eq_b5_type",
+    "texture_pre_eq_b5_freq",
+    "texture_pre_eq_b5_gain",
+    "texture_pre_eq_b5_q",
 );
 
 define_module_eq!(
     TexturePostEq,
     "texture_post_eq_mode",
     "texture_post_eq_bypass",
-    "texture_post_eq_band_1_enabled",
-    "texture_post_eq_band_1_type",
-    "texture_post_eq_band_1_frequency",
-    "texture_post_eq_band_1_gain",
-    "texture_post_eq_band_1_q",
-    "texture_post_eq_band_2_enabled",
-    "texture_post_eq_band_2_type",
-    "texture_post_eq_band_2_frequency",
-    "texture_post_eq_band_2_gain",
-    "texture_post_eq_band_2_q",
-    "texture_post_eq_band_3_enabled",
-    "texture_post_eq_band_3_type",
-    "texture_post_eq_band_3_frequency",
-    "texture_post_eq_band_3_gain",
-    "texture_post_eq_band_3_q",
-    "texture_post_eq_band_4_enabled",
-    "texture_post_eq_band_4_type",
-    "texture_post_eq_band_4_frequency",
-    "texture_post_eq_band_4_gain",
-    "texture_post_eq_band_4_q",
-    "texture_post_eq_band_5_enabled",
-    "texture_post_eq_band_5_type",
-    "texture_post_eq_band_5_frequency",
-    "texture_post_eq_band_5_gain",
-    "texture_post_eq_band_5_q",
+    "texture_post_eq_b1_enabled",
+    "texture_post_eq_b1_type",
+    "texture_post_eq_b1_freq",
+    "texture_post_eq_b1_gain",
+    "texture_post_eq_b1_q",
+    "texture_post_eq_b2_enabled",
+    "texture_post_eq_b2_type",
+    "texture_post_eq_b2_freq",
+    "texture_post_eq_b2_gain",
+    "texture_post_eq_b2_q",
+    "texture_post_eq_b3_enabled",
+    "texture_post_eq_b3_type",
+    "texture_post_eq_b3_freq",
+    "texture_post_eq_b3_gain",
+    "texture_post_eq_b3_q",
+    "texture_post_eq_b4_enabled",
+    "texture_post_eq_b4_type",
+    "texture_post_eq_b4_freq",
+    "texture_post_eq_b4_gain",
+    "texture_post_eq_b4_q",
+    "texture_post_eq_b5_enabled",
+    "texture_post_eq_b5_type",
+    "texture_post_eq_b5_freq",
+    "texture_post_eq_b5_gain",
+    "texture_post_eq_b5_q",
 );
 
 pub trait EqParamRefs {
@@ -1384,4 +1387,95 @@ fn module_bypass_param(name: &'static str) -> BoolParam {
 
 fn chain_slot_param(default: i32) -> IntParam {
     IntParam::new("Chain Slot", default, IntRange::Linear { min: 0, max: 3 })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use nih_plug::prelude::Params;
+
+    use super::Cc22Params;
+
+    #[test]
+    fn parameter_ids_are_unique() {
+        let params = Cc22Params::default();
+        let mut ids = BTreeSet::new();
+
+        for (id, _, _) in params.param_map() {
+            assert!(ids.insert(id.clone()), "duplicate parameter ID: {id}");
+        }
+    }
+
+    #[test]
+    fn eq_parameter_ids_match_the_independent_bank_schema() {
+        let params = Cc22Params::default();
+        let all_ids = params
+            .param_map()
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect::<BTreeSet<_>>();
+
+        for id in expected_eq_parameter_ids() {
+            assert!(all_ids.contains(&id), "missing EQ parameter ID: {id}");
+        }
+    }
+
+    fn expected_eq_parameter_ids() -> BTreeSet<String> {
+        let mut ids = BTreeSet::new();
+
+        for bank in [
+            "global_pre_eq",
+            "character_pre_eq",
+            "character_post_eq",
+            "movement_pre_eq",
+            "movement_post_eq",
+            "diffusion_pre_eq",
+            "diffusion_post_eq",
+            "texture_pre_eq",
+            "texture_post_eq",
+        ] {
+            ids.insert(format!("{bank}_mode"));
+            ids.insert(format!("{bank}_bypass"));
+            for band in 1..=5 {
+                for field in ["enabled", "type", "freq", "gain", "q"] {
+                    ids.insert(format!("{bank}_b{band}_{field}"));
+                }
+            }
+        }
+
+        for id in [
+            "eq_mode",
+            "eq_bypass",
+            "eq_band1_enabled",
+            "eq_band1_type",
+            "eq_low_cut_frequency",
+            "eq_band1_gain",
+            "eq_band1_q",
+            "eq_band2_enabled",
+            "eq_band2_type",
+            "eq_low_shelf_frequency",
+            "eq_low_shelf_gain",
+            "eq_band2_q",
+            "eq_band3_enabled",
+            "eq_band3_type",
+            "eq_mid_frequency",
+            "eq_mid_gain",
+            "eq_mid_q",
+            "eq_band4_enabled",
+            "eq_band4_type",
+            "eq_high_shelf_frequency",
+            "eq_high_shelf_gain",
+            "eq_band4_q",
+            "eq_band5_enabled",
+            "eq_band5_type",
+            "eq_high_cut_frequency",
+            "eq_band5_gain",
+            "eq_band5_q",
+        ] {
+            ids.insert(id.to_string());
+        }
+
+        ids
+    }
 }
