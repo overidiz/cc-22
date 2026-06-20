@@ -626,8 +626,9 @@ fn render_premium_mode_selector(
 }
 
 /// Renders the module's five product modes as a fixed list of selectable rows.
-/// Every card therefore shows exactly five items, in product order, with the
-/// active mode highlighted in the module accent color.
+/// Every card shows exactly five items, in product order, each prefixed by a
+/// per-row colored square. The selected mode's name is drawn in bold so it
+/// stands out from the other options.
 fn render_mode_list<T>(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -646,55 +647,47 @@ fn render_mode_list<T>(
     let row_height = 15.0;
     let radius = CornerRadius::same(5);
 
-    for (value, label) in options {
+    for (index, (value, label)) in options.iter().enumerate() {
         let selected = current == *value && !bypass.value();
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
 
-        // Active row: solid accent fill. Hovered (inactive) row: faint accent wash.
-        if selected {
-            ui.painter().rect_filled(rect, radius, accent);
-            ui.painter().rect_stroke(
-                rect,
-                radius,
-                Stroke::new(1.0, accent.gamma_multiply(0.6)),
-                StrokeKind::Inside,
-            );
-        } else if response.hovered() {
+        // Neutral background; only a faint accent wash on hover so the bold
+        // selected label is what carries the selection state.
+        if response.hovered() && !selected {
             ui.painter().rect_filled(
                 rect,
                 radius,
-                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 30),
+                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 26),
             );
         }
 
-        // Left indicator square echoes the rest of the card's visual language.
+        // Per-row colored square (red, yellow, green, blue, purple by position).
         let square = Rect::from_center_size(
-            Pos2::new(rect.left() + 9.0, rect.center().y),
-            Vec2::splat(5.0),
+            Pos2::new(rect.left() + 8.0, rect.center().y),
+            Vec2::splat(6.0),
         );
-        ui.painter().rect_filled(
-            square,
-            CornerRadius::same(1),
-            if selected {
-                theme.text_dark
-            } else {
-                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 150)
-            },
-        );
+        ui.painter()
+            .rect_filled(square, CornerRadius::same(2), mode_option_color(index));
 
-        // Dark text on the bright accent reads clearly for every module color.
-        ui.painter().text(
-            Pos2::new(rect.left() + 18.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            label,
-            FontId::monospace(10.0),
-            if selected {
-                theme.text_dark
-            } else {
-                theme.muted_dark
-            },
-        );
+        // Selected mode: bold name (a second offset pass thickens the strokes,
+        // since egui's monospace family has no dedicated bold weight). Others
+        // stay regular weight and slightly muted so the bold one pops.
+        let text_color = if selected {
+            theme.text_dark
+        } else {
+            theme.muted_dark
+        };
+        let offsets: &[f32] = if selected { &[0.0, 0.6] } else { &[0.0] };
+        for &dx in offsets {
+            ui.painter().text(
+                Pos2::new(rect.left() + 17.0 + dx, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                FontId::monospace(10.0),
+                text_color,
+            );
+        }
 
         if response.clicked() {
             set_param(setter, bypass, false);
