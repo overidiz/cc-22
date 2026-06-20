@@ -14,31 +14,39 @@ const MIN_TONE_HZ: f32 = 900.0;
 const MAX_TONE_HZ: f32 = 12_000.0;
 const NUM_PHASER_STAGES: usize = 6;
 
+/// The five Movement modes, in product order. Variants are identified by their
+/// stable `#[id]`, so dropping the legacy modes (off/chorus) and reordering the
+/// rest keeps state compatibility for every id that remains.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementMode {
-    #[id = "off"]
-    Off,
-
-    #[id = "chorus"]
-    Chorus,
-
-    #[id = "vibrato"]
-    Vibrato,
-
-    #[id = "tremolo"]
-    Tremolo,
-
     #[id = "doubler"]
     #[name = "Doubler"]
     Doubler,
+
+    #[id = "vibrato"]
+    Vibrato,
 
     #[id = "phaser"]
     #[name = "Phaser"]
     Phaser,
 
+    #[id = "tremolo"]
+    Tremolo,
+
     #[id = "pitch"]
     #[name = "Pitch"]
     Pitch,
+}
+
+impl MovementMode {
+    /// The five product modes, in the exact order shown in the UI.
+    pub const PRODUCT_MODES: [MovementMode; 5] = [
+        MovementMode::Doubler,
+        MovementMode::Vibrato,
+        MovementMode::Phaser,
+        MovementMode::Tremolo,
+        MovementMode::Pitch,
+    ];
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +115,7 @@ impl Default for Movement {
             previous_shape: LfoShape::Sine,
             target_shape: LfoShape::Sine,
             shape_crossfade: LinearSmoother::new(20.0, 1.0),
-            current_mode: MovementMode::Off,
+            current_mode: MovementMode::Doubler,
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
             tone_state: [0.0; MAX_CHANNELS],
             last_output: [0.0; MAX_CHANNELS],
@@ -164,8 +172,6 @@ impl Movement {
         self.set_mode(mode);
         let requested_shape = params.shape.value();
         let max_rate_hz = match mode {
-            MovementMode::Off => 20.0,
-            MovementMode::Chorus => 8.0,
             MovementMode::Vibrato => 10.0,
             MovementMode::Tremolo => 20.0,
             MovementMode::Doubler => 1.2,
@@ -184,8 +190,6 @@ impl Movement {
 
         let phase = self.lfo_phase;
         let frame_shape = match mode {
-            MovementMode::Off => LfoShape::Sine,
-            MovementMode::Chorus => LfoShape::Sine,
             MovementMode::Vibrato => match requested_shape {
                 LfoShape::SquareSmooth => LfoShape::Triangle,
                 other => other,
@@ -196,8 +200,7 @@ impl Movement {
         self.set_lfo_shape(frame_shape);
         let shape_blend = self.shape_crossfade.next_value();
         let right_phase_offset = match mode {
-            MovementMode::Off => 0.0,
-            MovementMode::Chorus | MovementMode::Vibrato => 0.25 + (phase_degrees / 720.0),
+            MovementMode::Vibrato => 0.25 + (phase_degrees / 720.0),
             MovementMode::Tremolo => phase_degrees / 360.0,
             MovementMode::Doubler => 0.12 + (width * 0.38),
             MovementMode::Phaser => 0.18 + (phase_degrees / 720.0) + (width * 0.30),
@@ -253,8 +256,6 @@ impl Movement {
         let index = channel.min(MAX_CHANNELS - 1);
         let dry = sanitize_sample(sample);
         let wet = match frame.mode {
-            MovementMode::Off => dry,
-            MovementMode::Chorus => self.process_chorus(index, dry, frame),
             MovementMode::Vibrato => self.process_vibrato(index, dry, frame),
             MovementMode::Tremolo => self.process_tremolo(index, dry, frame),
             MovementMode::Doubler => self.process_doubler(index, dry, frame),
@@ -262,29 +263,12 @@ impl Movement {
             MovementMode::Pitch => self.process_pitch(index, dry, frame),
         };
 
-        let mixed = if frame.mode == MovementMode::Off {
-            dry
-        } else {
-            DryWet.mix(dry, wet, frame.mix)
-        };
+        let mixed = DryWet.mix(dry, wet, frame.mix);
         let mixed = self.smooth_mode_transition(index, mixed, frame.mode_fade);
         let output = sanitize_sample(self.core.bypass_mix(dry, mixed, frame.active_mix));
         self.last_output[index] = output;
         self.has_processed = true;
         output
-    }
-
-    fn process_chorus(&mut self, channel: usize, sample: f32, frame: &MovementFrame) -> f32 {
-        let index = channel.min(MAX_CHANNELS - 1);
-        let lfo = self.channel_lfo(index, frame);
-        let mod_depth_ms = frame.depth * frame.delay_ms.min(18.0) * 0.55;
-        let delay_ms = (frame.delay_ms + (lfo * mod_depth_ms)).clamp(1.0, 45.0);
-        let delay_samples = delay_ms * 0.001 * self.sample_rate;
-        let delayed = self
-            .delay
-            .process(index, sample, delay_samples, frame.feedback);
-        let toned = self.apply_tone(index, delayed, frame.tone_alpha);
-        sanitize_sample(toned * chorus_level_compensation(frame.depth, frame.feedback))
     }
 
     fn process_vibrato(&mut self, channel: usize, sample: f32, frame: &MovementFrame) -> f32 {
@@ -580,11 +564,6 @@ fn tone_to_alpha(tone: f32, sample_rate: f32) -> f32 {
 }
 
 #[inline]
-fn chorus_level_compensation(depth: f32, feedback: f32) -> f32 {
-    (1.0 - (depth.clamp(0.0, 1.0) * 0.08) - (feedback.clamp(0.0, 0.58) * 0.12)).clamp(0.78, 1.0)
-}
-
-#[inline]
 fn vibrato_level_compensation(depth: f32) -> f32 {
     (1.0 - (depth.clamp(0.0, 1.0) * 0.04)).clamp(0.92, 1.0)
 }
@@ -774,12 +753,12 @@ mod tests {
     }
 
     #[test]
-    fn doubler_differs_from_chorus() {
+    fn doubler_differs_from_vibrato() {
         let mut movement = Movement::default();
         movement.prepare(48_000.0);
 
-        let chorus_frame = MovementFrame {
-            mode: MovementMode::Chorus,
+        let vibrato_frame = MovementFrame {
+            mode: MovementMode::Vibrato,
             depth: 0.5,
             delay_ms: 16.0,
             feedback: 0.15,
@@ -794,20 +773,20 @@ mod tests {
         let doubler_frame = doubler_frame(0.5, 16.0, 1.0, 1.0);
 
         let mut phase = 0.0;
-        // Warm up: doubler has no feedback, chorus does — this creates different buffer states
+        // Warm up: doubler and vibrato use different delay/modulation paths
         for _ in 0..1200 {
             phase += 600.0 / 48_000.0;
             let sig = (phase * core::f32::consts::TAU).sin() * 0.3;
-            movement.process_sample_for_channel(0, sig, &chorus_frame);
+            movement.process_sample_for_channel(0, sig, &vibrato_frame);
             movement.process_sample_for_channel(0, sig, &doubler_frame);
         }
         let sig = (phase * core::f32::consts::TAU).sin() * 0.3;
-        let chorus_out = movement.process_sample_for_channel(0, sig, &chorus_frame);
+        let vibrato_out = movement.process_sample_for_channel(0, sig, &vibrato_frame);
         let doubler_out = movement.process_sample_for_channel(0, sig, &doubler_frame);
-        assert!(chorus_out.is_finite() && doubler_out.is_finite());
+        assert!(vibrato_out.is_finite() && doubler_out.is_finite());
         assert!(
-            (chorus_out - doubler_out).abs() > 0.000_01,
-            "Doubler and Chorus should differ, ch={chorus_out}, db={doubler_out}"
+            (vibrato_out - doubler_out).abs() > 0.000_01,
+            "Doubler and Vibrato should differ, vb={vibrato_out}, db={doubler_out}"
         );
     }
 
@@ -922,12 +901,12 @@ mod tests {
     }
 
     #[test]
-    fn phaser_differs_from_chorus() {
+    fn phaser_differs_from_vibrato() {
         let mut movement = Movement::default();
         movement.prepare(48_000.0);
 
-        let chorus_frame = MovementFrame {
-            mode: MovementMode::Chorus,
+        let vibrato_frame = MovementFrame {
+            mode: MovementMode::Vibrato,
             depth: 0.6,
             delay_ms: 16.0,
             feedback: 0.2,
@@ -945,16 +924,16 @@ mod tests {
         for _ in 0..256 {
             phase += 600.0 / 48_000.0;
             let sig = (phase * core::f32::consts::TAU).sin() * 0.3;
-            movement.process_sample_for_channel(0, sig, &chorus_frame);
+            movement.process_sample_for_channel(0, sig, &vibrato_frame);
             movement.process_sample_for_channel(0, sig, &phaser_frame);
         }
         let sig = (phase * core::f32::consts::TAU).sin() * 0.3;
-        let chorus_out = movement.process_sample_for_channel(0, sig, &chorus_frame);
+        let vibrato_out = movement.process_sample_for_channel(0, sig, &vibrato_frame);
         let phaser_out = movement.process_sample_for_channel(0, sig, &phaser_frame);
-        assert!(chorus_out.is_finite() && phaser_out.is_finite());
+        assert!(vibrato_out.is_finite() && phaser_out.is_finite());
         assert!(
-            (chorus_out - phaser_out).abs() > 0.000_01,
-            "Phaser and Chorus should differ"
+            (vibrato_out - phaser_out).abs() > 0.000_01,
+            "Phaser and Vibrato should differ"
         );
     }
 
@@ -1023,14 +1002,14 @@ mod tests {
     }
 
     #[test]
-    fn pitch_differs_from_chorus() {
+    fn pitch_differs_from_vibrato() {
         let mut movement_p = Movement::default();
         movement_p.prepare(48_000.0);
-        let mut movement_c = Movement::default();
-        movement_c.prepare(48_000.0);
+        let mut movement_v = Movement::default();
+        movement_v.prepare(48_000.0);
 
-        let chorus_frame = MovementFrame {
-            mode: MovementMode::Chorus,
+        let vibrato_frame = MovementFrame {
+            mode: MovementMode::Vibrato,
             depth: 0.4,
             delay_ms: 16.0,
             feedback: 0.1,
@@ -1049,19 +1028,19 @@ mod tests {
         for _ in 0..4800 {
             phase += 440.0 / 48_000.0;
             let sig = (phase * core::f32::consts::TAU).sin() * 0.3;
-            movement_c.process_sample_for_channel(0, sig, &chorus_frame);
+            movement_v.process_sample_for_channel(0, sig, &vibrato_frame);
             movement_p.process_sample_for_channel(0, sig, &pitch_frame);
         }
         let sig = (phase * core::f32::consts::TAU).sin() * 0.3;
-        let ch_out = movement_c.process_sample_for_channel(0, sig, &chorus_frame);
+        let vb_out = movement_v.process_sample_for_channel(0, sig, &vibrato_frame);
         let pt_out = movement_p.process_sample_for_channel(0, sig, &pitch_frame);
-        assert!(ch_out.is_finite() && pt_out.is_finite());
+        assert!(vb_out.is_finite() && pt_out.is_finite());
 
-        let diff = (ch_out - pt_out).abs();
+        let diff = (vb_out - pt_out).abs();
         // Either they differ, or at least both are non-zero (alive)
         assert!(
-            diff > 0.000_01 || (ch_out.abs() > 0.01 && pt_out.abs() > 0.01),
-            "Pitch output should be active, ch={ch_out}, pt={pt_out}"
+            diff > 0.000_01 || (vb_out.abs() > 0.01 && pt_out.abs() > 0.01),
+            "Pitch output should be active, vb={vb_out}, pt={pt_out}"
         );
     }
 }

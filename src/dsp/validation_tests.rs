@@ -78,7 +78,7 @@ fn global_bypass_preserves_input_signal() {
     params.global_bypass = BoolParam::new("Global Bypass", true);
     params.input_gain = float_param("Input Gain", 12.0);
     params.output_gain = float_param("Output Gain", -12.0);
-    params.character.mode = EnumParam::new("Character Mode", CharacterMode::Saturation);
+    params.character.mode = EnumParam::new("Character Mode", CharacterMode::Drive);
     params.character.drive = float_param("Drive", 1.0);
     params.character.mix = float_param("Mix", 1.0);
     params.reset_smoothers();
@@ -105,9 +105,6 @@ fn global_bypass_preserves_input_signal() {
 #[test]
 fn character_modes_handle_standard_test_signals() {
     for (mode_id, mode) in [
-        ("clean", CharacterMode::Clean),
-        ("saturation", CharacterMode::Saturation),
-        ("cassette", CharacterMode::Cassette),
         ("drive", CharacterMode::Drive),
         ("sweet", CharacterMode::Sweet),
         ("fuzz", CharacterMode::Fuzz),
@@ -137,12 +134,10 @@ fn character_modes_handle_standard_test_signals() {
 #[test]
 fn movement_modes_handle_standard_test_signals() {
     for (mode_id, mode) in [
-        ("off", MovementMode::Off),
-        ("chorus", MovementMode::Chorus),
-        ("vibrato", MovementMode::Vibrato),
-        ("tremolo", MovementMode::Tremolo),
         ("doubler", MovementMode::Doubler),
+        ("vibrato", MovementMode::Vibrato),
         ("phaser", MovementMode::Phaser),
+        ("tremolo", MovementMode::Tremolo),
         ("pitch", MovementMode::Pitch),
     ] {
         for signal in TestSignal::ALL {
@@ -168,10 +163,6 @@ fn movement_modes_handle_standard_test_signals() {
 #[test]
 fn diffusion_modes_handle_standard_test_signals() {
     for (mode_id, mode) in [
-        ("off", DiffusionMode::Off),
-        ("delay", DiffusionMode::Delay),
-        ("slap", DiffusionMode::Slap),
-        ("reverb", DiffusionMode::Reverb),
         ("cascade", DiffusionMode::Cascade),
         ("reels", DiffusionMode::Reels),
         ("space", DiffusionMode::Space),
@@ -201,10 +192,6 @@ fn diffusion_modes_handle_standard_test_signals() {
 #[test]
 fn texture_modes_handle_standard_test_signals() {
     for (mode_id, mode) in [
-        ("off", TextureMode::Off),
-        ("wow-flutter", TextureMode::WowFlutter),
-        ("noise", TextureMode::Noise),
-        ("tape", TextureMode::Tape),
         ("filter", TextureMode::Filter),
         ("squash", TextureMode::Squash),
         ("cassette", TextureMode::Cassette),
@@ -299,7 +286,7 @@ fn module_bypass_preserves_signal_for_each_module() {
     let signal = TestSignal::Sine.render(TEST_BLOCK_SAMPLES, TEST_SAMPLE_RATE);
 
     let mut character_params = CharacterParams::default();
-    character_params.mode = EnumParam::new("Character Mode", CharacterMode::Saturation);
+    character_params.mode = EnumParam::new("Character Mode", CharacterMode::Drive);
     character_params.bypass = BoolParam::new("Character Bypass", true);
     character_params.drive = float_param("Drive", 1.0);
     character_params.mix = float_param("Mix", 1.0);
@@ -319,7 +306,7 @@ fn module_bypass_preserves_signal_for_each_module() {
     assert!(max_abs_difference(&audio, &signal) < 0.000_001);
 
     let mut movement_params = MovementParams::default();
-    movement_params.mode = EnumParam::new("Movement Mode", MovementMode::Chorus);
+    movement_params.mode = EnumParam::new("Movement Mode", MovementMode::Doubler);
     movement_params.bypass = BoolParam::new("Movement Bypass", true);
     movement_params.depth = float_param("Depth", 1.0);
     movement_params.mix = float_param("Mix", 1.0);
@@ -339,7 +326,7 @@ fn module_bypass_preserves_signal_for_each_module() {
     assert!(max_abs_difference(&audio, &signal) < 0.000_001);
 
     let mut diffusion_params = DiffusionParams::default();
-    diffusion_params.mode = EnumParam::new("Diffusion Mode", DiffusionMode::Delay);
+    diffusion_params.mode = EnumParam::new("Diffusion Mode", DiffusionMode::Cascade);
     diffusion_params.bypass = BoolParam::new("Diffusion Bypass", true);
     diffusion_params.feedback = float_param("Feedback", 0.9);
     diffusion_params.mix = float_param("Mix", 1.0);
@@ -359,7 +346,7 @@ fn module_bypass_preserves_signal_for_each_module() {
     assert!(max_abs_difference(&audio, &signal) < 0.000_001);
 
     let mut texture_params = TextureParams::default();
-    texture_params.mode = EnumParam::new("Texture Mode", TextureMode::Tape);
+    texture_params.mode = EnumParam::new("Texture Mode", TextureMode::Cassette);
     texture_params.bypass = BoolParam::new("Texture Bypass", true);
     texture_params.wow_depth = float_param("Wow Depth", 1.0);
     texture_params.noise_amount = float_param("Noise Amount", 1.0);
@@ -403,14 +390,16 @@ fn module_bypass_preserves_signal_for_each_module() {
 #[test]
 fn processor_dry_wet_endpoints_are_stable() {
     let mut wet_params = Cc22Params::default();
-    wet_params.character.mode = EnumParam::new("Character Mode", CharacterMode::Saturation);
+    wet_params.character.mode = EnumParam::new("Character Mode", CharacterMode::Drive);
+    wet_params.character.bypass = BoolParam::new("Character Bypass", false);
     wet_params.character.drive = float_param("Drive", 0.7);
     wet_params.character.mix = float_param("Mix", 1.0);
     wet_params.dry_wet = float_param("Dry/Wet", 1.0);
     wet_params.reset_smoothers();
 
     let mut dry_params = Cc22Params::default();
-    dry_params.character.mode = EnumParam::new("Character Mode", CharacterMode::Saturation);
+    dry_params.character.mode = EnumParam::new("Character Mode", CharacterMode::Drive);
+    dry_params.character.bypass = BoolParam::new("Character Bypass", false);
     dry_params.character.drive = float_param("Drive", 0.7);
     dry_params.character.mix = float_param("Mix", 1.0);
     dry_params.dry_wet = float_param("Dry/Wet", 0.0);
@@ -475,7 +464,7 @@ fn eq_extreme_settings_stay_finite_and_gain_safe() {
 #[test]
 fn diffusion_high_feedback_integration_stays_finite() {
     let mut params = DiffusionParams::default();
-    params.mode = EnumParam::new("Diffusion Mode", DiffusionMode::Delay);
+    params.mode = EnumParam::new("Diffusion Mode", DiffusionMode::Cascade);
     params.time = float_param("Time", 120.0);
     params.feedback = float_param("Feedback", 0.949);
     params.mix = float_param("Mix", 1.0);
@@ -499,7 +488,8 @@ fn diffusion_high_feedback_integration_stays_finite() {
 #[test]
 fn texture_wow_flutter_integration_moves_audio_without_instability() {
     let mut params = TextureParams::default();
-    params.mode = EnumParam::new("Texture Mode", TextureMode::Tape);
+    params.mode = EnumParam::new("Texture Mode", TextureMode::Cassette);
+    params.bypass = BoolParam::new("Texture Bypass", false);
     params.wow_depth = float_param("Wow Depth", 1.0);
     params.wow_rate = float_param("Wow Rate", 1.7);
     params.flutter_depth = float_param("Flutter Depth", 0.8);
@@ -1154,7 +1144,7 @@ fn processor_handles_sample_rate_change_and_reset() {
 #[test]
 fn diffusion_reset_makes_reverb_repeatable() {
     let mut params = DiffusionParams::default();
-    params.mode = EnumParam::new("Diffusion Mode", DiffusionMode::Reverb);
+    params.mode = EnumParam::new("Diffusion Mode", DiffusionMode::Space);
     params.reset_smoothers();
 
     let mut diffusion = Diffusion::default();

@@ -183,8 +183,8 @@ pub struct CharacterParams {
 impl Default for CharacterParams {
     fn default() -> Self {
         Self {
-            mode: EnumParam::new("Character Mode", CharacterMode::Clean),
-            bypass: module_bypass_param("Character Bypass"),
+            mode: EnumParam::new("Character Mode", CharacterMode::Drive),
+            bypass: module_bypass_param_on("Character Bypass"),
             drive: percent_param("Drive", 0.0, 20.0),
             age: percent_param("Age", 0.0, 40.0),
             tone: percent_param("Tone", 0.5, 20.0),
@@ -245,8 +245,8 @@ pub struct MovementParams {
 impl Default for MovementParams {
     fn default() -> Self {
         Self {
-            mode: EnumParam::new("Movement Mode", MovementMode::Off),
-            bypass: module_bypass_param("Movement Bypass"),
+            mode: EnumParam::new("Movement Mode", MovementMode::Doubler),
+            bypass: module_bypass_param_on("Movement Bypass"),
             rate: FloatParam::new(
                 "Rate",
                 0.45,
@@ -350,8 +350,8 @@ pub struct DiffusionParams {
 impl Default for DiffusionParams {
     fn default() -> Self {
         Self {
-            mode: EnumParam::new("Diffusion Mode", DiffusionMode::Off),
-            bypass: module_bypass_param("Diffusion Bypass"),
+            mode: EnumParam::new("Diffusion Mode", DiffusionMode::Cascade),
+            bypass: module_bypass_param_on("Diffusion Bypass"),
             time: FloatParam::new(
                 "Time",
                 350.0,
@@ -468,8 +468,8 @@ pub struct TextureParams {
 impl Default for TextureParams {
     fn default() -> Self {
         Self {
-            mode: EnumParam::new("Texture Mode", TextureMode::Off),
-            bypass: module_bypass_param("Texture Bypass"),
+            mode: EnumParam::new("Texture Mode", TextureMode::Filter),
+            bypass: module_bypass_param_on("Texture Bypass"),
             wow_depth: percent_param("Wow Depth", 0.18, 80.0),
             wow_rate: FloatParam::new(
                 "Wow Rate",
@@ -1380,7 +1380,18 @@ fn percent_param(name: &'static str, default: f32, smoothing_ms: f32) -> FloatPa
 }
 
 fn module_bypass_param(name: &'static str) -> BoolParam {
-    BoolParam::new(name, false)
+    module_bypass_param_with_default(name, false)
+}
+
+/// Module bypass that starts engaged. The four effect modules default to
+/// bypassed so a freshly inserted plugin is transparent — "off" is expressed by
+/// the bypass, not by a dedicated mode.
+fn module_bypass_param_on(name: &'static str) -> BoolParam {
+    module_bypass_param_with_default(name, true)
+}
+
+fn module_bypass_param_with_default(name: &'static str, default: bool) -> BoolParam {
+    BoolParam::new(name, default)
         .with_value_to_string(formatters::v2s_bool_bypass())
         .with_string_to_value(formatters::s2v_bool_bypass())
 }

@@ -13,23 +13,11 @@ const MAX_CHANNELS: usize = 2;
 const MAX_DELAY_SECONDS: f32 = 0.08;
 const BASE_DELAY_MS: f32 = 18.0;
 
+/// The five Texture modes, in product order. Variants are identified by their
+/// stable `#[id]`, so dropping the legacy modes (off/wow-flutter/noise/tape)
+/// keeps state compatibility for every id that remains.
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureMode {
-    #[id = "off"]
-    Off,
-
-    #[id = "wow-flutter"]
-    #[name = "Wow/Flutter"]
-    WowFlutter,
-
-    #[id = "noise"]
-    #[name = "Noise"]
-    Noise,
-
-    #[id = "tape"]
-    #[name = "Tape"]
-    Tape,
-
     #[id = "filter"]
     #[name = "Filter"]
     Filter,
@@ -49,6 +37,17 @@ pub enum TextureMode {
     #[id = "interference"]
     #[name = "Interference"]
     Interference,
+}
+
+impl TextureMode {
+    /// The five product modes, in the exact order shown in the UI.
+    pub const PRODUCT_MODES: [TextureMode; 5] = [
+        TextureMode::Filter,
+        TextureMode::Squash,
+        TextureMode::Cassette,
+        TextureMode::Broken,
+        TextureMode::Interference,
+    ];
 }
 
 #[derive(Debug, Clone)]
@@ -168,7 +167,7 @@ impl Default for Texture {
                 NoiseGenerator::new(0x1020_3040),
                 NoiseGenerator::new(0xa0b0_c0d0),
             ],
-            current_mode: TextureMode::Off,
+            current_mode: TextureMode::Filter,
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
             last_output: [0.0; MAX_CHANNELS],
             has_processed: false,
@@ -276,13 +275,6 @@ impl Texture {
         let index = channel.min(MAX_CHANNELS - 1);
         let dry = sanitize_sample(sample);
         let wet = match frame.mode {
-            TextureMode::Off => dry,
-            TextureMode::WowFlutter => self.process_wow_flutter(index, dry, frame),
-            TextureMode::Noise => self.process_noise(index, dry, frame),
-            TextureMode::Tape => {
-                let unstable = self.process_wow_flutter(index, dry, frame);
-                self.process_noise(index, unstable, frame)
-            }
             TextureMode::Filter => self.process_filter(index, dry, frame),
             TextureMode::Squash => self.process_squash(index, dry, frame),
             TextureMode::Cassette => self.process_cassette(index, dry, frame),
@@ -290,46 +282,12 @@ impl Texture {
             TextureMode::Interference => self.process_interference(index, dry, frame),
         };
 
-        let mixed = if frame.mode == TextureMode::Off {
-            dry
-        } else {
-            DryWet.mix(dry, wet, frame.mix)
-        };
+        let mixed = DryWet.mix(dry, wet, frame.mix);
         let mixed = self.smooth_mode_transition(index, mixed, frame.mode_fade);
         let output = sanitize_sample(self.core.bypass_mix(dry, mixed, frame.active_mix));
         self.last_output[index] = output;
         self.has_processed = true;
         output
-    }
-
-    fn process_wow_flutter(&mut self, channel: usize, sample: f32, frame: &TextureFrame) -> f32 {
-        let index = channel.min(MAX_CHANNELS - 1);
-        let stereo_phase = if index == 0 { 0.0 } else { 0.17 };
-        let wow = sine_lfo((frame.wow_phase + stereo_phase).fract()) * frame.wow_depth * 8.0;
-        let flutter = sine_lfo((frame.flutter_phase + (stereo_phase * 2.0)).fract())
-            * frame.flutter_depth
-            * 2.2;
-        let drift = self.drift[index].next_value(frame.random_drift) * 6.0;
-        let delay_ms = (BASE_DELAY_MS + wow + flutter + drift).clamp(2.0, 60.0);
-        let delay_samples = delay_ms * 0.001 * self.sample_rate;
-
-        self.delay.process(index, sample, delay_samples)
-    }
-
-    fn process_noise(&mut self, channel: usize, sample: f32, frame: &TextureFrame) -> f32 {
-        let index = channel.min(MAX_CHANNELS - 1);
-        let shared_noise = self.noise[0].next_colored(frame.noise_color);
-        let local_noise = if index == 0 {
-            shared_noise
-        } else {
-            self.noise[index].next_colored(frame.noise_color)
-        };
-        let stereo_noise =
-            (shared_noise * (1.0 - frame.stereo_spread)) + (local_noise * frame.stereo_spread);
-        let noise_gain = noise_amount_to_gain(frame.noise_amount);
-        let noisy = sample + (stereo_noise * noise_gain);
-
-        apply_degradation(noisy, frame.degrade, stereo_noise)
     }
 
     fn process_filter(&mut self, channel: usize, sample: f32, frame: &TextureFrame) -> f32 {
@@ -943,26 +901,6 @@ impl NoiseGenerator {
 }
 
 #[inline]
-fn noise_amount_to_gain(amount: f32) -> f32 {
-    amount.clamp(0.0, 1.0).powf(2.2) * 0.045
-}
-
-#[inline]
-fn apply_degradation(sample: f32, degrade: f32, noise: f32) -> f32 {
-    let degrade = degrade.clamp(0.0, 1.0);
-    if degrade <= 0.000_001 {
-        return sanitize_sample(sample);
-    }
-
-    let drive = 1.0 + (degrade * 2.5);
-    let bias = noise * degrade * 0.025;
-    let saturated = ((sample + bias) * drive).tanh() / drive.tanh();
-    let softened = (sample * (1.0 - degrade * 0.35)) + (saturated * degrade * 0.35);
-
-    sanitize_sample(softened)
-}
-
-#[inline]
 fn cassette_lowpass_cutoff_hz(
     noise_color: f32,
     degrade: f32,
@@ -1304,13 +1242,12 @@ fn sine_lfo(phase: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_phase, apply_degradation, broken_artifact_gain, broken_bitcrush,
-        broken_dropout_smoothing_coeff, broken_hold_period, broken_level_compensation,
-        broken_rate_reduce_mix, cassette_level_compensation, cassette_lowpass_cutoff_hz,
-        cassette_noise_gain, interference_am_depth, interference_frequency_hz,
-        interference_level_compensation, interference_noise_gain,
-        interference_parasite_frequency_hz, interference_ring_depth, interference_tone_gain,
-        noise_amount_to_gain, read_interpolated, squash_compression_gain, squash_makeup_gain,
+        advance_phase, broken_artifact_gain, broken_bitcrush, broken_dropout_smoothing_coeff,
+        broken_hold_period, broken_level_compensation, broken_rate_reduce_mix,
+        cassette_level_compensation, cassette_lowpass_cutoff_hz, cassette_noise_gain,
+        interference_am_depth, interference_frequency_hz, interference_level_compensation,
+        interference_noise_gain, interference_parasite_frequency_hz, interference_ring_depth,
+        interference_tone_gain, read_interpolated, squash_compression_gain, squash_makeup_gain,
         texture_filter_cutoff_hz, texture_filter_resonance, BrokenState, DriftGenerator,
         NoiseGenerator, StereoDelay, Texture, TextureFrame, TextureMode,
     };
@@ -1373,27 +1310,6 @@ mod tests {
     }
 
     #[test]
-    fn wow_flutter_output_stays_finite() {
-        let mut texture = Texture::default();
-        texture.prepare(48_000.0);
-        let frame = test_frame(TextureMode::WowFlutter);
-
-        let mut sample = 0.5;
-        for _ in 0..2_000 {
-            sample = texture.process_sample_for_channel(0, sample, &frame);
-            assert!(sample.is_finite());
-            assert!(sample.abs() <= 8.0);
-        }
-    }
-
-    #[test]
-    fn noise_gain_is_calibrated_low() {
-        assert_eq!(noise_amount_to_gain(0.0), 0.0);
-        assert!(noise_amount_to_gain(0.25) < 0.003);
-        assert!(noise_amount_to_gain(1.0) <= 0.045);
-    }
-
-    #[test]
     fn noise_color_output_stays_finite() {
         let mut noise = NoiseGenerator::new(0x1234_5678);
 
@@ -1403,54 +1319,6 @@ mod tests {
             assert!(sample.is_finite());
             assert!(sample.abs() <= 8.0);
         }
-    }
-
-    #[test]
-    fn degradation_is_finite_and_subtle_at_low_amount() {
-        let dry = 0.25;
-        let degraded = apply_degradation(dry, 0.1, 0.2);
-
-        assert!(degraded.is_finite());
-        assert!((degraded - dry).abs() < 0.05);
-    }
-
-    #[test]
-    fn noise_mode_output_stays_finite() {
-        let mut texture = Texture::default();
-        texture.prepare(48_000.0);
-        let mut frame = test_frame(TextureMode::Noise);
-        frame.noise_amount = 1.0;
-        frame.noise_color = 0.8;
-        frame.degrade = 1.0;
-        frame.stereo_spread = 1.0;
-
-        let mut sample = 0.2;
-        for _ in 0..2_000 {
-            sample = texture.process_sample_for_channel(1, sample, &frame);
-            assert!(sample.is_finite());
-            assert!(sample.abs() <= 8.0);
-        }
-    }
-
-    #[test]
-    fn tape_mode_combines_wow_flutter_noise_and_degrade() {
-        let mut texture = Texture::default();
-        texture.prepare(48_000.0);
-        let mut frame = test_frame(TextureMode::Tape);
-        frame.noise_amount = 0.6;
-        frame.noise_color = 0.7;
-        frame.degrade = 0.35;
-        frame.random_drift = 0.2;
-
-        let mut changed = false;
-        for _ in 0..2_000 {
-            let sample = texture.process_sample_for_channel(0, 0.2, &frame);
-            assert!(sample.is_finite());
-            assert!(sample.abs() <= 8.0);
-            changed |= (sample - 0.2).abs() > 0.000_1;
-        }
-
-        assert!(changed, "Tape mode should alter the wet path");
     }
 
     fn cassette_frame(

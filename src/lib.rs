@@ -3,9 +3,13 @@ use std::sync::Arc;
 
 pub mod dsp;
 pub mod meters;
+pub mod migration;
 pub mod params;
 pub mod presets;
 pub mod ui;
+
+#[cfg(test)]
+mod mode_exposure_tests;
 
 use dsp::denormals::FlushDenormals;
 use dsp::Processor;
@@ -78,6 +82,13 @@ impl Plugin for Cc22 {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    /// Migrate state saved by older CC-22 builds before it is applied, so that
+    /// removed modes map onto the 20 official modes instead of silently falling
+    /// back to defaults. See [`crate::migration`].
+    fn filter_state(state: &mut PluginState) {
+        crate::migration::migrate_legacy_state(state);
     }
 
     fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {

@@ -313,6 +313,7 @@ pub struct ChainFrame {
 #[derive(Debug, Clone, Default)]
 pub struct ModuleCore {
     bypass: BypassCrossfade,
+    initialized: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -329,10 +330,19 @@ impl ModuleCore {
 
     pub fn reset(&mut self) {
         self.bypass.reset(false);
+        self.initialized = false;
     }
 
     pub fn next_frame(&mut self, bypassed: bool, mix: f32, output_trim_db: f32) -> ModuleFrame {
-        self.bypass.set_bypassed(bypassed);
+        if self.initialized {
+            self.bypass.set_bypassed(bypassed);
+        } else {
+            // Snap to the real bypass state on the first frame so a module that
+            // starts bypassed (the default now that "off" is the bypass) is
+            // instantly transparent instead of crossfading its mode in.
+            self.bypass.reset(bypassed);
+            self.initialized = true;
+        }
 
         ModuleFrame {
             mix: mix.clamp(0.0, 1.0),
@@ -1055,7 +1065,7 @@ mod tests {
 
         let mut eq_params = Cc22Params::default();
         eq_params.character.bypass = BoolParam::new("ChB", false);
-        eq_params.character.mode = EnumParam::new("ChM", CharacterMode::Saturation);
+        eq_params.character.mode = EnumParam::new("ChM", CharacterMode::Drive);
         eq_params.character.drive =
             FloatParam::new("Dr", 0.3, FloatRange::Linear { min: 0.0, max: 1.0 });
         eq_params.character.mix =
@@ -1125,7 +1135,7 @@ mod tests {
 
         let mut eq_params = Cc22Params::default();
         eq_params.character.bypass = BoolParam::new("ChB", false);
-        eq_params.character.mode = EnumParam::new("ChM", CharacterMode::Saturation);
+        eq_params.character.mode = EnumParam::new("ChM", CharacterMode::Drive);
         eq_params.character.drive =
             FloatParam::new("Dr", 0.3, FloatRange::Linear { min: 0.0, max: 1.0 });
         eq_params.character.mix =
@@ -1166,7 +1176,7 @@ mod tests {
     fn movement_pre_post_do_not_alter_character_eq() {
         let mut params = Cc22Params::default();
         params.character.bypass = BoolParam::new("ChB", false);
-        params.character.mode = EnumParam::new("ChM", CharacterMode::Saturation);
+        params.character.mode = EnumParam::new("ChM", CharacterMode::Drive);
         params.character.drive =
             FloatParam::new("Dr", 0.2, FloatRange::Linear { min: 0.0, max: 1.0 });
         params.character.mix =
@@ -1416,13 +1426,13 @@ mod tests {
 
         let mut params = Cc22Params::default();
         params.character.bypass = BoolParam::new("Byp", false);
-        params.character.mode = EnumParam::new("Mode", CharacterMode::Saturation);
+        params.character.mode = EnumParam::new("Mode", CharacterMode::Drive);
         params.character.drive =
             FloatParam::new("Dr", 0.3, FloatRange::Linear { min: 0.0, max: 1.0 });
         params.character.mix =
             FloatParam::new("Mix", 0.8, FloatRange::Linear { min: 0.0, max: 1.0 });
         params.movement.bypass = BoolParam::new("Byp", false);
-        params.movement.mode = EnumParam::new("Mode", MovementMode::Chorus);
+        params.movement.mode = EnumParam::new("Mode", MovementMode::Doubler);
         params.movement.depth =
             FloatParam::new("Dp", 0.3, FloatRange::Linear { min: 0.0, max: 1.0 });
         params.movement.mix =

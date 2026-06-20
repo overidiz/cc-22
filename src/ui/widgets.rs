@@ -4,13 +4,7 @@ use nih_plug_egui::egui::{
     Vec2,
 };
 
-use crate::{
-    dsp::{
-        character::CharacterMode, diffusion::DiffusionMode, movement::MovementMode,
-        texture::TextureMode,
-    },
-    params::Cc22Params,
-};
+use crate::params::Cc22Params;
 
 use super::theme::{
     ModuleColors, Theme, FONT_CONTROL_LABEL, FONT_HINT, FONT_SECONDARY, FONT_VALUE_LABEL,
@@ -412,18 +406,20 @@ pub(crate) fn value_string(param: &FloatParam) -> String {
     param.normalized_value_to_string(param.unmodulated_normalized_value(), true)
 }
 
+// A module is active whenever it is not bypassed — "off" is the bypass now, so
+// there is no longer a dedicated off/clean mode to exclude.
 pub(crate) fn character_active(params: &Cc22Params) -> bool {
-    !params.character.bypass.value() && params.character.mode.value() != CharacterMode::Clean
+    !params.character.bypass.value()
 }
 
 pub(crate) fn movement_active(params: &Cc22Params) -> bool {
-    !params.movement.bypass.value() && params.movement.mode.value() != MovementMode::Off
+    !params.movement.bypass.value()
 }
 
 pub(crate) fn diffusion_active(params: &Cc22Params) -> bool {
-    !params.diffusion.bypass.value() && params.diffusion.mode.value() != DiffusionMode::Off
+    !params.diffusion.bypass.value()
 }
 
 pub(crate) fn texture_active(params: &Cc22Params) -> bool {
-    !params.texture.bypass.value() && params.texture.mode.value() != TextureMode::Off
+    !params.texture.bypass.value()
 }

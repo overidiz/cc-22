@@ -71,6 +71,7 @@ pub(crate) fn eq_workbench(
     selected_eq_target: &mut EqTargetSelection,
     selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
+    advanced_open: &mut bool,
     colors: ModuleColors,
     theme: Theme,
     available_width: f32,
@@ -96,7 +97,6 @@ pub(crate) fn eq_workbench(
                         (workbench_width - f32::from(EQ_INNER_PADDING) * 2.0).max(0.0);
                     ui.set_width(content_width);
                     ui.set_min_height(EQ_WORKBENCH_HEIGHT - f32::from(EQ_INNER_PADDING) * 2.0);
-                    let eq_accent = target_color(*selected_eq_target, colors);
                     eq_header(
                         ui,
                         setter,
@@ -104,7 +104,7 @@ pub(crate) fn eq_workbench(
                         selected_eq_target,
                         selected_eq_position,
                         selected_eq_band,
-                        eq_accent,
+                        advanced_open,
                         colors,
                         theme,
                     );
@@ -126,7 +126,7 @@ fn eq_header(
     selected_eq_target: &mut EqTargetSelection,
     selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
-    eq_accent: Color32,
+    advanced_open: &mut bool,
     colors: ModuleColors,
     theme: Theme,
 ) {
@@ -139,28 +139,103 @@ fn eq_header(
                 .color(theme.text_dark),
         );
         ui.add_space(6.0);
-        eq_target_tabs(ui, selected_eq_target, colors, theme);
-        eq_toolbar_divider(ui, theme);
-        eq_position_tabs(ui, selected_eq_position, eq_accent, colors, theme);
-        eq_toolbar_divider(ui, theme);
-        let eq_params = selected_eq_params(params, *selected_eq_target, *selected_eq_position);
-        let active = eq_active(eq_params);
-        if eq_toggle_button(ui, active, eq_accent, theme).clicked() {
-            if active {
-                set_param(setter, eq_params.bypass(), true);
-            } else {
-                set_param(setter, eq_params.mode(), EqMode::On);
-                set_param(setter, eq_params.bypass(), false);
+        eq_selection_badge(
+            ui,
+            *selected_eq_target,
+            *selected_eq_position,
+            colors,
+            theme,
+        );
+        if eq_advanced_button(ui, *advanced_open, theme).clicked() {
+            *advanced_open = !*advanced_open;
+        }
+        if *advanced_open {
+            eq_toolbar_divider(ui, theme);
+            eq_target_tabs(ui, selected_eq_target, colors, theme);
+            let eq_accent = target_color(*selected_eq_target, colors);
+            eq_toolbar_divider(ui, theme);
+            eq_position_tabs(ui, selected_eq_position, eq_accent, colors, theme);
+        } else {
+            eq_toolbar_divider(ui, theme);
+            let eq_accent = target_color(*selected_eq_target, colors);
+            let eq_params = selected_eq_params(params, *selected_eq_target, *selected_eq_position);
+            let active = eq_active(eq_params);
+            if eq_toggle_button(ui, active, eq_accent, theme).clicked() {
+                if active {
+                    set_param(setter, eq_params.bypass(), true);
+                } else {
+                    set_param(setter, eq_params.mode(), EqMode::On);
+                    set_param(setter, eq_params.bypass(), false);
+                }
+            }
+            eq_toolbar_divider(ui, theme);
+            eq_band_tabs(ui, selected_eq_band, colors, theme);
+            eq_toolbar_divider(ui, theme);
+            if eq_reset_button(ui, eq_accent, theme).clicked() {
+                reset_eq_params_to_defaults(
+                    setter,
+                    params,
+                    *selected_eq_target,
+                    *selected_eq_position,
+                );
+                *selected_eq_band = EqBandSelection::Band1;
             }
         }
-        eq_toolbar_divider(ui, theme);
-        eq_band_tabs(ui, selected_eq_band, colors, theme);
-        eq_toolbar_divider(ui, theme);
-        if eq_reset_button(ui, eq_accent, theme).clicked() {
-            reset_eq_params_to_defaults(setter, params, *selected_eq_target, *selected_eq_position);
-            *selected_eq_band = EqBandSelection::Band1;
-        }
     });
+}
+
+fn eq_selection_badge(
+    ui: &mut egui::Ui,
+    target: EqTargetSelection,
+    position: EqPositionSelection,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    let accent = target_color(target, colors);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(88.0, 20.0), Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(6),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 34),
+    );
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0, accent.gamma_multiply(0.7)),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        format!("{} · {}", target.label(), position.label()),
+        FontId::monospace(7.5),
+        theme.text_dark,
+    );
+}
+
+fn eq_advanced_button(ui: &mut egui::Ui, open: bool, theme: Theme) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(82.0, 20.0), Sense::click());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(6),
+        if open || response.hovered() {
+            Color32::from_rgb(52, 48, 42)
+        } else {
+            Color32::from_rgb(225, 219, 207)
+        },
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        if open { "CLOSE TARGET" } else { "EQ TARGET" },
+        FontId::monospace(7.2),
+        if open || response.hovered() {
+            Color32::WHITE
+        } else {
+            theme.muted_dark
+        },
+    );
+    response
 }
 
 fn eq_toggle_button(
@@ -864,28 +939,33 @@ fn eq_inspector(
 
             let band_type = params.band_type(band_index).value();
             if band_type != EqBandType::Off && params.band_enabled(band_index).value() {
-                eq_inspector_slider(
-                    ui,
-                    setter,
-                    params.band_frequency(band_index),
-                    "FREQ",
-                    accent,
-                    theme,
-                );
-
-                if eq_type_uses_gain(band_type) {
-                    eq_inspector_slider(
-                        ui,
-                        setter,
-                        params.band_gain(band_index),
-                        "GAIN",
-                        accent,
-                        theme,
-                    );
-                }
-                if eq_type_uses_q(band_type) {
-                    eq_inspector_slider(ui, setter, params.band_q(band_index), "Q", accent, theme);
-                }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let count = 1
+                        + usize::from(eq_type_uses_gain(band_type))
+                        + usize::from(eq_type_uses_q(band_type));
+                    let control_width = ((ui.available_width()
+                        - 6.0 * (count.saturating_sub(1)) as f32)
+                        / count as f32)
+                        .max(42.0);
+                    for (param, label) in [
+                        (Some(params.band_frequency(band_index)), "FREQ"),
+                        (
+                            eq_type_uses_gain(band_type).then(|| params.band_gain(band_index)),
+                            "GAIN",
+                        ),
+                        (
+                            eq_type_uses_q(band_type).then(|| params.band_q(band_index)),
+                            "Q",
+                        ),
+                    ] {
+                        if let Some(param) = param {
+                            ui.allocate_ui(Vec2::new(control_width, 32.0), |ui| {
+                                eq_inspector_slider(ui, setter, param, label, accent, theme);
+                            });
+                        }
+                    }
+                });
             }
         },
     );

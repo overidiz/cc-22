@@ -1,3 +1,5 @@
+use std::{env, fs, io, path::PathBuf};
+
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{
     self, Align, Color32, CornerRadius, FontId, Pos2, RichText, Sense, Stroke, UiBuilder, Vec2,
@@ -264,6 +266,32 @@ pub(crate) fn preset_selector_with_id(
                 }
             });
     });
+}
+
+pub(crate) fn save_user_snapshot(params: &Cc22Params) -> io::Result<PathBuf> {
+    let base = env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir);
+    let directory = base.join("CC-22").join("Presets");
+    fs::create_dir_all(&directory)?;
+    let path = directory.join("CC-22 User Snapshot.cc22preset");
+    let mut values = params
+        .param_map()
+        .into_iter()
+        .map(|(id, param, _)| {
+            // ParamPtr values remain valid while `params` is alive. This runs on the UI thread.
+            let normalized = unsafe { param.unmodulated_normalized_value() };
+            (id, normalized)
+        })
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut snapshot = String::from("CC22_PRESET_V1\n");
+    for (id, normalized) in values {
+        snapshot.push_str(&format!("{id}={normalized:.9}\n"));
+    }
+    fs::write(&path, snapshot)?;
+    Ok(path)
 }
 
 pub(crate) fn previous_preset(setter: &ParamSetter<'_>, state: &mut UiState, params: &Cc22Params) {

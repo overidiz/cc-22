@@ -36,6 +36,14 @@ pub enum PresetId {
     DiffusionCleanRepeats,
     TextureLoFiCurve,
     FullChainMaster,
+    // Showcase series: one preset per official-mode combination, added so every
+    // one of the 20 official modes appears in at least one preset (these are the
+    // only presets that exercise Movement::Tremolo and Texture::Squash).
+    ShowcaseDriveStack,
+    ShowcaseSweetAir,
+    ShowcaseFuzzCascade,
+    ShowcaseHowlTremolo,
+    ShowcaseSwellReverse,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -223,13 +231,13 @@ impl ModuleEqBand {
     }
 }
 
-pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
+pub const INTERNAL_PRESETS: [InternalPreset; 27] = [
     InternalPreset {
         id: PresetId::WarmTapeChorus,
         name: "Warm Tape Chorus",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Saturation,
+                mode: CharacterMode::Drive,
                 drive: 0.18,
                 age: 0.0,
                 tone: 0.42,
@@ -238,7 +246,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: -1.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Chorus,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.38,
                 depth: 0.28,
                 shape: LfoShape::Sine,
@@ -250,7 +258,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.36,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Slap,
+                mode: DiffusionMode::Reels,
                 time_ms: 95.0,
                 feedback: 0.18,
                 size: 0.25,
@@ -263,7 +271,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.65,
             },
             texture: TexturePreset {
-                mode: TextureMode::WowFlutter,
+                mode: TextureMode::Cassette,
                 wow_depth: 0.10,
                 wow_rate_hz: 0.32,
                 flutter_depth: 0.04,
@@ -306,7 +314,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Dreamy Diffusion",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Cassette,
+                mode: CharacterMode::Sweet,
                 drive: 0.16,
                 age: 0.28,
                 tone: 0.48,
@@ -315,7 +323,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: -1.5,
             },
             movement: MovementPreset {
-                mode: MovementMode::Chorus,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.22,
                 depth: 0.42,
                 shape: LfoShape::Sine,
@@ -327,7 +335,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.45,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Reverb,
+                mode: DiffusionMode::Space,
                 time_ms: 420.0,
                 feedback: 0.28,
                 size: 0.55,
@@ -340,7 +348,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.92,
             },
             texture: TexturePreset {
-                mode: TextureMode::Noise,
+                mode: TextureMode::Broken,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.35,
                 flutter_depth: 0.0,
@@ -383,7 +391,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Psychedelic Motion",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Saturation,
+                mode: CharacterMode::Drive,
                 drive: 0.42,
                 age: 0.0,
                 tone: 0.55,
@@ -404,7 +412,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.55,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Delay,
+                mode: DiffusionMode::Reels,
                 time_ms: 430.0,
                 feedback: 0.42,
                 size: 0.3,
@@ -417,7 +425,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.9,
             },
             texture: TexturePreset {
-                mode: TextureMode::WowFlutter,
+                mode: TextureMode::Cassette,
                 wow_depth: 0.32,
                 wow_rate_hz: 0.55,
                 flutter_depth: 0.12,
@@ -460,7 +468,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Lo-Fi Room",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Cassette,
+                mode: CharacterMode::Sweet,
                 drive: 0.46,
                 age: 0.62,
                 tone: 0.34,
@@ -469,7 +477,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: -2.5,
             },
             movement: MovementPreset {
-                mode: MovementMode::Off,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.45,
                 depth: 0.0,
                 shape: LfoShape::Sine,
@@ -481,7 +489,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.0,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Slap,
+                mode: DiffusionMode::Reels,
                 time_ms: 130.0,
                 feedback: 0.22,
                 size: 0.25,
@@ -494,7 +502,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.45,
             },
             texture: TexturePreset {
-                mode: TextureMode::Noise,
+                mode: TextureMode::Broken,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.4,
                 flutter_depth: 0.0,
@@ -537,7 +545,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Clean Widen",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Clean,
+                mode: CharacterMode::Sweet,
                 drive: 0.0,
                 age: 0.0,
                 tone: 0.5,
@@ -546,7 +554,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: 0.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Chorus,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.28,
                 depth: 0.22,
                 shape: LfoShape::Sine,
@@ -558,7 +566,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.28,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Reverb,
+                mode: DiffusionMode::Space,
                 time_ms: 280.0,
                 feedback: 0.18,
                 size: 0.32,
@@ -571,7 +579,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.75,
             },
             texture: TexturePreset {
-                mode: TextureMode::Off,
+                mode: TextureMode::Filter,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.4,
                 flutter_depth: 0.0,
@@ -1316,7 +1324,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: -1.5,
             },
             movement: MovementPreset {
-                mode: MovementMode::Chorus,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.24,
                 depth: 0.22,
                 shape: LfoShape::Sine,
@@ -1341,7 +1349,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.90,
             },
             texture: TexturePreset {
-                mode: TextureMode::Tape,
+                mode: TextureMode::Cassette,
                 wow_depth: 0.14,
                 wow_rate_hz: 0.30,
                 flutter_depth: 0.05,
@@ -1384,7 +1392,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Pre EQ Sculpted",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Saturation,
+                mode: CharacterMode::Drive,
                 drive: 0.14,
                 age: 0.0,
                 tone: 0.50,
@@ -1393,7 +1401,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: -2.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Chorus,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.45,
                 depth: 0.20,
                 shape: LfoShape::Sine,
@@ -1473,7 +1481,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Global Tone Polish",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Clean,
+                mode: CharacterMode::Sweet,
                 drive: 0.0,
                 age: 0.0,
                 tone: 0.5,
@@ -1482,7 +1490,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: 0.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Off,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.45,
                 depth: 0.0,
                 shape: LfoShape::Sine,
@@ -1494,7 +1502,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.0,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Off,
+                mode: DiffusionMode::Cascade,
                 time_ms: 350.0,
                 feedback: 0.0,
                 size: 0.0,
@@ -1507,7 +1515,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.0,
             },
             texture: TexturePreset {
-                mode: TextureMode::Off,
+                mode: TextureMode::Filter,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.4,
                 flutter_depth: 0.0,
@@ -1570,7 +1578,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: -2.5,
             },
             movement: MovementPreset {
-                mode: MovementMode::Off,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.45,
                 depth: 0.0,
                 shape: LfoShape::Sine,
@@ -1582,7 +1590,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.0,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Off,
+                mode: DiffusionMode::Cascade,
                 time_ms: 350.0,
                 feedback: 0.0,
                 size: 0.0,
@@ -1595,7 +1603,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.0,
             },
             texture: TexturePreset {
-                mode: TextureMode::Off,
+                mode: TextureMode::Filter,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.4,
                 flutter_depth: 0.0,
@@ -1656,7 +1664,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Movement Wide Polish",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Clean,
+                mode: CharacterMode::Sweet,
                 drive: 0.0,
                 age: 0.0,
                 tone: 0.5,
@@ -1665,7 +1673,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: 0.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Chorus,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.32,
                 depth: 0.30,
                 shape: LfoShape::Sine,
@@ -1677,7 +1685,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.40,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Off,
+                mode: DiffusionMode::Cascade,
                 time_ms: 350.0,
                 feedback: 0.0,
                 size: 0.0,
@@ -1690,7 +1698,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.0,
             },
             texture: TexturePreset {
-                mode: TextureMode::Off,
+                mode: TextureMode::Filter,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.4,
                 flutter_depth: 0.0,
@@ -1751,7 +1759,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Diffusion Clean Repeats",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Clean,
+                mode: CharacterMode::Sweet,
                 drive: 0.0,
                 age: 0.0,
                 tone: 0.5,
@@ -1760,7 +1768,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: 0.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Off,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.45,
                 depth: 0.0,
                 shape: LfoShape::Sine,
@@ -1772,7 +1780,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.0,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Delay,
+                mode: DiffusionMode::Reels,
                 time_ms: 380.0,
                 feedback: 0.38,
                 size: 0.3,
@@ -1785,7 +1793,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.82,
             },
             texture: TexturePreset {
-                mode: TextureMode::Off,
+                mode: TextureMode::Filter,
                 wow_depth: 0.0,
                 wow_rate_hz: 0.4,
                 flutter_depth: 0.0,
@@ -1846,7 +1854,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
         name: "Texture Lo-Fi Curve",
         values: PresetValues {
             character: CharacterPreset {
-                mode: CharacterMode::Clean,
+                mode: CharacterMode::Sweet,
                 drive: 0.0,
                 age: 0.0,
                 tone: 0.5,
@@ -1855,7 +1863,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 output_trim_db: 0.0,
             },
             movement: MovementPreset {
-                mode: MovementMode::Off,
+                mode: MovementMode::Doubler,
                 rate_hz: 0.45,
                 depth: 0.0,
                 shape: LfoShape::Sine,
@@ -1867,7 +1875,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 mix: 0.0,
             },
             diffusion: DiffusionPreset {
-                mode: DiffusionMode::Off,
+                mode: DiffusionMode::Cascade,
                 time_ms: 350.0,
                 feedback: 0.0,
                 size: 0.0,
@@ -1880,7 +1888,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
                 width: 0.0,
             },
             texture: TexturePreset {
-                mode: TextureMode::Tape,
+                mode: TextureMode::Cassette,
                 wow_depth: 0.20,
                 wow_rate_hz: 0.38,
                 flutter_depth: 0.08,
@@ -2048,6 +2056,394 @@ pub const INTERNAL_PRESETS: [InternalPreset; 22] = [
             texture_post_eq: None,
             input_gain_db: -0.5,
             output_gain_db: -1.0,
+            dry_wet: 1.0,
+        },
+    },
+    // ─── Showcase series ──────────────────────────────────────────────────
+    // Conservative, headroom-safe presets that each demonstrate one official
+    // mode per module. Drive/feedback/mix stay moderate so they don't clip.
+    InternalPreset {
+        id: PresetId::ShowcaseDriveStack,
+        name: "Showcase Drive Stack",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Drive,
+                drive: 0.30,
+                age: 0.10,
+                tone: 0.50,
+                noise: 0.0,
+                mix: 0.70,
+                output_trim_db: -1.5,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Doubler,
+                rate_hz: 0.40,
+                depth: 0.30,
+                shape: LfoShape::Sine,
+                delay_ms: 18.0,
+                feedback: 0.10,
+                width: 0.70,
+                phase_degrees: 180.0,
+                tone: 0.50,
+                mix: 0.35,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reels,
+                time_ms: 180.0,
+                feedback: 0.25,
+                size: 0.35,
+                decay: 0.35,
+                pre_delay_ms: 12.0,
+                damping: 0.45,
+                mix: 0.22,
+                tone: 0.45,
+                stereo_offset: 0.0,
+                width: 0.70,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Cassette,
+                wow_depth: 0.12,
+                wow_rate_hz: 0.40,
+                flutter_depth: 0.05,
+                flutter_rate_hz: 6.5,
+                random_drift: 0.08,
+                noise_amount: 0.05,
+                noise_color: 0.45,
+                degrade: 0.12,
+                stereo_spread: 0.70,
+                mix: 0.25,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 32.0,
+                low_shelf_gain_db: -0.5,
+                low_shelf_hz: 120.0,
+                mid_gain_db: -0.5,
+                mid_hz: 2_000.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: -1.0,
+                high_shelf_hz: 8_000.0,
+                high_cut_hz: 17_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: 0.0,
+            output_gain_db: -1.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ShowcaseSweetAir,
+        name: "Showcase Sweet Air",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Sweet,
+                drive: 0.20,
+                age: 0.15,
+                tone: 0.60,
+                noise: 0.0,
+                mix: 0.60,
+                output_trim_db: -1.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Vibrato,
+                rate_hz: 4.5,
+                depth: 0.25,
+                shape: LfoShape::Sine,
+                delay_ms: 12.0,
+                feedback: 0.0,
+                width: 0.50,
+                phase_degrees: 90.0,
+                tone: 0.55,
+                mix: 0.30,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Space,
+                time_ms: 380.0,
+                feedback: 0.25,
+                size: 0.50,
+                decay: 0.50,
+                pre_delay_ms: 24.0,
+                damping: 0.50,
+                mix: 0.30,
+                tone: 0.50,
+                stereo_offset: 0.0,
+                width: 0.90,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Filter,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.45,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.05,
+                noise_amount: 0.0,
+                noise_color: 0.55,
+                degrade: 0.10,
+                stereo_spread: 0.60,
+                mix: 0.25,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 32.0,
+                low_shelf_gain_db: -0.4,
+                low_shelf_hz: 120.0,
+                mid_gain_db: -0.3,
+                mid_hz: 2_500.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: 0.5,
+                high_shelf_hz: 9_000.0,
+                high_cut_hz: 18_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: 0.0,
+            output_gain_db: -1.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ShowcaseFuzzCascade,
+        name: "Showcase Fuzz Cascade",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Fuzz,
+                drive: 0.35,
+                age: 0.20,
+                tone: 0.45,
+                noise: 0.0,
+                mix: 0.55,
+                output_trim_db: -3.0,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Phaser,
+                rate_hz: 0.60,
+                depth: 0.50,
+                shape: LfoShape::Sine,
+                delay_ms: 16.0,
+                feedback: 0.30,
+                width: 0.70,
+                phase_degrees: 120.0,
+                tone: 0.50,
+                mix: 0.40,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Cascade,
+                time_ms: 160.0,
+                feedback: 0.30,
+                size: 0.50,
+                decay: 0.50,
+                pre_delay_ms: 0.0,
+                damping: 0.50,
+                mix: 0.25,
+                tone: 0.45,
+                stereo_offset: 0.10,
+                width: 0.70,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Broken,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.40,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.25,
+                noise_amount: 0.15,
+                noise_color: 0.50,
+                degrade: 0.30,
+                stereo_spread: 0.60,
+                mix: 0.25,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 40.0,
+                low_shelf_gain_db: -1.0,
+                low_shelf_hz: 110.0,
+                mid_gain_db: -1.0,
+                mid_hz: 2_200.0,
+                mid_q: 0.9,
+                high_shelf_gain_db: -2.0,
+                high_shelf_hz: 7_000.0,
+                high_cut_hz: 15_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: -0.5,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ShowcaseHowlTremolo,
+        name: "Showcase Howl Tremolo",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Howl,
+                drive: 0.40,
+                age: 0.20,
+                tone: 0.50,
+                noise: 0.0,
+                mix: 0.50,
+                output_trim_db: -2.5,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Tremolo,
+                rate_hz: 5.0,
+                depth: 0.40,
+                shape: LfoShape::Triangle,
+                delay_ms: 16.0,
+                feedback: 0.0,
+                width: 0.40,
+                phase_degrees: 90.0,
+                tone: 0.50,
+                mix: 0.45,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Collage,
+                time_ms: 240.0,
+                feedback: 0.30,
+                size: 0.50,
+                decay: 0.50,
+                pre_delay_ms: 8.0,
+                damping: 0.50,
+                mix: 0.25,
+                tone: 0.45,
+                stereo_offset: 0.10,
+                width: 0.70,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Interference,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.40,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.20,
+                noise_amount: 0.20,
+                noise_color: 0.50,
+                degrade: 0.20,
+                stereo_spread: 0.70,
+                mix: 0.20,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 38.0,
+                low_shelf_gain_db: -0.8,
+                low_shelf_hz: 120.0,
+                mid_gain_db: -1.0,
+                mid_hz: 2_400.0,
+                mid_q: 0.9,
+                high_shelf_gain_db: -1.5,
+                high_shelf_hz: 7_500.0,
+                high_cut_hz: 15_500.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: -0.5,
+            output_gain_db: -2.0,
+            dry_wet: 1.0,
+        },
+    },
+    InternalPreset {
+        id: PresetId::ShowcaseSwellReverse,
+        name: "Showcase Swell Reverse",
+        values: PresetValues {
+            character: CharacterPreset {
+                mode: CharacterMode::Swell,
+                drive: 0.40,
+                age: 0.20,
+                tone: 0.50,
+                noise: 0.0,
+                mix: 0.60,
+                output_trim_db: -1.5,
+            },
+            movement: MovementPreset {
+                mode: MovementMode::Pitch,
+                rate_hz: 3.0,
+                depth: 0.30,
+                shape: LfoShape::Sine,
+                delay_ms: 16.0,
+                feedback: 0.0,
+                width: 0.50,
+                phase_degrees: 90.0,
+                tone: 0.50,
+                mix: 0.35,
+            },
+            diffusion: DiffusionPreset {
+                mode: DiffusionMode::Reverse,
+                time_ms: 360.0,
+                feedback: 0.25,
+                size: 0.50,
+                decay: 0.50,
+                pre_delay_ms: 10.0,
+                damping: 0.45,
+                mix: 0.28,
+                tone: 0.50,
+                stereo_offset: 0.10,
+                width: 0.80,
+            },
+            texture: TexturePreset {
+                mode: TextureMode::Squash,
+                wow_depth: 0.0,
+                wow_rate_hz: 0.45,
+                flutter_depth: 0.0,
+                flutter_rate_hz: 7.0,
+                random_drift: 0.10,
+                noise_amount: 0.0,
+                noise_color: 0.50,
+                degrade: 0.35,
+                stereo_spread: 0.60,
+                mix: 0.30,
+            },
+            eq: EqPreset {
+                mode: EqMode::On,
+                low_cut_hz: 34.0,
+                low_shelf_gain_db: -0.5,
+                low_shelf_hz: 120.0,
+                mid_gain_db: -0.5,
+                mid_hz: 2_000.0,
+                mid_q: 0.8,
+                high_shelf_gain_db: -0.8,
+                high_shelf_hz: 8_500.0,
+                high_cut_hz: 17_000.0,
+            },
+            pre_eq: None,
+            character_pre_eq: None,
+            character_post_eq: None,
+            movement_pre_eq: None,
+            movement_post_eq: None,
+            diffusion_pre_eq: None,
+            diffusion_post_eq: None,
+            texture_pre_eq: None,
+            texture_post_eq: None,
+            input_gain_db: 0.0,
+            output_gain_db: -1.5,
             dry_wet: 1.0,
         },
     },
@@ -2292,7 +2688,7 @@ mod tests {
     fn exposes_named_presets_without_reordering_existing_ones() {
         let presets = internal_presets();
 
-        assert_eq!(presets.len(), 22);
+        assert_eq!(presets.len(), 27);
         assert_eq!(presets[0].name, "Warm Tape Chorus");
         assert_eq!(presets[4].name, "Clean Widen");
         assert_eq!(presets[5].name, "Sweet Console");
@@ -2308,9 +2704,9 @@ mod tests {
         let preset = find_preset(PresetId::LoFiRoom).expect("preset exists");
 
         assert_eq!(preset.name, "Lo-Fi Room");
-        assert_eq!(preset.values.character.mode, CharacterMode::Cassette);
-        assert_eq!(preset.values.diffusion.mode, DiffusionMode::Slap);
-        assert_eq!(preset.values.texture.mode, TextureMode::Noise);
+        assert_eq!(preset.values.character.mode, CharacterMode::Sweet);
+        assert_eq!(preset.values.diffusion.mode, DiffusionMode::Reels);
+        assert_eq!(preset.values.texture.mode, TextureMode::Broken);
     }
 
     #[test]
@@ -2358,9 +2754,9 @@ mod tests {
     fn clean_widen_keeps_character_and_texture_neutral() {
         let preset = find_preset(PresetId::CleanWiden).expect("preset exists");
 
-        assert_eq!(preset.values.character.mode, CharacterMode::Clean);
-        assert_eq!(preset.values.texture.mode, TextureMode::Off);
-        assert_eq!(preset.values.movement.mode, MovementMode::Chorus);
+        assert_eq!(preset.values.character.mode, CharacterMode::Sweet);
+        assert_eq!(preset.values.texture.mode, TextureMode::Filter);
+        assert_eq!(preset.values.movement.mode, MovementMode::Doubler);
     }
 
     #[test]
@@ -2497,5 +2893,84 @@ mod tests {
         assert!(preset.values.pre_eq.is_some());
         assert!(preset.values.character_pre_eq.is_none());
         assert!(preset.values.diffusion_pre_eq.is_none());
+    }
+
+    #[test]
+    fn every_official_mode_appears_in_at_least_one_preset() {
+        let presets = internal_presets();
+
+        for mode in CharacterMode::PRODUCT_MODES {
+            assert!(
+                presets.iter().any(|p| p.values.character.mode == mode),
+                "no preset uses Character mode {mode:?}"
+            );
+        }
+        for mode in MovementMode::PRODUCT_MODES {
+            assert!(
+                presets.iter().any(|p| p.values.movement.mode == mode),
+                "no preset uses Movement mode {mode:?}"
+            );
+        }
+        for mode in DiffusionMode::PRODUCT_MODES {
+            assert!(
+                presets.iter().any(|p| p.values.diffusion.mode == mode),
+                "no preset uses Diffusion mode {mode:?}"
+            );
+        }
+        for mode in TextureMode::PRODUCT_MODES {
+            assert!(
+                presets.iter().any(|p| p.values.texture.mode == mode),
+                "no preset uses Texture mode {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn showcase_presets_cover_the_required_combinations() {
+        let cases = [
+            (
+                PresetId::ShowcaseDriveStack,
+                CharacterMode::Drive,
+                MovementMode::Doubler,
+                DiffusionMode::Reels,
+                TextureMode::Cassette,
+            ),
+            (
+                PresetId::ShowcaseSweetAir,
+                CharacterMode::Sweet,
+                MovementMode::Vibrato,
+                DiffusionMode::Space,
+                TextureMode::Filter,
+            ),
+            (
+                PresetId::ShowcaseFuzzCascade,
+                CharacterMode::Fuzz,
+                MovementMode::Phaser,
+                DiffusionMode::Cascade,
+                TextureMode::Broken,
+            ),
+            (
+                PresetId::ShowcaseHowlTremolo,
+                CharacterMode::Howl,
+                MovementMode::Tremolo,
+                DiffusionMode::Collage,
+                TextureMode::Interference,
+            ),
+            (
+                PresetId::ShowcaseSwellReverse,
+                CharacterMode::Swell,
+                MovementMode::Pitch,
+                DiffusionMode::Reverse,
+                TextureMode::Squash,
+            ),
+        ];
+
+        for (id, character, movement, diffusion, texture) in cases {
+            let preset = find_preset(id).expect("showcase preset exists");
+            assert_eq!(preset.values.character.mode, character);
+            assert_eq!(preset.values.movement.mode, movement);
+            assert_eq!(preset.values.diffusion.mode, diffusion);
+            assert_eq!(preset.values.texture.mode, texture);
+        }
     }
 }

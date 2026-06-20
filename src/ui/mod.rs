@@ -10,7 +10,7 @@ use crate::{meters::Meters, params::Cc22Params, Cc22};
 
 mod eq_view;
 mod meters;
-mod module_card;
+pub(crate) mod module_card;
 mod preset_bar;
 mod signal_flow;
 mod theme;
@@ -21,6 +21,7 @@ use eq_view::eq_workbench;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
+use signal_flow::signal_chain_row;
 use theme::{Look, ModuleColors, Theme};
 pub(crate) use theme::{BASE_HEIGHT, BASE_WIDTH};
 use top_bar::top_bar;
@@ -66,8 +67,9 @@ pub fn create_editor(
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
                                 ui.spacing_mut().item_spacing.y = 8.0;
-                                top_bar(ui, setter, state, &params, colors, theme);
+                                top_bar(ui, setter, state, &params, colors, theme, now);
                                 center_modules(ui, setter, state, &params, look);
+                                signal_chain_row(ui, &params, colors, theme);
                                 let eq_width = ui.available_width();
                                 eq_workbench(
                                     ui,
@@ -76,6 +78,7 @@ pub fn create_editor(
                                     &mut state.selected_eq_target,
                                     &mut state.selected_eq_position,
                                     &mut state.selected_eq_band,
+                                    &mut state.eq_advanced_open,
                                     colors,
                                     theme,
                                     eq_width,

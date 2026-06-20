@@ -7,12 +7,15 @@ use crate::params::Cc22Params;
 
 use super::{
     meters::UiState,
-    preset_bar::{next_preset, preset_selector_with_id, previous_preset, randomize_controls},
+    preset_bar::{
+        next_preset, preset_selector_with_id, previous_preset, randomize_controls,
+        save_user_snapshot,
+    },
     theme::{ModuleColors, Theme},
-    widgets::{brand_mark, colored_knob, compact_button, global_bypass_button},
+    widgets::{brand_mark, compact_button, global_bypass_button},
 };
 
-pub(crate) const TOP_BAR_HEIGHT: f32 = 86.0;
+pub(crate) const TOP_BAR_HEIGHT: f32 = 76.0;
 
 pub(crate) fn top_bar(
     ui: &mut egui::Ui,
@@ -21,6 +24,7 @@ pub(crate) fn top_bar(
     params: &Cc22Params,
     colors: ModuleColors,
     theme: Theme,
+    now: f64,
 ) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), TOP_BAR_HEIGHT),
@@ -86,18 +90,33 @@ pub(crate) fn top_bar(
                         {
                             randomize_controls(setter, state, params);
                         }
+                        if compact_button(ui, "SAVE", theme, colors.diffusion)
+                            .on_hover_text("Save a portable snapshot to the CC-22 user folder")
+                            .clicked()
+                        {
+                            state.save_failed = save_user_snapshot(params).is_err();
+                            state.save_notice_until = now + 2.0;
+                        }
+
+                        if now < state.save_notice_until {
+                            ui.label(
+                                RichText::new(if state.save_failed {
+                                    "SAVE ERR"
+                                } else {
+                                    "SAVED"
+                                })
+                                .font(FontId::monospace(8.0))
+                                .strong()
+                                .color(if state.save_failed {
+                                    theme.warning
+                                } else {
+                                    colors.diffusion
+                                }),
+                            );
+                        }
 
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             global_bypass_button(ui, setter, &params.global_bypass, theme);
-                            colored_knob(
-                                ui,
-                                setter,
-                                &params.dry_wet,
-                                "DRY/WET",
-                                colors.master,
-                                theme,
-                                38.0,
-                            );
                         });
                     });
                 });

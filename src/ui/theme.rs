@@ -2,12 +2,10 @@ use nih_plug_egui::egui::Color32;
 
 pub(crate) const CARD_HEIGHT: f32 = 280.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
-pub(crate) const KNOB_SIZE: f32 = 50.0;
-
 pub(crate) const BASE_WIDTH: f32 = 1040.0;
-pub(crate) const BASE_HEIGHT: f32 = 760.0;
+pub(crate) const BASE_HEIGHT: f32 = 744.0;
 
-pub(crate) const FONT_MODULE_TITLE: f32 = 13.5;
+pub(crate) const FONT_MODULE_TITLE: f32 = 16.0;
 pub(crate) const FONT_CONTROL_LABEL: f32 = 9.0;
 pub(crate) const FONT_VALUE_LABEL: f32 = 8.5;
 pub(crate) const FONT_SECONDARY: f32 = 9.0;
@@ -32,7 +30,7 @@ pub(crate) struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            background: Color32::from_rgb(207, 199, 184),
+            background: Color32::from_rgb(27, 25, 23),
             paper: Color32::from_rgb(244, 239, 228),
             paper_alt: Color32::from_rgb(235, 229, 216),
             card: Color32::from_rgb(236, 231, 219),
@@ -43,7 +41,7 @@ impl Default for Theme {
             muted: Color32::from_rgb(126, 118, 104),
             muted_dark: Color32::from_rgb(70, 64, 55),
             warning: Color32::from_rgb(225, 64, 52),
-            shadow: Color32::from_rgba_premultiplied(28, 23, 18, 44),
+            shadow: Color32::from_rgba_premultiplied(0, 0, 0, 92),
         }
     }
 }

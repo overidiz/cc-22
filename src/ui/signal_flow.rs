@@ -1,6 +1,177 @@
 use nih_plug_egui::egui::{
-    self, Align2, Color32, CornerRadius, FontId, Pos2, Stroke, StrokeKind, Vec2,
+    self, Align2, Color32, CornerRadius, FontId, Pos2, Sense, Stroke, StrokeKind, Vec2,
 };
+
+use crate::{dsp::chain::ChainModule, params::Cc22Params};
+
+use super::theme::{ModuleColors, Theme};
+
+pub(crate) const SIGNAL_CHAIN_HEIGHT: f32 = 46.0;
+
+pub(crate) fn signal_chain_row(
+    ui: &mut egui::Ui,
+    params: &Cc22Params,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), SIGNAL_CHAIN_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(10), Color32::from_rgb(39, 36, 32));
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(10),
+        Stroke::new(1.0, Color32::from_rgb(80, 73, 63)),
+        StrokeKind::Inside,
+    );
+
+    let order = params.chain_order();
+    let widths = [40.0, 64.0, 120.0, 120.0, 120.0, 120.0, 64.0, 40.0];
+    let gap = 18.0;
+    let total = widths.iter().sum::<f32>() + gap * 7.0;
+    let mut x = rect.center().x - total * 0.5;
+    let y = rect.center().y - 15.0;
+    let mut nodes = [egui::Rect::NOTHING; 8];
+    let mut accents = [theme.muted; 8];
+
+    nodes[0] = paint_chain_node(
+        ui.painter(),
+        x,
+        y + 4.0,
+        widths[0],
+        22.0,
+        "IN",
+        None,
+        theme.muted,
+    );
+    x += widths[0] + gap;
+    accents[1] = colors.eq;
+    nodes[1] = paint_chain_node(
+        ui.painter(),
+        x,
+        y,
+        widths[1],
+        30.0,
+        "PRE EQ",
+        Some("GLOBAL"),
+        colors.eq,
+    );
+    x += widths[1] + gap;
+
+    for (index, module) in order.into_iter().enumerate() {
+        let node_index = index + 2;
+        let accent = module_color(module, colors);
+        accents[node_index] = accent;
+        nodes[node_index] = paint_chain_node(
+            ui.painter(),
+            x,
+            y,
+            widths[node_index],
+            30.0,
+            module_name(module),
+            Some("PRE EQ · POST EQ"),
+            accent,
+        );
+        x += widths[node_index] + gap;
+    }
+
+    accents[6] = colors.eq;
+    nodes[6] = paint_chain_node(
+        ui.painter(),
+        x,
+        y,
+        widths[6],
+        30.0,
+        "POST EQ",
+        Some("GLOBAL"),
+        colors.eq,
+    );
+    x += widths[6] + gap;
+    nodes[7] = paint_chain_node(
+        ui.painter(),
+        x,
+        y + 4.0,
+        widths[7],
+        22.0,
+        "OUT",
+        None,
+        theme.muted,
+    );
+
+    for index in 0..7 {
+        signal_flow_arrow(
+            ui.painter(),
+            Pos2::new(nodes[index].right() + 3.0, nodes[index].center().y),
+            Pos2::new(nodes[index + 1].left() - 3.0, nodes[index].center().y),
+            accents[index],
+            false,
+        );
+    }
+}
+
+fn paint_chain_node(
+    painter: &egui::Painter,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    label: &str,
+    eq_label: Option<&str>,
+    accent: Color32,
+) -> egui::Rect {
+    let node = egui::Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, height));
+    painter.rect_filled(
+        node,
+        CornerRadius::same(8),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 48),
+    );
+    painter.rect_stroke(
+        node,
+        CornerRadius::same(8),
+        Stroke::new(1.0, accent.gamma_multiply(0.85)),
+        StrokeKind::Inside,
+    );
+    painter.text(
+        Pos2::new(
+            node.center().x,
+            node.center().y - if eq_label.is_some() { 4.5 } else { 0.0 },
+        ),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::monospace(if width >= 100.0 { 9.0 } else { 7.5 }),
+        Color32::from_rgb(244, 237, 221),
+    );
+    if let Some(eq_label) = eq_label {
+        painter.text(
+            Pos2::new(node.center().x, node.center().y + 6.0),
+            Align2::CENTER_CENTER,
+            eq_label,
+            FontId::monospace(6.5),
+            accent.gamma_multiply(1.15),
+        );
+    }
+    node
+}
+
+fn module_name(module: ChainModule) -> &'static str {
+    match module {
+        ChainModule::Character => "CHARACTER",
+        ChainModule::Movement => "MOVEMENT",
+        ChainModule::Diffusion => "DIFFUSION",
+        ChainModule::Texture => "TEXTURE",
+    }
+}
+
+fn module_color(module: ChainModule, colors: ModuleColors) -> Color32 {
+    match module {
+        ChainModule::Character => colors.character,
+        ChainModule::Movement => colors.movement,
+        ChainModule::Diffusion => colors.diffusion,
+        ChainModule::Texture => colors.texture,
+    }
+}
 
 // ── shadows & lift ──────────────────────────────────────────────────────
 
