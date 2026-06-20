@@ -1,6 +1,7 @@
 pub mod bypass;
 pub mod chain;
 pub mod character;
+pub mod denormals;
 pub mod diffusion;
 pub mod dry_wet;
 pub mod eq;

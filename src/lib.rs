@@ -7,6 +7,7 @@ pub mod params;
 pub mod presets;
 pub mod ui;
 
+use dsp::denormals::FlushDenormals;
 use dsp::Processor;
 use meters::Meters;
 use params::Cc22Params;
@@ -103,6 +104,9 @@ impl Plugin for Cc22 {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Flush denormals to zero for the duration of this block so the IIR /
+        // feedback loops in the chain can't spike CPU on a decaying tail.
+        let _denormals = FlushDenormals::new();
         self.process_block(buffer);
         ProcessStatus::Normal
     }

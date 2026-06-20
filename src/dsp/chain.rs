@@ -82,18 +82,43 @@ pub fn reorder_module(
     result
 }
 
+/// Turns four raw slot indices into a valid module permutation.
+///
+/// During automation a host can momentarily present a conflicting state — e.g.
+/// moving one slot before the others have caught up leaves a duplicate like
+/// `[2, 1, 2, 3]`. Rather than snapping the whole chain back to the default
+/// order (an audible jump), this repairs the permutation in place: the first
+/// occurrence of each module wins, and any out-of-range or duplicate slot is
+/// back-filled with the lowest still-unused module. A valid permutation is
+/// returned unchanged, so this is a no-op in steady state.
 pub fn validate_chain_order(slots: &[usize; 4]) -> [ChainModule; 4] {
-    let mut seen = [false; 4];
-    for &s in slots {
-        if s >= 4 {
-            return default_chain_order();
+    let mut used = [false; 4];
+    let mut needs_fill = [false; 4];
+    let mut result = [ChainModule::Character; 4];
+
+    // First pass: honor each module the first time it appears in a valid slot.
+    for (position, &slot) in slots.iter().enumerate() {
+        if slot < 4 && !used[slot] {
+            used[slot] = true;
+            result[position] = module_from_slot(slot);
+        } else {
+            needs_fill[position] = true;
         }
-        if seen[s] {
-            return default_chain_order();
-        }
-        seen[s] = true;
     }
-    slots.map(module_from_slot)
+
+    // Second pass: back-fill conflicts with the remaining modules in order.
+    let mut next = 0;
+    for position in 0..4 {
+        if needs_fill[position] {
+            while next < 4 && used[next] {
+                next += 1;
+            }
+            used[next] = true;
+            result[position] = module_from_slot(next);
+        }
+    }
+
+    result
 }
 
 #[derive(Default)]
@@ -534,15 +559,58 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_duplicates() {
+    fn validate_repairs_duplicates_without_snapping_to_default() {
+        // [0, 0, 1, 2]: first Character wins, the duplicate slot is back-filled
+        // with the only unused module (Texture) — a minimal repair, not a reset.
         let result = validate_chain_order(&[0, 0, 1, 2]);
-        assert_eq!(result, default_chain_order());
+        assert_eq!(
+            result,
+            [
+                ChainModule::Character,
+                ChainModule::Texture,
+                ChainModule::Movement,
+                ChainModule::Diffusion,
+            ]
+        );
+        assert!(is_valid_permutation(&result));
     }
 
     #[test]
-    fn validate_rejects_out_of_bounds() {
+    fn validate_repairs_out_of_bounds() {
+        // Slot 0 is invalid, so it is back-filled with the lowest unused module
+        // (Character), which restores the default order here.
         let result = validate_chain_order(&[4, 1, 2, 3]);
         assert_eq!(result, default_chain_order());
+        assert!(is_valid_permutation(&result));
+    }
+
+    #[test]
+    fn validate_always_returns_a_permutation() {
+        for a in 0..6 {
+            for b in 0..6 {
+                for c in 0..6 {
+                    for d in 0..6 {
+                        let result = validate_chain_order(&[a, b, c, d]);
+                        assert!(
+                            is_valid_permutation(&result),
+                            "non-permutation for slots [{a}, {b}, {c}, {d}]: {result:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_valid_permutation(order: &[ChainModule; 4]) -> bool {
+        let mut seen = [false; 4];
+        for &module in order {
+            let index = module as usize;
+            if seen[index] {
+                return false;
+            }
+            seen[index] = true;
+        }
+        seen.iter().all(|&s| s)
     }
 
     #[test]
