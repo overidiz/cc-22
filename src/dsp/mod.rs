@@ -64,6 +64,7 @@ impl Processor {
 
     pub fn process_block(&mut self, buffer: &mut Buffer, params: &Cc22Params, meters: &Meters) {
         self.bypass.set_bypassed(params.global_bypass.value());
+        meters.set_analyzer_sample_rate(self.sample_rate);
         let mut input_peak = 0.0_f32;
         let mut output_peak = 0.0_f32;
 
@@ -83,6 +84,9 @@ impl Processor {
             for (channel_index, sample) in channel_samples.into_iter().enumerate() {
                 let dry_sample = *sample;
                 input_peak = input_peak.max(dry_sample.abs());
+                if channel_index == 0 {
+                    meters.push_analyzer_sample(dry_sample);
+                }
                 let wet_sample = self.input_gain.apply(dry_sample, input_gain);
                 let wet_sample = self.chain.process_sample(
                     channel_index,

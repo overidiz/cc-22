@@ -694,3 +694,116 @@ fn audit_measurements_report() {
         }
     }
 }
+
+// ─── Release hardening: sample-rate coverage and state hygiene ───────────────
+
+fn engaged_params(
+    character: CharacterMode,
+    movement: MovementMode,
+    diffusion: DiffusionMode,
+    texture: TextureMode,
+) -> Cc22Params {
+    let mut params = Cc22Params::default();
+    params.character.mode = EnumParam::new("c", character);
+    params.character.bypass = BoolParam::new("cb", false);
+    params.character.drive = fp(0.7);
+    params.movement.mode = EnumParam::new("m", movement);
+    params.movement.bypass = BoolParam::new("mb", false);
+    params.movement.feedback = fp(0.4);
+    params.diffusion.mode = EnumParam::new("d", diffusion);
+    params.diffusion.bypass = BoolParam::new("db", false);
+    params.diffusion.feedback = fp(0.6);
+    params.texture.mode = EnumParam::new("t", texture);
+    params.texture.bypass = BoolParam::new("tb", false);
+    params.texture.degrade = fp(0.6);
+    params.reset_smoothers();
+    params
+}
+
+/// Every module must stay finite and bounded at the sample rates a host can pick.
+/// The DSP sizes its delay/reverse/pitch buffers in `prepare()`, so this guards
+/// against any hidden 48 kHz assumption (out-of-range reads, wrong coefficients).
+#[test]
+fn all_modes_stay_sane_across_sample_rates() {
+    let combos = [
+        (
+            CharacterMode::Fuzz,
+            MovementMode::Phaser,
+            DiffusionMode::Reels,
+            TextureMode::Broken,
+        ),
+        (
+            CharacterMode::Drive,
+            MovementMode::Pitch,
+            DiffusionMode::Reverse,
+            TextureMode::Interference,
+        ),
+        (
+            CharacterMode::Howl,
+            MovementMode::Tremolo,
+            DiffusionMode::Space,
+            TextureMode::Squash,
+        ),
+    ];
+
+    for sample_rate in [44_100.0_f32, 88_200.0, 96_000.0] {
+        for (character, movement, diffusion, texture) in combos {
+            let params = engaged_params(character, movement, diffusion, texture);
+            let meters = Meters::default();
+            let mut processor = Processor::default();
+            processor.prepare(sample_rate);
+            processor.reset(false);
+
+            for signal in [
+                AuditSignal::WhiteNoise,
+                AuditSignal::Impulse,
+                AuditSignal::Sine440,
+            ] {
+                let samples = (0.4 * sample_rate) as usize;
+                let mut audio = signal.render(samples, sample_rate);
+                with_stereo_buffer(&mut audio, |buffer| {
+                    processor.process_block(buffer, &params, &meters);
+                });
+                let label = format!("sr-{sample_rate}/{character:?}/{signal:?}");
+                assert_finite_buffer(&label, &audio);
+                assert_peak_below(&label, &audio, MAX_EXPECTED_ABS_SAMPLE);
+            }
+        }
+    }
+}
+
+/// `reset()` must fully clear DSP state. Using only deterministic modes (no
+/// internal noise/RNG, which is intentionally free-running), the same input
+/// rendered before and after a reset must be bit-identical — proof that no
+/// delay/filter/LFO residue leaks across transport stops, preset changes, or
+/// project reloads.
+#[test]
+fn processor_reset_yields_deterministic_output() {
+    let params = engaged_params(
+        CharacterMode::Drive,
+        MovementMode::Vibrato,
+        DiffusionMode::Cascade,
+        TextureMode::Filter,
+    );
+    let meters = Meters::default();
+    let mut processor = Processor::default();
+    processor.prepare(TEST_SAMPLE_RATE);
+
+    let render = |processor: &mut Processor| {
+        params.reset_smoothers();
+        processor.reset(false);
+        let samples = (0.4 * TEST_SAMPLE_RATE) as usize;
+        let mut audio = AuditSignal::WhiteNoise.render(samples, TEST_SAMPLE_RATE);
+        with_stereo_buffer(&mut audio, |buffer| {
+            processor.process_block(buffer, &params, &meters);
+        });
+        audio
+    };
+
+    let first = render(&mut processor);
+    let second = render(&mut processor);
+    assert_eq!(
+        first, second,
+        "reset() must fully clear state for deterministic recall"
+    );
+}

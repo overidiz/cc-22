@@ -16,8 +16,8 @@ use super::{
 };
 
 const EQ_DISPLAY_SAMPLE_RATE: f32 = 48_000.0;
-const EQ_DISPLAY_MIN_HZ: f32 = 10.0;
-const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
+pub(crate) const EQ_DISPLAY_MIN_HZ: f32 = 10.0;
+pub(crate) const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 240;
 const EQ_NODE_COUNT: usize = 5;
@@ -72,6 +72,7 @@ pub(crate) fn eq_workbench(
     selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
     advanced_open: &mut bool,
+    spectrum: &[f32],
     colors: ModuleColors,
     theme: Theme,
     available_width: f32,
@@ -113,7 +114,15 @@ pub(crate) fn eq_workbench(
                     ui.add_space(4.0);
                     let eq_params =
                         selected_eq_params(params, *selected_eq_target, *selected_eq_position);
-                    eq_body(ui, setter, eq_params, selected_eq_band, colors, theme);
+                    eq_body(
+                        ui,
+                        setter,
+                        eq_params,
+                        selected_eq_band,
+                        spectrum,
+                        colors,
+                        theme,
+                    );
                 });
         },
     );
@@ -536,6 +545,7 @@ fn eq_canvas(
     setter: &ParamSetter<'_>,
     params: &dyn EqParamRefs,
     selected_eq_band: &mut EqBandSelection,
+    spectrum: &[f32],
     colors: ModuleColors,
     theme: Theme,
     canvas_width: f32,
@@ -657,6 +667,33 @@ fn eq_canvas(
                 Color32::from_rgb(128, 118, 104)
             },
         );
+    }
+
+    // Input spectrum overlay: a soft, signal-following analyzer drawn behind the
+    // curve so the EQ shape stays the focus. Columns are log-spaced to line up
+    // with the frequency axis; heights come pre-smoothed from the UI thread.
+    if spectrum.len() >= 2 {
+        let cols = spectrum.len();
+        let spectrum_fill = Color32::from_rgba_unmultiplied(96, 120, 138, 46);
+        let spectrum_edge = Color32::from_rgba_unmultiplied(120, 150, 170, 96);
+        let base_y = plot_rect.bottom();
+        let plot_h = plot_rect.height();
+        let mut prev: Option<Pos2> = None;
+        for (c, mag) in spectrum.iter().enumerate() {
+            let t = c as f32 / (cols - 1) as f32;
+            let x = plot_rect.left() + plot_rect.width() * t;
+            let y = base_y - mag.clamp(0.0, 1.0) * plot_h;
+            let top = Pos2::new(x, y);
+            if let Some(p) = prev {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![p, top, Pos2::new(top.x, base_y), Pos2::new(p.x, base_y)],
+                    spectrum_fill,
+                    Stroke::NONE,
+                ));
+                painter.line_segment([p, top], Stroke::new(1.0, spectrum_edge));
+            }
+            prev = Some(top);
+        }
     }
 
     let eq_response = EqDisplayResponse::from_params(params, eq_active(params));
@@ -871,6 +908,7 @@ fn eq_body(
     setter: &ParamSetter<'_>,
     params: &dyn EqParamRefs,
     selected_eq_band: &mut EqBandSelection,
+    spectrum: &[f32],
     colors: ModuleColors,
     theme: Theme,
 ) {
@@ -884,6 +922,7 @@ fn eq_body(
         setter,
         params,
         selected_eq_band,
+        spectrum,
         colors,
         theme,
         canvas_width,

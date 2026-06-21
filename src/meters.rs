@@ -1,14 +1,38 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 const CLIP_THRESHOLD: f32 = 0.999;
 const MAX_METER_PEAK: f32 = 4.0;
 
-#[derive(Debug, Default)]
+/// Length of the lock-free analyzer capture ring. Power of two so the index can
+/// wrap with a cheap bit-mask. At 48 kHz this holds ~43 ms of input, giving the
+/// spectrum display ~23 Hz bins — enough low-end resolution for an EQ overlay.
+pub const ANALYZER_FFT_SIZE: usize = 2048;
+
+#[derive(Debug)]
 pub struct Meters {
     input_peak: AtomicU32,
     output_peak: AtomicU32,
     input_clip_events: AtomicU32,
     output_clip_events: AtomicU32,
+    /// Recent input samples (f32 bits) written by the audio thread, read by the
+    /// UI thread. Relaxed atomics only: a torn snapshot is harmless for a meter.
+    analyzer_ring: [AtomicU32; ANALYZER_FFT_SIZE],
+    analyzer_write: AtomicUsize,
+    analyzer_sample_rate: AtomicU32,
+}
+
+impl Default for Meters {
+    fn default() -> Self {
+        Self {
+            input_peak: AtomicU32::new(0),
+            output_peak: AtomicU32::new(0),
+            input_clip_events: AtomicU32::new(0),
+            output_clip_events: AtomicU32::new(0),
+            analyzer_ring: std::array::from_fn(|_| AtomicU32::new(0)),
+            analyzer_write: AtomicUsize::new(0),
+            analyzer_sample_rate: AtomicU32::new(44_100.0_f32.to_bits()),
+        }
+    }
 }
 
 impl Meters {
@@ -39,6 +63,39 @@ impl Meters {
 
     pub fn output_clip_events(&self) -> u32 {
         self.output_clip_events.load(Ordering::Acquire)
+    }
+
+    /// Audio thread: record the host sample rate so the UI can map FFT bins to Hz.
+    pub fn set_analyzer_sample_rate(&self, sample_rate: f32) {
+        self.analyzer_sample_rate
+            .store(sample_rate.max(1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn analyzer_sample_rate(&self) -> f32 {
+        let sr = f32::from_bits(self.analyzer_sample_rate.load(Ordering::Relaxed));
+        if sr.is_finite() && sr > 0.0 {
+            sr
+        } else {
+            44_100.0
+        }
+    }
+
+    /// Audio thread: push one input sample into the capture ring. Allocation-free
+    /// and lock-free — a single relaxed store plus a wrapping counter increment.
+    pub fn push_analyzer_sample(&self, sample: f32) {
+        let index = self.analyzer_write.fetch_add(1, Ordering::Relaxed) & (ANALYZER_FFT_SIZE - 1);
+        let value = if sample.is_finite() { sample } else { 0.0 };
+        self.analyzer_ring[index].store(value.to_bits(), Ordering::Relaxed);
+    }
+
+    /// UI thread: copy the most recent `ANALYZER_FFT_SIZE` samples in chronological
+    /// order (oldest first) into `out`.
+    pub fn analyzer_snapshot(&self, out: &mut [f32; ANALYZER_FFT_SIZE]) {
+        let write = self.analyzer_write.load(Ordering::Relaxed);
+        for (k, slot) in out.iter_mut().enumerate() {
+            let index = (write + k) & (ANALYZER_FFT_SIZE - 1);
+            *slot = f32::from_bits(self.analyzer_ring[index].load(Ordering::Relaxed));
+        }
     }
 
     fn publish_input_peak(&self, peak: f32) {

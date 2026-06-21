@@ -1,8 +1,11 @@
 use crate::meters::Meters;
 
+use super::spectrum::SpectrumState;
+
 impl Default for UiState {
     fn default() -> Self {
         Self {
+            spectrum: SpectrumState::default(),
             selected_preset: 0,
             random_seed: 0,
             selected_eq_target: EqTargetSelection::Global,
@@ -25,6 +28,7 @@ impl Default for UiState {
 }
 
 pub(crate) struct UiState {
+    pub(crate) spectrum: SpectrumState,
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
     pub(crate) selected_eq_target: EqTargetSelection,

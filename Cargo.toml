@@ -1,9 +1,11 @@
 [package]
 name = "cc_22"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Rafa Audio"]
-license = "MIT"
+description = "CC-22 — a boutique modular multi-FX plugin (Character, Movement, Diffusion, Texture)."
+repository = "https://github.com/overidiz/cc-22"
+license-file = "EULA.md"
 
 [workspace]
 members = [".", "xtask"]

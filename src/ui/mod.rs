@@ -13,6 +13,7 @@ mod meters;
 pub(crate) mod module_card;
 mod preset_bar;
 mod signal_flow;
+mod spectrum;
 mod theme;
 mod top_bar;
 mod widgets;
@@ -71,6 +72,12 @@ pub fn create_editor(
                                 center_modules(ui, setter, state, &params, look);
                                 signal_chain_row(ui, &params, colors, theme);
                                 let eq_width = ui.available_width();
+                                state.spectrum.update(
+                                    &meters,
+                                    eq_view::EQ_DISPLAY_MIN_HZ,
+                                    eq_view::EQ_DISPLAY_MAX_HZ,
+                                );
+                                let spectrum_columns = *state.spectrum.columns();
                                 eq_workbench(
                                     ui,
                                     setter,
@@ -79,6 +86,7 @@ pub fn create_editor(
                                     &mut state.selected_eq_position,
                                     &mut state.selected_eq_band,
                                     &mut state.eq_advanced_open,
+                                    &spectrum_columns,
                                     colors,
                                     theme,
                                     eq_width,
