@@ -21,6 +21,13 @@ path = "src/main.rs"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f", features = ["standalone"] }
 nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "f36931f" }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_Foundation",
+] }
+
 [build-dependencies]
 winresource = "0.1"
 
