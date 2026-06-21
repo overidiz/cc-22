@@ -674,8 +674,10 @@ fn eq_canvas(
     // with the frequency axis; heights come pre-smoothed from the UI thread.
     if spectrum.len() >= 2 {
         let cols = spectrum.len();
-        let spectrum_fill = Color32::from_rgba_unmultiplied(96, 120, 138, 46);
-        let spectrum_edge = Color32::from_rgba_unmultiplied(120, 150, 170, 96);
+        // Keep this a faint, translucent wash so it never veils the curve/grid:
+        // a low-alpha fill and a thin soft top line, not a solid block.
+        let spectrum_fill = Color32::from_rgba_unmultiplied(112, 134, 152, 20);
+        let spectrum_edge = Color32::from_rgba_unmultiplied(118, 146, 168, 55);
         let base_y = plot_rect.bottom();
         let plot_h = plot_rect.height();
         let mut prev: Option<Pos2> = None;
@@ -685,12 +687,15 @@ fn eq_canvas(
             let y = base_y - mag.clamp(0.0, 1.0) * plot_h;
             let top = Pos2::new(x, y);
             if let Some(p) = prev {
-                painter.add(egui::Shape::convex_polygon(
-                    vec![p, top, Pos2::new(top.x, base_y), Pos2::new(p.x, base_y)],
-                    spectrum_fill,
-                    Stroke::NONE,
-                ));
-                painter.line_segment([p, top], Stroke::new(1.0, spectrum_edge));
+                // Skip near-silent columns so the floor stays perfectly clean.
+                if (base_y - top.y) > 0.5 || (base_y - p.y) > 0.5 {
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![p, top, Pos2::new(top.x, base_y), Pos2::new(p.x, base_y)],
+                        spectrum_fill,
+                        Stroke::NONE,
+                    ));
+                    painter.line_segment([p, top], Stroke::new(0.8, spectrum_edge));
+                }
             }
             prev = Some(top);
         }
