@@ -250,10 +250,29 @@ pub(crate) fn preset_selector_with_id(
                 .font(FontId::monospace(10.0))
                 .color(theme.muted_dark),
         );
+        // The global theme paints windows/widgets near-black with dark text,
+        // which left the preset combo (button + popup) invisible. Give this combo
+        // a light "paper" surface locally so the dark text reads. `weak_bg_fill`
+        // is what the ComboBox button uses; `window_fill` is the popup frame.
+        {
+            let visuals = &mut ui.style_mut().visuals;
+            visuals.window_fill = theme.paper;
+            visuals.window_stroke = Stroke::new(1.0, theme.card_edge);
+            visuals.widgets.inactive.weak_bg_fill = theme.paper;
+            visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(250, 246, 235);
+            visuals.widgets.active.weak_bg_fill = Color32::from_rgb(226, 220, 207);
+        }
         egui::ComboBox::from_id_salt(id)
             .selected_text(presets[state.selected_preset].name)
             .width(width)
             .show_ui(ui, |ui| {
+                // Inside the popup: dark text on the light frame, with a tinted
+                // (not dark) highlight so the selected/hovered row stays readable.
+                let visuals = &mut ui.style_mut().visuals;
+                visuals.override_text_color = Some(theme.text_dark);
+                visuals.selection.bg_fill = Color32::from_rgb(214, 206, 190);
+                visuals.selection.stroke = Stroke::new(1.0, theme.card_edge);
+                visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(232, 226, 214);
                 for (index, preset) in presets.iter().enumerate() {
                     if ui
                         .selectable_label(index == state.selected_preset, preset.name)
