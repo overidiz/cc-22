@@ -234,7 +234,7 @@ impl ModuleEqBand {
 pub const INTERNAL_PRESETS: [InternalPreset; 27] = [
     InternalPreset {
         id: PresetId::WarmTapeChorus,
-        name: "Warm Tape Chorus",
+        name: "Warm Reel Drift",
         values: PresetValues {
             character: CharacterPreset {
                 mode: CharacterMode::Drive,
@@ -542,7 +542,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 27] = [
     },
     InternalPreset {
         id: PresetId::CleanWiden,
-        name: "Clean Widen",
+        name: "Crystal Widen",
         values: PresetValues {
             character: CharacterPreset {
                 mode: CharacterMode::Sweet,
@@ -850,7 +850,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 27] = [
     },
     InternalPreset {
         id: PresetId::TapeReels,
-        name: "Tape Reels",
+        name: "Dub Reels",
         values: PresetValues {
             character: CharacterPreset {
                 mode: CharacterMode::Sweet,
@@ -1004,7 +1004,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 27] = [
     },
     InternalPreset {
         id: PresetId::HowlingTapeLead,
-        name: "Howling Tape Lead",
+        name: "Howling Lead",
         values: PresetValues {
             character: CharacterPreset {
                 mode: CharacterMode::Howl,
@@ -1756,7 +1756,7 @@ pub const INTERNAL_PRESETS: [InternalPreset; 27] = [
     },
     InternalPreset {
         id: PresetId::DiffusionCleanRepeats,
-        name: "Diffusion Clean Repeats",
+        name: "Diffusion Glass Repeats",
         values: PresetValues {
             character: CharacterPreset {
                 mode: CharacterMode::Sweet,
@@ -2689,11 +2689,11 @@ mod tests {
         let presets = internal_presets();
 
         assert_eq!(presets.len(), 27);
-        assert_eq!(presets[0].name, "Warm Tape Chorus");
-        assert_eq!(presets[4].name, "Clean Widen");
+        assert_eq!(presets[0].name, "Warm Reel Drift");
+        assert_eq!(presets[4].name, "Crystal Widen");
         assert_eq!(presets[5].name, "Sweet Console");
         assert_eq!(presets[9].name, "Interference Swell");
-        assert_eq!(presets[10].name, "Howling Tape Lead");
+        assert_eq!(presets[10].name, "Howling Lead");
         assert_eq!(presets[14].name, "Soft Swell Space");
         assert_eq!(presets[16].name, "Global Tone Polish");
         assert_eq!(presets[21].name, "Full Chain Master");
@@ -2721,6 +2721,36 @@ mod tests {
             assert!(values.character.mix <= 0.85);
             assert!(values.input_gain_db <= 0.0);
             assert!(values.output_gain_db <= 0.0);
+        }
+    }
+
+    #[test]
+    fn all_presets_have_safe_gain_staging_and_feedback() {
+        for preset in internal_presets() {
+            let v = preset.values;
+            let name = preset.name;
+            // Output never boosts into clipping territory.
+            assert!(
+                (-24.0..=0.0).contains(&v.output_gain_db),
+                "{name}: output_gain_db {} outside safe range",
+                v.output_gain_db
+            );
+            assert!(
+                (-24.0..=6.0).contains(&v.character.output_trim_db),
+                "{name}: character output_trim_db {} outside safe range",
+                v.character.output_trim_db
+            );
+            // Every feedback path stays safely below unity (no runaway).
+            assert!(
+                (0.0..0.95).contains(&v.movement.feedback),
+                "{name}: movement feedback {} is dangerous",
+                v.movement.feedback
+            );
+            assert!(
+                (0.0..0.95).contains(&v.diffusion.feedback),
+                "{name}: diffusion feedback {} is dangerous",
+                v.diffusion.feedback
+            );
         }
     }
 

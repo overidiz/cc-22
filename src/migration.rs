@@ -254,4 +254,49 @@ mod tests {
             Some(ParamValue::I32(3))
         ));
     }
+
+    #[test]
+    fn migration_preserves_chain_order_and_eq_params() {
+        // A realistic saved state: a removed mode that must migrate, alongside
+        // chain-order slots and EQ parameters that must survive untouched.
+        let mut params = BTreeMap::new();
+        params.insert(
+            "character_mode".to_string(),
+            ParamValue::String("clean".to_string()),
+        );
+        params.insert(
+            "chain_s0".to_string(),
+            ParamValue::String("texture".to_string()),
+        );
+        params.insert(
+            "chain_s1".to_string(),
+            ParamValue::String("character".to_string()),
+        );
+        params.insert("global_pre_eq_b1_gain".to_string(), ParamValue::F32(-4.5));
+        params.insert(
+            "texture_post_eq_b3_freq".to_string(),
+            ParamValue::F32(2_200.0),
+        );
+        let mut state = PluginState {
+            version: "old".to_string(),
+            params,
+            fields: BTreeMap::new(),
+        };
+
+        migrate_legacy_state(&mut state);
+
+        // Removed mode is migrated...
+        assert_eq!(mode_of(&state, "character_mode").as_deref(), Some("sweet"));
+        // ...while chain order and EQ params pass through byte-for-byte.
+        assert_eq!(mode_of(&state, "chain_s0").as_deref(), Some("texture"));
+        assert_eq!(mode_of(&state, "chain_s1").as_deref(), Some("character"));
+        assert!(matches!(
+            state.params.get("global_pre_eq_b1_gain"),
+            Some(ParamValue::F32(g)) if (*g - (-4.5)).abs() < 1e-6
+        ));
+        assert!(matches!(
+            state.params.get("texture_post_eq_b3_freq"),
+            Some(ParamValue::F32(f)) if (*f - 2_200.0).abs() < 1e-3
+        ));
+    }
 }
