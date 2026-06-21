@@ -12,14 +12,14 @@ use crate::{
 use super::{
     meters::{EqBandSelection, EqPositionSelection, EqTargetSelection},
     theme::{ModuleColors, Theme},
-    widgets::{mini_slider, set_param, value_string},
+    widgets::set_param,
 };
 
 const EQ_DISPLAY_SAMPLE_RATE: f32 = 48_000.0;
 const EQ_DISPLAY_MIN_HZ: f32 = 10.0;
 const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
-const EQ_CURVE_POINTS: usize = 144;
+const EQ_CURVE_POINTS: usize = 240;
 const EQ_NODE_COUNT: usize = 5;
 pub(crate) const EQ_WORKBENCH_HEIGHT: f32 = 180.0;
 const EQ_CANVAS_HEIGHT: f32 = 128.0;
@@ -623,7 +623,9 @@ fn eq_canvas(
     let gain_labels = [
         (12.0, "+12"),
         (6.0, "+6"),
+        (3.0, "+3"),
         (0.0, "0"),
+        (-3.0, "-3"),
         (-6.0, "-6"),
         (-12.0, "-12"),
     ];
@@ -872,204 +874,20 @@ fn eq_body(
     colors: ModuleColors,
     theme: Theme,
 ) {
-    let width = ui.available_width().max(0.0);
-    let gap = 8.0;
-    let inspector_width = (width * 0.22)
-        .clamp(178.0, 220.0)
-        .min((width - gap).max(0.0));
-    let canvas_width = (width - inspector_width - gap).max(0.0);
-
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        eq_canvas(
-            ui,
-            setter,
-            params,
-            selected_eq_band,
-            colors,
-            theme,
-            canvas_width,
-        );
-        eq_inspector(
-            ui,
-            setter,
-            params,
-            *selected_eq_band,
-            colors,
-            theme,
-            inspector_width,
-        );
-    });
-}
-
-fn eq_inspector(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    params: &dyn EqParamRefs,
-    band: EqBandSelection,
-    colors: ModuleColors,
-    theme: Theme,
-    width: f32,
-) {
-    let accent = eq_band_color(band, colors);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, EQ_CANVAS_HEIGHT), Sense::hover());
-    ui.scope_builder(
-        UiBuilder::new()
-            .max_rect(rect)
-            .layout(egui::Layout::top_down(Align::Min)),
-        |ui| {
-            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
-            ui.spacing_mut().item_spacing.y = 4.0;
-            ui.label(
-                RichText::new(eq_band_name(band))
-                    .font(FontId::monospace(10.0))
-                    .strong()
-                    .color(theme.text_dark),
-            );
-            ui.label(
-                RichText::new(eq_band_summary(params, band))
-                    .font(FontId::monospace(8.2))
-                    .strong()
-                    .color(theme.muted_dark),
-            );
-            ui.add_space(2.0);
-            let band_index = band.index();
-            eq_band_enable_button(ui, setter, params.band_enabled(band_index), accent, theme);
-            eq_band_type_buttons(ui, setter, params.band_type(band_index), accent, theme);
-
-            let band_type = params.band_type(band_index).value();
-            if band_type != EqBandType::Off && params.band_enabled(band_index).value() {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let count = 1
-                        + usize::from(eq_type_uses_gain(band_type))
-                        + usize::from(eq_type_uses_q(band_type));
-                    let control_width = ((ui.available_width()
-                        - 6.0 * (count.saturating_sub(1)) as f32)
-                        / count as f32)
-                        .max(42.0);
-                    for (param, label) in [
-                        (Some(params.band_frequency(band_index)), "FREQ"),
-                        (
-                            eq_type_uses_gain(band_type).then(|| params.band_gain(band_index)),
-                            "GAIN",
-                        ),
-                        (
-                            eq_type_uses_q(band_type).then(|| params.band_q(band_index)),
-                            "Q",
-                        ),
-                    ] {
-                        if let Some(param) = param {
-                            ui.allocate_ui(Vec2::new(control_width, 32.0), |ui| {
-                                eq_inspector_slider(ui, setter, param, label, accent, theme);
-                            });
-                        }
-                    }
-                });
-            }
-        },
+    // The curve is the whole instrument now: no side inspector / knob column.
+    // Every parameter is edited directly on the graph — drag a node for
+    // frequency + gain, scroll on it for Q, right-click for the band type
+    // (Off disables it), and double-click to reset the band.
+    let canvas_width = ui.available_width().max(0.0);
+    eq_canvas(
+        ui,
+        setter,
+        params,
+        selected_eq_band,
+        colors,
+        theme,
+        canvas_width,
     );
-}
-
-fn eq_band_enable_button(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &BoolParam,
-    accent: Color32,
-    theme: Theme,
-) {
-    let enabled = param.value();
-    let label = if enabled { "ENABLED" } else { "DISABLED" };
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 15.0), Sense::click());
-    if response.clicked() {
-        set_param(setter, param, !enabled);
-    }
-    let fill = if enabled {
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 58)
-    } else {
-        Color32::from_rgb(228, 222, 212)
-    };
-    ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(5),
-        Stroke::new(1.0, if enabled { accent } else { theme.card_edge }),
-        StrokeKind::Inside,
-    );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        FontId::monospace(8.0),
-        if enabled {
-            theme.text_dark
-        } else {
-            theme.muted_dark
-        },
-    );
-}
-
-fn eq_band_type_buttons(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &EnumParam<EqBandType>,
-    accent: Color32,
-    theme: Theme,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
-        for band_type in [
-            EqBandType::Off,
-            EqBandType::Bell,
-            EqBandType::LowShelf,
-            EqBandType::HighShelf,
-            EqBandType::HighPass,
-            EqBandType::LowPass,
-        ] {
-            let label = eq_band_type_label(band_type);
-            let width = if matches!(band_type, EqBandType::LowShelf | EqBandType::HighShelf) {
-                22.0
-            } else {
-                20.0
-            };
-            let active = param.value() == band_type;
-            let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 15.0), Sense::click());
-            if response.clicked() {
-                set_param(setter, param, band_type);
-            }
-            let fill = if active {
-                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 220)
-            } else if response.hovered() {
-                Color32::from_rgb(236, 231, 221)
-            } else {
-                Color32::from_rgb(226, 220, 210)
-            };
-            ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                label,
-                FontId::monospace(7.2),
-                if active {
-                    Color32::WHITE
-                } else {
-                    theme.text_dark
-                },
-            );
-        }
-    });
-}
-
-fn eq_inspector_slider(
-    ui: &mut egui::Ui,
-    setter: &ParamSetter<'_>,
-    param: &FloatParam,
-    label: &'static str,
-    accent: Color32,
-    theme: Theme,
-) {
-    mini_slider(ui, setter, param, label, accent, theme);
 }
 
 fn eq_band_tab_label(band: EqBandSelection) -> &'static str {
@@ -1079,69 +897,6 @@ fn eq_band_tab_label(band: EqBandSelection) -> &'static str {
         EqBandSelection::Band3 => "B3",
         EqBandSelection::Band4 => "B4",
         EqBandSelection::Band5 => "B5",
-    }
-}
-
-fn eq_band_name(band: EqBandSelection) -> &'static str {
-    match band {
-        EqBandSelection::Band1 => "BAND 1",
-        EqBandSelection::Band2 => "BAND 2",
-        EqBandSelection::Band3 => "BAND 3",
-        EqBandSelection::Band4 => "BAND 4",
-        EqBandSelection::Band5 => "BAND 5",
-    }
-}
-
-fn eq_band_summary(params: &dyn EqParamRefs, band: EqBandSelection) -> String {
-    let index = band.index();
-    let band_type = params.band_type(index).value();
-    if !params.band_enabled(index).value() || band_type == EqBandType::Off {
-        return format!(
-            "{} / {}",
-            eq_band_type_label(band_type),
-            value_string(params.band_frequency(index))
-        );
-    }
-
-    if eq_type_uses_gain(band_type) && eq_type_uses_q(band_type) {
-        format!(
-            "{} / {} / {} / Q {}",
-            eq_band_type_label(band_type),
-            value_string(params.band_frequency(index)),
-            value_string(params.band_gain(index)),
-            value_string(params.band_q(index))
-        )
-    } else if eq_type_uses_gain(band_type) {
-        format!(
-            "{} / {} / {}",
-            eq_band_type_label(band_type),
-            value_string(params.band_frequency(index)),
-            value_string(params.band_gain(index))
-        )
-    } else if eq_type_uses_q(band_type) {
-        format!(
-            "{} / {} / Q {}",
-            eq_band_type_label(band_type),
-            value_string(params.band_frequency(index)),
-            value_string(params.band_q(index))
-        )
-    } else {
-        format!(
-            "{} / {}",
-            eq_band_type_label(band_type),
-            value_string(params.band_frequency(index))
-        )
-    }
-}
-
-fn eq_band_type_label(band_type: EqBandType) -> &'static str {
-    match band_type {
-        EqBandType::Off => "OFF",
-        EqBandType::Bell => "BEL",
-        EqBandType::LowShelf => "LS",
-        EqBandType::HighShelf => "HS",
-        EqBandType::HighPass => "HP",
-        EqBandType::LowPass => "LP",
     }
 }
 
