@@ -16,10 +16,17 @@ use dsp::Processor;
 use meters::Meters;
 use params::Cc22Params;
 
+/// Reported processing tail in seconds. The diffusion/delay modes (Reels, Space,
+/// Reverse, Collage, Cascade) keep ringing after input stops, so the host must be
+/// told to keep the plugin alive long enough that those tails are never cut off.
+/// Feedback is clamped below unity, so everything has decayed well within this.
+const TAIL_SECONDS: f32 = 6.0;
+
 pub struct Cc22 {
     params: Arc<Cc22Params>,
     meters: Arc<Meters>,
     processor: Processor,
+    sample_rate: f32,
 }
 
 impl Default for Cc22 {
@@ -28,6 +35,7 @@ impl Default for Cc22 {
             params: Arc::new(Cc22Params::default()),
             meters: Arc::new(Meters::default()),
             processor: Processor::default(),
+            sample_rate: 44_100.0,
         }
     }
 }
@@ -101,6 +109,7 @@ impl Plugin for Cc22 {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
+        self.sample_rate = buffer_config.sample_rate;
         self.prepare(buffer_config.sample_rate);
         true
     }
@@ -119,7 +128,7 @@ impl Plugin for Cc22 {
         // feedback loops in the chain can't spike CPU on a decaying tail.
         let _denormals = FlushDenormals::new();
         self.process_block(buffer);
-        ProcessStatus::Normal
+        ProcessStatus::Tail((self.sample_rate * TAIL_SECONDS) as u32)
     }
 }
 

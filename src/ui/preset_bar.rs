@@ -140,10 +140,10 @@ fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: boo
                 .strong()
                 .color(Color32::from_rgb(245, 237, 218)),
         );
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 22.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(15.0, 32.0), Sense::hover());
         ui.painter()
             .rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(18, 15, 12));
-        let fill_bounds = rect.shrink2(Vec2::new(2.0, 2.0));
+        let fill_bounds = rect.shrink2(Vec2::new(2.5, 2.5));
         let fill_h = fill_bounds.height() * level.clamp(0.0, 1.0);
         let fill = egui::Rect::from_min_max(
             egui::pos2(fill_bounds.left(), fill_bounds.bottom() - fill_h),

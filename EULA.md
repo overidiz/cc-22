@@ -9,7 +9,7 @@
 
 **Product:** CC-22 audio effect plugin (VST3, CLAP, and standalone builds)
 **Licensor:** Rafa Audio ("the Licensor")
-**Contact:** [support email]
+**Contact:** rafatoledoreis@gmail.com
 **Effective date:** on purchase or installation, whichever is first.
 
 By downloading, installing, or using CC-22 ("the Software") you agree to this
@@ -53,8 +53,11 @@ This license terminates automatically if you breach it. On termination you must
 stop using and delete all copies of the Software.
 
 ## 8. Governing law
-This Agreement is governed by the laws of [jurisdiction], without regard to
-conflict-of-law rules.
+This Agreement is governed by the laws of Brazil, without regard to
+conflict-of-law rules. <!-- confirm jurisdiction with a lawyer before release -->
+
+## 9. Contact
+Support and licensing questions: rafatoledoreis@gmail.com
 
 ---
 

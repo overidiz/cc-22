@@ -1131,21 +1131,29 @@ fn primary_control_row(
         ui.allocate_space(Vec2::new(ui.available_width(), 68.0));
         return;
     }
-    ui.horizontal_centered(|ui| {
+    // Distribute the knobs across equal-width columns and centre each one, so a
+    // two-knob card (Character) spreads evenly across the card instead of
+    // bunching to the left and leaving a lopsided gap.
+    let cell_width = ui.available_width() / controls.len() as f32;
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for control in controls {
-            let response = colored_knob(
-                ui,
-                setter,
-                control.param,
-                control.label,
-                accent,
-                theme,
-                42.0,
-            );
-            if let Some(tip) = control.tip {
-                response.on_hover_text(tip);
-            }
+            ui.allocate_ui(Vec2::new(cell_width, 68.0), |ui| {
+                ui.vertical_centered(|ui| {
+                    let response = colored_knob(
+                        ui,
+                        setter,
+                        control.param,
+                        control.label,
+                        accent,
+                        theme,
+                        42.0,
+                    );
+                    if let Some(tip) = control.tip {
+                        response.on_hover_text(tip);
+                    }
+                });
+            });
         }
     });
 }

@@ -354,16 +354,25 @@ pub(crate) fn global_bypass_button(
     theme: Theme,
 ) {
     let bypassed = param.value();
+    // Explicit text colour (the default button colour rendered nearly invisible
+    // on the paper fill) plus a state-driven look so the global state reads at a
+    // glance: amber "BYPASSED" vs. a green-edged "GLOBAL ON".
+    let (label, fill, edge) = if bypassed {
+        ("BYPASSED", theme.warning, theme.text_dark)
+    } else {
+        ("GLOBAL ON", theme.paper, Color32::from_rgb(48, 198, 112))
+    };
     let response = ui.add(
         egui::Button::new(
-            RichText::new(if bypassed { "BYPASSED" } else { "GLOBAL ON" })
-                .font(FontId::monospace(FONT_SECONDARY))
-                .strong(),
+            RichText::new(label)
+                .font(FontId::monospace(FONT_SECONDARY + 1.5))
+                .strong()
+                .color(theme.text_dark),
         )
-        .fill(if bypassed { theme.warning } else { theme.paper })
-        .stroke(Stroke::new(1.0, theme.text_dark))
+        .fill(fill)
+        .stroke(Stroke::new(1.6, edge))
         .corner_radius(CornerRadius::same(10))
-        .min_size(Vec2::new(94.0, 30.0)),
+        .min_size(Vec2::new(104.0, 30.0)),
     );
     if response.clicked() {
         set_param(setter, param, !bypassed);
