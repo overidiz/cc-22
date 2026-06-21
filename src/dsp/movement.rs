@@ -3,9 +3,10 @@ use nih_plug::prelude::*;
 use crate::params::MovementParams;
 
 use super::{
-    chain::{sanitize_sample, ModuleCore},
+    chain::{sanitize_sample, soft_clip_sample, ModuleCore},
     dry_wet::DryWet,
     smoothing::LinearSmoother,
+    util::safe_feedback,
 };
 
 const MAX_CHANNELS: usize = 2;
@@ -181,7 +182,7 @@ impl Movement {
         let rate_hz = params.rate.smoothed.next().clamp(0.05, max_rate_hz);
         let depth = params.depth.smoothed.next().clamp(0.0, 1.0);
         let delay_ms = params.delay.smoothed.next().clamp(5.0, 30.0);
-        let feedback = params.feedback.smoothed.next().clamp(0.0, 0.58);
+        let feedback = safe_feedback(params.feedback.smoothed.next(), 0.58);
         let width = params.width.smoothed.next().clamp(0.0, 1.0);
         let phase_degrees = params.phase.smoothed.next().clamp(0.0, 180.0);
         let tone = params.tone.smoothed.next().clamp(0.0, 1.0);
@@ -274,48 +275,78 @@ impl Movement {
     fn process_vibrato(&mut self, channel: usize, sample: f32, frame: &MovementFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         let lfo = self.channel_lfo(index, frame);
+
+        // A modulated delay line is a pitch shifter: the LFO sweeping the read
+        // position is the vibrato. Depth is held to ±5 ms around an 8–12 ms base
+        // so even at full depth the detune stays musical, never absurd.
         let base_delay_ms = 8.0 + ((1.0 - frame.depth) * 4.0);
-        let mod_depth_ms = frame.depth * 6.0;
+        let mod_depth_ms = frame.depth * 5.0;
         let delay_ms = (base_delay_ms + (lfo * mod_depth_ms)).clamp(1.0, 30.0);
         let delay_samples = delay_ms * 0.001 * self.sample_rate;
-        let delayed = self.delay.process(index, sample, delay_samples, 0.0);
+
+        // Cubic-interpolated read keeps the sweep smooth and click-free.
+        let delayed = self.delay.process_cubic(index, sample, delay_samples);
 
         sanitize_sample(delayed * vibrato_level_compensation(frame.depth))
     }
 
     fn process_tremolo(&mut self, channel: usize, sample: f32, frame: &MovementFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
-        let lfo = if index == 0 {
+
+        // Width blends from a shared (mono) LFO to the phase-offset (stereo)
+        // LFO, so width sets *how much* stereo tremolo there is while the Phase
+        // param sets the L/R offset. At width 0 both channels pulse together.
+        let mono_lfo = frame.lfo_left;
+        let stereo_lfo = if index == 0 {
             frame.lfo_left
         } else {
             frame.lfo_right
         };
-        let modulation = ((lfo + 1.0) * 0.5).clamp(0.0, 1.0);
-        let gain = 1.0 - (frame.depth * modulation * 0.95);
+        let lfo = mono_lfo * (1.0 - frame.width) + stereo_lfo * frame.width;
 
-        sanitize_sample(sample * gain.clamp(0.05, 1.0))
+        // Amplitude-modulation law: a smooth depth dip that never fully kills the
+        // signal (floor 0.05), so deep settings read as musical tremolo rather
+        // than a hard gate.
+        let modulation = ((lfo + 1.0) * 0.5).clamp(0.0, 1.0);
+        let gain = (1.0 - frame.depth * modulation * 0.95).clamp(0.05, 1.0);
+
+        sanitize_sample(sample * gain)
     }
 
     fn process_doubler(&mut self, channel: usize, sample: f32, frame: &MovementFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
-        let lfo = self.channel_lfo(index, frame);
 
-        // Base delay: 8–35 ms from parameter
+        // Width-scaled motion. When centred both voices share the same LFO (so
+        // the mono sum stays coherent); as width opens, a fraction of the
+        // opposite channel's LFO is blended in, making the modulation irregular
+        // and decorrelated rather than a pure single-rate vibrato.
+        let base_lfo = self.channel_lfo(index, frame);
+        let cross_lfo = if index == 0 {
+            frame.lfo_right
+        } else {
+            frame.lfo_left
+        };
+        let lfo = base_lfo + (cross_lfo - base_lfo) * (frame.width * 0.25);
+
+        // Base delay: 8–35 ms — the "second take" time.
         let base_delay_ms = frame.delay_ms.clamp(8.0, 35.0);
 
-        // Very subtle pitch modulation via LFO: ±(depth * 2.0) ms
-        let mod_ms = lfo * frame.depth * 2.0;
+        // Subtle, slow micro-detune (±depth·1.6 ms) so it reads as a second
+        // performance, not an obvious vibrato.
+        let mod_ms = lfo * frame.depth * 1.6;
 
-        // Stereo offset: right channel gets extra delay based on width
+        // Right voice spreads behind the left with width, decorrelating the two
+        // delays so the stereo image widens and the mono sum lands on two comb
+        // frequencies instead of one deep notch.
         let stereo_extra = if index == 0 { 0.0 } else { frame.width * 11.0 };
 
         let delay_ms = (base_delay_ms + mod_ms + stereo_extra).clamp(5.0, 50.0);
         let delay_samples = delay_ms * 0.001 * self.sample_rate;
 
-        // No feedback — clean doubling without resonance
+        // No feedback — clean doubling without resonance.
         let delayed = self.delay.process(index, sample, delay_samples, 0.0);
 
-        // Tone shaping on the doubled signal
+        // Tone shaping on the doubled signal.
         let toned = self.apply_tone(index, delayed, frame.tone_alpha);
 
         sanitize_sample(toned * doubler_level_compensation(frame.depth, frame.width))
@@ -328,11 +359,13 @@ impl Movement {
         // Allpass coefficient: modulated by LFO, sweeping the notch frequency
         let a = (frame.depth * 0.78 * lfo).clamp(-0.92, 0.92);
 
-        // Feedback: wrap last stage output back to first stage input
-        let feedback = (frame.feedback * 0.88).clamp(0.0, 0.85);
+        // Feedback: wrap the last stage output back to the first stage input.
+        // The returned signal is soft-clipped so high feedback resonates richly
+        // without spiking into aggressive peaks (analog-style self-limiting).
+        let feedback = safe_feedback(frame.feedback * 0.85, 0.82);
         let feedback_signal = self.phaser_y_state[index][NUM_PHASER_STAGES - 1];
 
-        let mut input = sanitize_sample(sample + feedback_signal * feedback);
+        let mut input = sanitize_sample(sample + soft_clip_sample(feedback_signal * feedback));
 
         // Cascade of 6 first-order allpass filters
         for stage in 0..NUM_PHASER_STAGES {
@@ -375,24 +408,32 @@ impl Movement {
         buffer[write_pos] = sample;
         self.pitch_write_pos[index] = (write_pos + 1) % buf_len;
 
-        // Compute detune ratio from depth + LFO
+        // Detune ratio from depth + LFO. The amount is held to a musical
+        // ±70 cents (well under a semitone) so it reads as a microshift / pitch
+        // motion and the rotating read heads never have to race the write
+        // pointer fast enough to glitch.
         let cents = frame.depth * 70.0 * lfo;
         let read_speed = 2.0_f32.powf(cents / 1200.0);
 
-        // Read head A
+        // Two read heads, half a buffer apart, both read with modulo indexing so
+        // they can never fall outside the buffer.
         let ra = self.pitch_read_a[index];
         let da = dist_to_write(ra, write_pos, buf_len);
-        // Read head B = A shifted by half buffer
         let rb = (ra + buf_len as f32 / 2.0) % buf_len as f32;
         let db = dist_to_write(rb, write_pos, buf_len);
 
-        // Crossfade blend: prefer head farther from write position
-        let sum_dist = da + db;
-        let blend = if sum_dist > 0.01 { da / sum_dist } else { 0.5 };
+        // Raised-sine windows that vanish at the write pointer (distance → 0),
+        // so each head is silent exactly where it would otherwise read the
+        // write-pointer discontinuity — no click at the wrap. Because the two
+        // heads are half a buffer apart, the windows are sin and cos of the same
+        // angle, so their squares sum to one: an equal-power crossfade that never
+        // dips and never combs.
+        let wa = (core::f32::consts::PI * da / buf_len as f32).sin();
+        let wb = (core::f32::consts::PI * db / buf_len as f32).sin();
 
         let sa = read_interpolated_pitch(buffer, ra, buf_len);
         let sb = read_interpolated_pitch(buffer, rb, buf_len);
-        let wet = sanitize_sample(sa * blend + sb * (1.0 - blend));
+        let wet = sanitize_sample(sa * wa + sb * wb);
 
         // Advance read head at pitch-shifted rate
         self.pitch_read_a[index] = (ra + read_speed) % buf_len as f32;
@@ -493,8 +534,28 @@ impl StereoDelay {
             write_pos,
             delay_samples.clamp(1.0, len as f32 - 2.0),
         );
-        let feedback = feedback.clamp(0.0, 0.58);
+        let feedback = safe_feedback(feedback, 0.58);
         buffer[write_pos] = sanitize_sample(input + (delayed * feedback));
+        self.write_positions[channel] = (write_pos + 1) % len;
+
+        sanitize_sample(delayed)
+    }
+
+    /// Feedback-free read with cubic interpolation, for clean modulated delay.
+    fn process_cubic(&mut self, channel: usize, input: f32, delay_samples: f32) -> f32 {
+        let buffer = &mut self.buffers[channel];
+        if buffer.is_empty() {
+            return input;
+        }
+
+        let len = buffer.len();
+        let write_pos = self.write_positions[channel];
+        let delayed = read_cubic(
+            buffer,
+            write_pos,
+            delay_samples.clamp(1.0, len as f32 - 3.0),
+        );
+        buffer[write_pos] = sanitize_sample(input);
         self.write_positions[channel] = (write_pos + 1) % len;
 
         sanitize_sample(delayed)
@@ -513,6 +574,34 @@ fn read_interpolated(buffer: &[f32], write_pos: usize, delay_samples: f32) -> f3
     let index_b = (index_a + 1) % len;
     let frac = read_pos - read_pos.floor();
     sanitize_sample((buffer[index_a] * (1.0 - frac)) + (buffer[index_b] * frac))
+}
+
+/// 4-point Catmull-Rom (cubic) interpolated read. Higher quality than linear for
+/// a continuously modulated delay (Vibrato): less high-frequency loss and fewer
+/// gritty artifacts when the read position sweeps.
+#[inline]
+fn read_cubic(buffer: &[f32], write_pos: usize, delay_samples: f32) -> f32 {
+    let len = buffer.len();
+    let mut read_pos = write_pos as f32 - delay_samples;
+    while read_pos < 0.0 {
+        read_pos += len as f32;
+    }
+
+    let i1 = read_pos.floor() as usize % len;
+    let frac = read_pos - read_pos.floor();
+    let i0 = (i1 + len - 1) % len;
+    let i2 = (i1 + 1) % len;
+    let i3 = (i1 + 2) % len;
+
+    let y0 = buffer[i0];
+    let y1 = buffer[i1];
+    let y2 = buffer[i2];
+    let y3 = buffer[i3];
+
+    let a = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+    let b = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+    let c = -0.5 * y0 + 0.5 * y2;
+    sanitize_sample(((a * frac + b) * frac + c) * frac + y1)
 }
 
 #[inline]
@@ -673,16 +762,132 @@ mod tests {
         }
     }
 
+    fn vibrato_frame(depth: f32, width: f32, lfo_left: f32, lfo_right: f32) -> MovementFrame {
+        MovementFrame {
+            mode: MovementMode::Vibrato,
+            depth,
+            delay_ms: 16.0,
+            feedback: 0.0,
+            width,
+            mix: 1.0,
+            active_mix: 1.0,
+            lfo_left,
+            lfo_right,
+            tone_alpha: 1.0,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn vibrato_high_depth_sine_has_no_click() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut sig_phase = 0.0_f32;
+        let mut lfo_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..48_000 {
+            lfo_phase = (lfo_phase + 5.0 / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = vibrato_frame(1.0, 0.0, lfo, lfo);
+            sig_phase += 440.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.4;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "vibrato: NaN/inf");
+            peak = peak.max(output.abs());
+            if index > 4096 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(peak < 1.0, "vibrato peak should be controlled, {peak}");
+        assert!(
+            max_step < 0.15,
+            "vibrato should not click, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn vibrato_depth_automation_has_no_zipper() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut sig_phase = 0.0_f32;
+        let mut lfo_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..total {
+            let depth = index as f32 / (total - 1) as f32;
+            lfo_phase = (lfo_phase + 6.0 / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = vibrato_frame(depth, 0.0, lfo, lfo);
+            sig_phase += 330.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.35;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 4096 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.2,
+            "vibrato depth automation should not zipper, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn vibrato_stereo_phase_does_not_break_mono() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut sig_phase = 0.0_f32;
+        let mut lfo_phase = 0.0_f32;
+        let mut in_sq = 0.0_f64;
+        let mut mono_sq = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..8192 {
+            lfo_phase = (lfo_phase + 5.0 / 48_000.0).fract();
+            let left_lfo = (lfo_phase * tau).sin();
+            let right_lfo = ((lfo_phase + 0.25).fract() * tau).sin(); // 90° apart
+            let frame = vibrato_frame(0.6, 1.0, left_lfo, right_lfo);
+            sig_phase += 440.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.3;
+            let left = movement.process_sample_for_channel(0, input, &frame);
+            let right = movement.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            if index > 4096 {
+                let mono = (left + right) * 0.5;
+                in_sq += (input as f64) * (input as f64);
+                mono_sq += (mono as f64) * (mono as f64);
+                count += 1;
+            }
+        }
+        let in_rms = (in_sq / count as f64).sqrt() as f32;
+        let mono_rms = (mono_sq / count as f64).sqrt() as f32;
+        assert!(
+            mono_rms > in_rms * 0.4,
+            "vibrato stereo phase should not collapse mono (in {in_rms}, mono {mono_rms})"
+        );
+    }
+
     #[test]
     fn tremolo_modulates_level_without_pitch_delay() {
         let mut movement = Movement::default();
         movement.prepare(48_000.0);
+        // Full width so the stereo (phase-offset) LFO drives L and R apart.
         let frame = MovementFrame {
             mode: MovementMode::Tremolo,
             depth: 1.0,
             delay_ms: 16.0,
             feedback: 0.0,
-            width: 0.0,
+            width: 1.0,
             mix: 1.0,
             active_mix: 1.0,
             lfo_left: 1.0,
@@ -697,6 +902,146 @@ mod tests {
         assert!(left.is_finite());
         assert!(right.is_finite());
         assert!(left < right);
+    }
+
+    fn tremolo_frame(depth: f32, width: f32, lfo_left: f32, lfo_right: f32) -> MovementFrame {
+        MovementFrame {
+            mode: MovementMode::Tremolo,
+            depth,
+            delay_ms: 16.0,
+            feedback: 0.0,
+            width,
+            mix: 1.0,
+            active_mix: 1.0,
+            lfo_left,
+            lfo_right,
+            tone_alpha: 1.0,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn tremolo_square_max_depth_has_no_click() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let mut lfo_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..48_000 {
+            lfo_phase = (lfo_phase + 6.0 / 48_000.0).fract();
+            let lfo = square_smooth_lfo(lfo_phase);
+            let frame = tremolo_frame(1.0, 0.0, lfo, lfo);
+            // Steady input exposes the gain edges directly.
+            let output = movement.process_sample_for_channel(0, 0.5, &frame);
+            assert!(output.is_finite());
+            if index > 0 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.1,
+            "smoothed square tremolo should not click, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn tremolo_rate_automation_has_no_zipper() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut lfo_phase = 0.0_f32;
+        let mut sig_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..total {
+            let t = index as f32 / (total - 1) as f32;
+            let rate = 2.0 + t * 16.0; // 2 -> 18 Hz
+            lfo_phase = (lfo_phase + rate / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = tremolo_frame(0.7, 0.0, lfo, lfo);
+            sig_phase += 440.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.4;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 0 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.15,
+            "tremolo rate automation should not zipper, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn tremolo_mix_zero_dry_mix_one_tremolo() {
+        let mut dry_movement = Movement::default();
+        dry_movement.prepare(48_000.0);
+        let mut wet_movement = Movement::default();
+        wet_movement.prepare(48_000.0);
+
+        // Deep tremolo at its dip (lfo = 1.0 -> gain 0.05).
+        let mut dry_frame = tremolo_frame(0.8, 0.0, 1.0, 1.0);
+        dry_frame.mix = 0.0;
+        let wet_frame = tremolo_frame(0.8, 0.0, 1.0, 1.0);
+
+        let mut max_dry_diff = 0.0_f32;
+        let mut wet_diff = 0.0_f32;
+        for _ in 0..1024 {
+            let input = 0.4;
+            let dry = dry_movement.process_sample_for_channel(0, input, &dry_frame);
+            let wet = wet_movement.process_sample_for_channel(0, input, &wet_frame);
+            max_dry_diff = max_dry_diff.max((dry - input).abs());
+            wet_diff = wet_diff.max((wet - input).abs());
+        }
+        assert!(
+            max_dry_diff < 1e-4,
+            "tremolo mix 0 should be dry, {max_dry_diff}"
+        );
+        assert!(
+            wet_diff > 0.1,
+            "tremolo mix 1 should modulate level, {wet_diff}"
+        );
+    }
+
+    #[test]
+    fn tremolo_stereo_width_mono_sum_is_acceptable() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut lfo_phase = 0.0_f32;
+        let mut sig_phase = 0.0_f32;
+        let mut in_sq = 0.0_f64;
+        let mut mono_sq = 0.0_f64;
+        let mut count = 0u32;
+        for _ in 0..8192 {
+            lfo_phase = (lfo_phase + 5.0 / 48_000.0).fract();
+            let left_lfo = (lfo_phase * tau).sin();
+            let right_lfo = ((lfo_phase + 0.5).fract() * tau).sin(); // anti-phase
+            let frame = tremolo_frame(0.9, 1.0, left_lfo, right_lfo);
+            sig_phase += 440.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.3;
+            let left = movement.process_sample_for_channel(0, input, &frame);
+            let right = movement.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            let mono = (left + right) * 0.5;
+            in_sq += (input as f64) * (input as f64);
+            mono_sq += (mono as f64) * (mono as f64);
+            count += 1;
+        }
+        let in_rms = (in_sq / count as f64).sqrt() as f32;
+        let mono_rms = (mono_sq / count as f64).sqrt() as f32;
+        // Amplitude modulation can't phase-cancel, so the mono sum stays healthy.
+        assert!(
+            mono_rms > in_rms * 0.3,
+            "tremolo stereo width should keep mono sum acceptable (in {in_rms}, mono {mono_rms})"
+        );
     }
 
     fn doubler_frame(depth: f32, delay_ms: f32, width: f32, mix: f32) -> MovementFrame {
@@ -830,6 +1175,115 @@ mod tests {
         assert!(comp_max > 0.80 && comp_max < 1.0);
     }
 
+    #[test]
+    fn doubler_mono_sum_does_not_collapse() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        let frame = doubler_frame(0.3, 18.0, 1.0, 0.5); // wide, 50% blend
+
+        let mut phase = 0.0_f32;
+        let mut in_sq = 0.0_f64;
+        let mut mono_sq = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..8192 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let left = movement.process_sample_for_channel(0, input, &frame);
+            let right = movement.process_sample_for_channel(1, input, &frame);
+            if index > 2048 {
+                let mono = (left + right) * 0.5;
+                in_sq += (input as f64) * (input as f64);
+                mono_sq += (mono as f64) * (mono as f64);
+                count += 1;
+            }
+        }
+        let in_rms = (in_sq / count as f64).sqrt() as f32;
+        let mono_rms = (mono_sq / count as f64).sqrt() as f32;
+        assert!(
+            mono_rms > in_rms * 0.45,
+            "doubler mono sum should not collapse (in {in_rms}, mono {mono_rms})"
+        );
+    }
+
+    #[test]
+    fn doubler_sine_has_no_absurd_peaks() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        let frame = doubler_frame(1.0, 30.0, 1.0, 1.0);
+
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..8192 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let left = movement.process_sample_for_channel(0, input, &frame);
+            let right = movement.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            peak = peak.max(left.abs()).max(right.abs());
+        }
+        assert!(peak < 1.0, "doubler sine peak should be controlled, {peak}");
+    }
+
+    #[test]
+    fn doubler_mix_zero_dry_mix_one_wet() {
+        let mut dry_movement = Movement::default();
+        dry_movement.prepare(48_000.0);
+        let mut wet_movement = Movement::default();
+        wet_movement.prepare(48_000.0);
+        let dry_frame = doubler_frame(0.5, 18.0, 1.0, 0.0);
+        let wet_frame = doubler_frame(0.5, 18.0, 1.0, 1.0);
+
+        let mut phase = 0.0_f32;
+        let mut max_dry_diff = 0.0_f32;
+        let mut wet_diff = 0.0_f32;
+        for _ in 0..2048 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let dry = dry_movement.process_sample_for_channel(0, input, &dry_frame);
+            let wet = wet_movement.process_sample_for_channel(0, input, &wet_frame);
+            max_dry_diff = max_dry_diff.max((dry - input).abs());
+            wet_diff = wet_diff.max((wet - input).abs());
+        }
+        assert!(
+            max_dry_diff < 1e-4,
+            "doubler mix 0 should be dry, {max_dry_diff}"
+        );
+        assert!(
+            wet_diff > 0.001,
+            "doubler mix 1 should be processed, {wet_diff}"
+        );
+    }
+
+    #[test]
+    fn doubler_depth_delay_sweep_has_no_click() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let total = 48_000usize;
+        let mut phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..total {
+            let t = index as f32 / (total - 1) as f32;
+            let frame = doubler_frame(t, 8.0 + t * 27.0, 0.6, 1.0);
+            phase += 330.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.35;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "doubler sweep: NaN/inf");
+            peak = peak.max(output.abs());
+            if index > 0 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(peak < 1.0, "doubler sweep peak {peak}");
+        assert!(
+            max_step < 0.2,
+            "doubler sweep should not click, max step {max_step}"
+        );
+    }
+
     fn phaser_frame(depth: f32, feedback: f32, width: f32, mix: f32) -> MovementFrame {
         MovementFrame {
             mode: MovementMode::Phaser,
@@ -946,6 +1400,125 @@ mod tests {
         assert!((c0 - 1.0).abs() < 0.01);
     }
 
+    fn phaser_frame_lfo(
+        depth: f32,
+        feedback: f32,
+        width: f32,
+        mix: f32,
+        lfo_left: f32,
+        lfo_right: f32,
+    ) -> MovementFrame {
+        MovementFrame {
+            mode: MovementMode::Phaser,
+            depth,
+            delay_ms: 16.0,
+            feedback,
+            width,
+            mix,
+            active_mix: 1.0,
+            lfo_left,
+            lfo_right,
+            tone_alpha: 1.0,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn phaser_sine_sweep_has_no_nan() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut lfo_phase = 0.0_f32;
+        let mut sig_phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..48_000 {
+            lfo_phase = (lfo_phase + 1.0 / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = phaser_frame_lfo(0.8, 0.5, 1.0, 1.0, lfo, lfo);
+            sig_phase += 330.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.35;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "phaser sweep: NaN/inf");
+            assert!(output.abs() <= 8.0);
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "phaser sine sweep peak should be controlled, {peak}"
+        );
+    }
+
+    #[test]
+    fn phaser_rate_depth_sweep_has_no_click() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut lfo_phase = 0.0_f32;
+        let mut sig_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..total {
+            let t = index as f32 / (total - 1) as f32;
+            lfo_phase = (lfo_phase + (0.5 + t * 4.0) / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = phaser_frame_lfo(0.3 + t * 0.6, 0.4, 0.5, 1.0, lfo, lfo);
+            sig_phase += 220.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.35;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+            if index > 0 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(peak < 2.0, "phaser sweep peak {peak}");
+        assert!(
+            max_step < 0.2,
+            "phaser sweep should not click, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn phaser_mono_compatibility_is_acceptable() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut lfo_phase = 0.0_f32;
+        let mut sig_phase = 0.0_f32;
+        let mut in_sq = 0.0_f64;
+        let mut mono_sq = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..8192 {
+            lfo_phase = (lfo_phase + 1.0 / 48_000.0).fract();
+            let left_lfo = (lfo_phase * tau).sin();
+            let right_lfo = ((lfo_phase + 0.2).fract() * tau).sin();
+            let frame = phaser_frame_lfo(0.7, 0.4, 1.0, 0.5, left_lfo, right_lfo);
+            sig_phase += 440.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.3;
+            let left = movement.process_sample_for_channel(0, input, &frame);
+            let right = movement.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            if index > 2048 {
+                let mono = (left + right) * 0.5;
+                in_sq += (input as f64) * (input as f64);
+                mono_sq += (mono as f64) * (mono as f64);
+                count += 1;
+            }
+        }
+        let in_rms = (in_sq / count as f64).sqrt() as f32;
+        let mono_rms = (mono_sq / count as f64).sqrt() as f32;
+        assert!(
+            mono_rms > in_rms * 0.4,
+            "phaser mono compatibility should be acceptable (in {in_rms}, mono {mono_rms})"
+        );
+    }
+
     fn pitch_frame(depth: f32, width: f32, mix: f32) -> MovementFrame {
         MovementFrame {
             mode: MovementMode::Pitch,
@@ -1041,6 +1614,116 @@ mod tests {
         assert!(
             diff > 0.000_01 || (vb_out.abs() > 0.01 && pt_out.abs() > 0.01),
             "Pitch output should be active, vb={vb_out}, pt={pt_out}"
+        );
+    }
+
+    fn pitch_frame_lfo(depth: f32, width: f32, lfo_left: f32, lfo_right: f32) -> MovementFrame {
+        let mut frame = pitch_frame(depth, width, 1.0);
+        frame.lfo_left = lfo_left;
+        frame.lfo_right = lfo_right;
+        frame
+    }
+
+    #[test]
+    fn pitch_max_sine_440_has_no_nan() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut sig_phase = 0.0_f32;
+        let mut lfo_phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..48_000 {
+            lfo_phase = (lfo_phase + 4.0 / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = pitch_frame_lfo(1.0, 0.0, lfo, lfo);
+            sig_phase += 440.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.4;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "pitch max: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 1.5,
+            "pitch max sine peak should be controlled, {peak}"
+        );
+    }
+
+    #[test]
+    fn pitch_impulse_has_no_dangerous_peak() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        let frame = pitch_frame_lfo(0.8, 0.0, 0.5, 0.5);
+
+        let mut peak = 0.0_f32;
+        for index in 0..8192 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        assert!(peak < 1.5, "pitch impulse peak should be safe, got {peak}");
+    }
+
+    #[test]
+    fn pitch_read_head_wrap_has_no_strong_click() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        // Constant max detune makes read head A drift and lap the write pointer
+        // repeatedly, exercising the crossfade at every wrap.
+        let frame = pitch_frame_lfo(1.0, 0.0, 1.0, 1.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut sig_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..(48_000 * 2) {
+            sig_phase += 330.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.35;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 4096 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.2,
+            "pitch read-head wrap should not click strongly, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn pitch_automation_stays_finite_and_bounded() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut sig_phase = 0.0_f32;
+        let mut lfo_phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..total {
+            let depth = index as f32 / (total - 1) as f32;
+            lfo_phase = (lfo_phase + 3.0 / 48_000.0).fract();
+            let lfo = (lfo_phase * tau).sin();
+            let frame = pitch_frame_lfo(depth, 0.0, lfo, lfo);
+            sig_phase += 220.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.35;
+            let output = movement.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+            if index > 4096 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(peak < 1.5, "pitch automation peak {peak}");
+        assert!(
+            max_step < 0.2,
+            "pitch automation should not click, max step {max_step}"
         );
     }
 }

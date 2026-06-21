@@ -6,6 +6,7 @@ use super::{
     chain::{sanitize_sample, ModuleCore},
     dry_wet::DryWet,
     smoothing::LinearSmoother,
+    util::{equal_power_crossfade, one_pole_alpha, safe_feedback, smoothstep},
 };
 
 const MAX_CHANNELS: usize = 2;
@@ -229,7 +230,7 @@ impl Diffusion {
         let mode = params.mode.value();
         self.set_mode(mode);
         let time_ms = params.time.smoothed.next().clamp(1.0, 2_000.0);
-        let feedback = params.feedback.smoothed.next().clamp(0.0, 0.949);
+        let feedback = safe_feedback(params.feedback.smoothed.next(), 0.949);
         let size = params.size.smoothed.next().clamp(0.0, 1.0);
         let decay = params.decay.smoothed.next().clamp(0.0, 1.0);
         let pre_delay_ms = params.pre_delay.smoothed.next().clamp(0.0, 120.0);
@@ -300,13 +301,21 @@ impl Diffusion {
         let density = frame.size.clamp(0.0, 1.0);
         let decay = frame.decay.clamp(0.0, 1.0);
 
+        // Musical, non-harmonic tap spacing avoids a metallic flutter echo.
         let tap_ratios = [1.0, 1.42, 2.05, 3.15];
+        // Each tap decays relative to the first, shaping the echo envelope.
         let tap_gains = [
             0.65,
             0.65 * (1.0 - decay * 0.55),
             0.65 * (1.0 - decay * 0.75),
             0.65 * (1.0 - decay * 0.90),
         ];
+        // Normalize the tap sum by the total tap gain (capped at unity, never a
+        // boost) so layering taps raises density rather than peak level. This is
+        // headroom-safe even if every tap lines up, and keeps the perceived
+        // level steady across the decay range.
+        let gain_sum = tap_gains.iter().sum::<f32>().max(0.65);
+        let tap_norm = (1.25 / gain_sum).clamp(0.55, 1.0);
 
         let chan_offset = if index == 0 {
             -frame.stereo_offset * base_ms * 0.12
@@ -336,13 +345,13 @@ impl Diffusion {
             );
             sum += tap * tap_gains[i];
         }
-        let wet = sanitize_sample(sum);
+        let wet = sanitize_sample(sum * tap_norm);
 
         // Write input + feedback to buffer
         let buffer = &mut self.delay.buffers[index];
         buffer[write_pos] = sanitize_sample(sample);
 
-        let fb = frame.feedback.clamp(0.0, 0.80);
+        let fb = safe_feedback(frame.feedback, 0.80);
         let fb_filtered = self.delay.feedback_filter_state[index]
             + frame.tone_alpha * (wet - self.delay.feedback_filter_state[index]);
         self.delay.feedback_filter_state[index] = sanitize_sample(fb_filtered);
@@ -407,7 +416,7 @@ impl Diffusion {
         let wet = sanitize_sample(((colored + other) * 0.5 * (1.0 - width)) + colored * width);
 
         let feedback_gain =
-            frame.feedback.clamp(0.0, 0.94) * (0.65 + frame.decay.clamp(0.0, 1.0) * 0.25);
+            safe_feedback(frame.feedback, 0.94) * (0.65 + frame.decay.clamp(0.0, 1.0) * 0.25);
         self.delay.buffers[index][write_pos] = sanitize_sample(sample + colored * feedback_gain);
         self.delay.write_positions[index] = (write_pos + 1) % buf_len;
 
@@ -425,11 +434,13 @@ impl Diffusion {
         let feedback = space_reverb_feedback(frame.decay);
         let damping_alpha = space_damping_alpha(frame.damping);
 
-        // 6 comb filters — gentler modulation for smoother ambience
+        // 6 comb filters. A little more delay modulation than a plain Schroeder
+        // tank continuously detunes the comb resonances, breaking up the
+        // standing waves that would otherwise read as metallic ringing.
         let mut sum = 0.0;
         for (comb_index, delay_ms) in REVERB_COMB_DELAYS_MS[index].iter().enumerate() {
             let mod_phase = self.reverb.next_mod_phase(index, comb_index);
-            let mod_ms = mod_phase.sin() * REVERB_MOD_DEPTH_MS * (0.45 + frame.size * 0.55);
+            let mod_ms = mod_phase.sin() * REVERB_MOD_DEPTH_MS * (0.6 + frame.size * 0.9);
             let delay_samples = (*delay_ms + mod_ms) * 0.001 * self.sample_rate * size_scale;
             sum += self.reverb.combs[index][comb_index].process_comb(
                 reverb_input * 0.14,
@@ -439,14 +450,16 @@ impl Diffusion {
             );
         }
 
-        // 3 allpass diffusers
+        // 3 allpass diffusers. A higher diffusion coefficient packs the echoes
+        // tighter, smoothing the early reflections into a denser, less grainy
+        // ambience.
         let mut wet = sum * 0.14;
         for (allpass_index, delay_ms) in REVERB_ALLPASS_DELAYS_MS[index].iter().enumerate() {
             let delay_samples = *delay_ms * 0.001 * self.sample_rate * size_scale;
             wet = self.reverb.allpasses[index][allpass_index].process_allpass(
                 wet,
                 delay_samples,
-                0.55,
+                0.62,
             );
         }
 
@@ -483,8 +496,10 @@ impl Diffusion {
                 let fade_from_delay =
                     self.collage.fade_from_delay_samples[index].clamp(1.0, buf_len as f32 - 2.0);
                 let previous = read_interpolated(buffer, write_pos, fade_from_delay);
+                // Equal-power crossfade so the level stays constant when cutting
+                // between two decorrelated fragments — no mid-fade dip or click.
                 let amount = smoothstep(fade_pos as f32 / crossfade_len as f32);
-                linear_crossfade(previous, current, amount)
+                equal_power_crossfade(previous, current, amount)
             }
         };
 
@@ -742,13 +757,6 @@ fn linear_crossfade(dry: f32, wet: f32, amount: f32) -> f32 {
     sanitize_sample((dry * (1.0 - amount)) + (wet * amount))
 }
 
-#[inline]
-fn equal_power_crossfade(from: f32, to: f32, amount: f32) -> f32 {
-    let amount = amount.clamp(0.0, 1.0);
-    let a = amount * core::f32::consts::FRAC_PI_2;
-    sanitize_sample(from * a.cos() + to * a.sin())
-}
-
 impl Default for CollageState {
     fn default() -> Self {
         Self {
@@ -963,7 +971,7 @@ impl DelayLine {
         self.filter_state += damping_alpha * (delayed - self.filter_state);
         self.filter_state = sanitize_sample(self.filter_state);
         self.buffer[self.write_position] =
-            sanitize_sample(input + (self.filter_state * feedback.clamp(0.0, 0.92)));
+            sanitize_sample(input + (self.filter_state * safe_feedback(feedback, 0.92)));
         self.write_position = (self.write_position + 1) % len;
 
         self.filter_state
@@ -1100,8 +1108,7 @@ fn reels_feedback_color(
     let compressed = saturated * compression.clamp(0.55, 1.0);
 
     let hp_cutoff = 34.0 + decay * 52.0;
-    let hp_alpha =
-        (1.0 - (-core::f32::consts::TAU * hp_cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+    let hp_alpha = one_pole_alpha(hp_cutoff, sample_rate);
     *hp_state += hp_alpha * (compressed - *hp_state);
     let high_passed = sanitize_sample(compressed - *hp_state);
 
@@ -1109,8 +1116,7 @@ fn reels_feedback_color(
     let lp_cutoff =
         (1_150.0 + tone_brightness * 10_350.0) * (1.0 - damping * 0.44) * (1.0 - decay * 0.38);
     let lp_cutoff = lp_cutoff.clamp(580.0, 13_000.0);
-    let lp_alpha =
-        (1.0 - (-core::f32::consts::TAU * lp_cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+    let lp_alpha = one_pole_alpha(lp_cutoff, sample_rate);
     *lp_state += lp_alpha * (high_passed - *lp_state);
     let low_passed = sanitize_sample(*lp_state);
 
@@ -1127,7 +1133,13 @@ fn reels_tape_saturate(sample: f32, decay: f32) -> f32 {
     let drive = 1.0 + decay * 2.9;
     let bias = sample * sample * decay * 0.022;
     let driven = (sample + bias) * drive;
-    sanitize_sample(driven.tanh() / (drive * (1.0 + decay * 0.04)))
+    let saturated = driven.tanh() / (drive * (1.0 + decay * 0.04));
+    // Blend toward the clean signal at low decay so subtle echoes stay
+    // transparent, while heavy settings drive the full warm tape saturation.
+    // The blend collapses quickly, so the well-tuned high-decay feedback
+    // behaviour is essentially unchanged.
+    let clean_amount = (1.0 - decay) * (1.0 - decay) * 0.5;
+    sanitize_sample(sample * clean_amount + saturated * (1.0 - clean_amount))
 }
 
 fn reels_drift_next(
@@ -1261,8 +1273,7 @@ fn reverse_tone_filter(
     let decay = frame.decay.clamp(0.0, 1.0);
     let cutoff = (950.0 + tone * 12_000.0) * (1.0 - damping * 0.38) * (1.0 - decay * 0.22);
     let cutoff = cutoff.clamp(600.0, 13_500.0);
-    let alpha =
-        (1.0 - (-core::f32::consts::TAU * cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+    let alpha = one_pole_alpha(cutoff, sample_rate);
     *state = sanitize_sample(*state + alpha * (input - *state));
     *state
 }
@@ -1384,12 +1395,6 @@ fn collage_level_compensation(feedback: f32, decay: f32) -> f32 {
     (0.86 + decay * 0.10 - feedback * 0.12).clamp(0.68, 0.96)
 }
 
-#[inline]
-fn smoothstep(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1483,6 +1488,140 @@ mod tests {
         assert!(c > 0.70 && c < 1.0, "cascade comp={c}");
         let c0 = cascade_level_compensation(0.0, 0.0);
         assert!((c0 - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn cascade_impulse_taps_decrease() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = cascade_frame(60.0, 0.0, 0.5, 0.8); // no feedback, strong decay
+
+        let mut windows = [0.0_f32; 4];
+        for index in 0..16000 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let output = diffusion.process_sample_for_channel(0, input, &frame).abs();
+            let window = (index / 4000).min(3);
+            windows[window] = windows[window].max(output);
+        }
+        assert!(
+            windows[0] > 0.01,
+            "first taps should be audible, {windows:?}"
+        );
+        assert!(
+            windows[2] < windows[0],
+            "later taps should decay, {windows:?}"
+        );
+    }
+
+    #[test]
+    fn cascade_max_feedback_10s_does_not_explode() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = cascade_frame(120.0, 0.95, 0.6, 0.6);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..(48_000 * 10) {
+            phase += 110.0 / 48_000.0;
+            let input = if index < 4800 {
+                (phase * tau).sin() * 0.3
+            } else {
+                0.0
+            };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "cascade 10s feedback: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 4.0,
+            "cascade max feedback over 10s should not explode, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn cascade_time_sweep_has_no_strong_click() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..total {
+            let t = index as f32 / (total - 1) as f32;
+            let frame = cascade_frame(60.0 + t * 400.0, 0.3, 0.5, 0.5);
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 4096 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.3,
+            "cascade time sweep should not click strongly, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn cascade_stereo_offset_reads_stay_in_bounds() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        // Max time + max stereo offset pushes the tap reads to their extremes.
+        let mut frame = cascade_frame(800.0, 0.4, 1.0, 0.5);
+        frame.stereo_offset = 0.5;
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        for _ in 0..8192 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let left = diffusion.process_sample_for_channel(0, input, &frame);
+            let right = diffusion.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            assert!(left.abs() <= 8.0 && right.abs() <= 8.0);
+        }
+    }
+
+    #[test]
+    fn cascade_mix_zero_dry_mix_one_wet() {
+        let mut dry_diffusion = Diffusion::default();
+        dry_diffusion.prepare(48_000.0);
+        let mut wet_diffusion = Diffusion::default();
+        wet_diffusion.prepare(48_000.0);
+        let mut dry_frame = cascade_frame(120.0, 0.3, 0.5, 0.5);
+        dry_frame.mix = 0.0;
+        let wet_frame = cascade_frame(120.0, 0.3, 0.5, 0.5);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut max_dry_diff = 0.0_f32;
+        let mut wet_energy = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..8192 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let dry = dry_diffusion.process_sample_for_channel(0, input, &dry_frame);
+            let wet = wet_diffusion.process_sample_for_channel(0, input, &wet_frame);
+            max_dry_diff = max_dry_diff.max((dry - input).abs());
+            if index > 4000 {
+                wet_energy += (wet as f64) * (wet as f64);
+                count += 1;
+            }
+        }
+        assert!(
+            max_dry_diff < 1e-4,
+            "cascade mix 0 should be dry, {max_dry_diff}"
+        );
+        let wet_rms = (wet_energy / count as f64).sqrt() as f32;
+        assert!(
+            wet_rms > 0.01,
+            "cascade mix 1 should produce wet, {wet_rms}"
+        );
     }
 
     fn reels_frame(time_ms: f32, feedback: f32, size: f32, decay: f32) -> DiffusionFrame {
@@ -1665,6 +1804,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reels_max_feedback_10s_does_not_explode() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = reels_frame(180.0, 1.0, 0.6, 0.7);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..(48_000 * 10) {
+            phase += 110.0 / 48_000.0;
+            // Excite for the first 100 ms, then let the dub feedback ring.
+            let input = if index < 4800 {
+                (phase * tau).sin() * 0.3
+            } else {
+                0.0
+            };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "reels 10s dub feedback: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 4.0,
+            "reels max dub feedback over 10s should be safe, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn reels_mix_zero_dry_mix_one_wet() {
+        let mut dry_diffusion = Diffusion::default();
+        dry_diffusion.prepare(48_000.0);
+        let mut wet_diffusion = Diffusion::default();
+        wet_diffusion.prepare(48_000.0);
+        let mut dry_frame = reels_frame(150.0, 0.5, 0.5, 0.5);
+        dry_frame.mix = 0.0;
+        let wet_frame = reels_frame(150.0, 0.5, 0.5, 0.5);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut max_dry_diff = 0.0_f32;
+        let mut wet_energy = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..12000 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let dry = dry_diffusion.process_sample_for_channel(0, input, &dry_frame);
+            let wet = wet_diffusion.process_sample_for_channel(0, input, &wet_frame);
+            max_dry_diff = max_dry_diff.max((dry - input).abs());
+            if index > 6000 {
+                wet_energy += (wet as f64) * (wet as f64);
+                count += 1;
+            }
+        }
+        assert!(
+            max_dry_diff < 1e-4,
+            "reels mix 0 should be dry, {max_dry_diff}"
+        );
+        let wet_rms = (wet_energy / count as f64).sqrt() as f32;
+        assert!(wet_rms > 0.01, "reels mix 1 should produce wet, {wet_rms}");
+    }
+
     fn collage_frame(
         time_ms: f32,
         feedback: f32,
@@ -1805,6 +2005,72 @@ mod tests {
         assert!(xfade > 0 && xfade <= len / 2);
         assert!(collage_feedback_gain(1.0, 1.0) <= 0.58);
         assert!(collage_level_compensation(1.0, 1.0) < 1.0);
+    }
+
+    #[test]
+    fn collage_silence_stays_silent() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = collage_frame(120.0, 0.5, 0.5, 0.8, 0.0, 1.0);
+
+        let mut peak = 0.0_f32;
+        for _ in 0..48_000 {
+            let output = diffusion.process_sample_for_channel(0, 0.0, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        // The randomized fragment chooser must never synthesize noise from
+        // silence — reading a silent buffer stays silent.
+        assert!(
+            peak < 1e-6,
+            "collage should stay silent on silence, peak {peak}"
+        );
+    }
+
+    #[test]
+    fn collage_max_feedback_10s_does_not_explode() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = collage_frame(120.0, 1.0, 0.6, 0.7, 0.2, 1.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..(48_000 * 10) {
+            phase += 110.0 / 48_000.0;
+            let input = if index < 4800 {
+                (phase * tau).sin() * 0.3
+            } else {
+                0.0
+            };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "collage 10s feedback: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 4.0,
+            "collage max feedback over 10s should be safe, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn collage_extreme_params_stay_in_bounds() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        // Extreme time, size, decay and stereo offset push the fragment reads to
+        // their limits; clamped indexing must keep them inside the buffer.
+        let frame = collage_frame(2000.0, 0.9, 1.0, 1.0, 0.5, 1.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        for _ in 0..16000 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let left = diffusion.process_sample_for_channel(0, input, &frame);
+            let right = diffusion.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            assert!(left.abs() <= 8.0 && right.abs() <= 8.0);
+        }
     }
 
     fn reverse_frame(
@@ -2109,5 +2375,132 @@ mod tests {
         let fb1 = space_reverb_feedback(1.0);
         assert!(fb0 > 0.50 && fb0 < 0.65);
         assert!(fb1 > 0.80 && fb1 < 0.92);
+    }
+
+    #[test]
+    fn space_impulse_tail_is_smooth() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = space_frame(1.0, 0.9, 0.6, 1.0);
+
+        let mut previous = 0.0_f32;
+        let mut max_tail_step = 0.0_f32;
+        for index in 0..32000 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 2000 {
+                max_tail_step = max_tail_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        // A smooth ambient tail has no large sample-to-sample jumps (a metallic
+        // resonance or a click would spike this).
+        assert!(
+            max_tail_step < 0.1,
+            "space tail should be smooth, max step {max_tail_step}"
+        );
+    }
+
+    #[test]
+    fn space_size_sweep_has_no_strong_click() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..total {
+            let t = index as f32 / (total - 1) as f32;
+            let frame = space_frame(t, 0.7, 0.5, 1.0); // size 0 -> 1
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 2000 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.15,
+            "space size sweep should not click, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn space_white_noise_tail_is_not_metallic() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = space_frame(0.9, 0.85, 0.5, 1.0);
+
+        // Excite with a noise burst, then let the tail ring out.
+        let mut rng: u32 = 0x51ee_d5a7;
+        let mut peak = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_tail_step = 0.0_f32;
+        for index in 0..48_000 {
+            let input = if index < 4800 {
+                rng ^= rng << 13;
+                rng ^= rng >> 17;
+                rng ^= rng << 5;
+                ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0) * 0.25
+            } else {
+                0.0
+            };
+            let output = diffusion.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+            if index > 9600 {
+                // long after the burst, only tail
+                max_tail_step = max_tail_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            peak < 2.0,
+            "space white-noise peak should be controlled, {peak}"
+        );
+        // Excessive metallic ringing would show up as large steps in the decayed
+        // tail; a smooth ambient decay keeps them small.
+        assert!(
+            max_tail_step < 0.05,
+            "space tail should decay smoothly, not ring metallically, max step {max_tail_step}"
+        );
+    }
+
+    #[test]
+    fn space_stereo_width_is_mono_compatible() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let frame = space_frame(0.8, 0.7, 0.5, 1.0); // full width
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut in_sq = 0.0_f64;
+        let mut mono_sq = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..24_000 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let left = diffusion.process_sample_for_channel(0, input, &frame);
+            let right = diffusion.process_sample_for_channel(1, input, &frame);
+            assert!(left.is_finite() && right.is_finite());
+            if index > 8000 {
+                let mono = (left + right) * 0.5;
+                in_sq += (input as f64) * (input as f64);
+                mono_sq += (mono as f64) * (mono as f64);
+                count += 1;
+            }
+        }
+        let in_rms = (in_sq / count as f64).sqrt() as f32;
+        let mono_rms = (mono_sq / count as f64).sqrt() as f32;
+        // The wide stereo tail must not vanish when summed to mono.
+        assert!(
+            mono_rms > in_rms * 0.1,
+            "space mono sum should survive (in {in_rms}, mono {mono_rms})"
+        );
     }
 }

@@ -9,7 +9,10 @@ pub mod gain;
 pub mod movement;
 pub mod smoothing;
 pub mod texture;
+pub mod util;
 
+#[cfg(test)]
+mod audit_tests;
 #[cfg(test)]
 mod test_utils;
 #[cfg(test)]

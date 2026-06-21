@@ -7,6 +7,10 @@ use super::{
     dry_wet::DryWet,
     gain::db_to_gain,
     smoothing::LinearSmoother,
+    util::{
+        dc_blocker_step, gain_compensation_curve, one_pole_alpha, safe_frequency, safe_q,
+        smoothstep, soft_saturate,
+    },
 };
 
 const MAX_CHANNELS: usize = 2;
@@ -56,11 +60,15 @@ pub struct Character {
     sample_rate: f32,
     tone_state: [f32; MAX_CHANNELS],
     drive_dc_state: [f32; MAX_CHANNELS],
+    drive_hp_state: [f32; MAX_CHANNELS],
     drive_hf_state: [f32; MAX_CHANNELS],
     sweet_dc_state: [f32; MAX_CHANNELS],
     sweet_exciter_state: [f32; MAX_CHANNELS],
+    sweet_air_state: [f32; MAX_CHANNELS],
     fuzz_dc_state: [f32; MAX_CHANNELS],
     fuzz_tone_state: [f32; MAX_CHANNELS],
+    fuzz_hp_state: [f32; MAX_CHANNELS],
+    fuzz_body_state: [f32; MAX_CHANNELS],
     howl_input_hp_state: [f32; MAX_CHANNELS],
     howl_body_lp_state: [f32; MAX_CHANNELS],
     howl_formant1_lp_state: [f32; MAX_CHANNELS],
@@ -100,11 +108,15 @@ impl Default for Character {
             sample_rate: 44_100.0,
             tone_state: [0.0; MAX_CHANNELS],
             drive_dc_state: [0.0; MAX_CHANNELS],
+            drive_hp_state: [0.0; MAX_CHANNELS],
             drive_hf_state: [0.0; MAX_CHANNELS],
             sweet_dc_state: [0.0; MAX_CHANNELS],
             sweet_exciter_state: [0.0; MAX_CHANNELS],
+            sweet_air_state: [0.0; MAX_CHANNELS],
             fuzz_dc_state: [0.0; MAX_CHANNELS],
             fuzz_tone_state: [0.0; MAX_CHANNELS],
+            fuzz_hp_state: [0.0; MAX_CHANNELS],
+            fuzz_body_state: [0.0; MAX_CHANNELS],
             howl_input_hp_state: [0.0; MAX_CHANNELS],
             howl_body_lp_state: [0.0; MAX_CHANNELS],
             howl_formant1_lp_state: [0.0; MAX_CHANNELS],
@@ -138,11 +150,15 @@ impl Character {
         self.core.reset();
         self.tone_state = [0.0; MAX_CHANNELS];
         self.drive_dc_state = [0.0; MAX_CHANNELS];
+        self.drive_hp_state = [0.0; MAX_CHANNELS];
         self.drive_hf_state = [0.0; MAX_CHANNELS];
         self.sweet_dc_state = [0.0; MAX_CHANNELS];
         self.sweet_exciter_state = [0.0; MAX_CHANNELS];
+        self.sweet_air_state = [0.0; MAX_CHANNELS];
         self.fuzz_dc_state = [0.0; MAX_CHANNELS];
         self.fuzz_tone_state = [0.0; MAX_CHANNELS];
+        self.fuzz_hp_state = [0.0; MAX_CHANNELS];
+        self.fuzz_body_state = [0.0; MAX_CHANNELS];
         self.howl_input_hp_state = [0.0; MAX_CHANNELS];
         self.howl_body_lp_state = [0.0; MAX_CHANNELS];
         self.howl_formant1_lp_state = [0.0; MAX_CHANNELS];
@@ -215,124 +231,190 @@ impl Character {
 
     fn process_drive(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
+        let sample_rate = self.sample_rate.max(1.0);
+        let drive = frame.drive;
 
-        // Stage 1: DC removal — first-order HPF tracking subsonic offset
-        let dc_alpha = 0.9992;
-        let dc = self.drive_dc_state[index];
-        self.drive_dc_state[index] += (1.0 - dc_alpha) * (sample - dc);
-        let dc_free = sanitize_sample(sample - self.drive_dc_state[index]);
+        // Stage 1: Input conditioning. A DC blocker plus a gentle subsonic
+        // high-pass keeps rumble and offset out of the saturator so the
+        // sub-bass never "explodes" the waveshaper. The corner rises a touch
+        // with drive (more headroom when pushed) but stays subsonic, so all the
+        // musical low-mid body still reaches the saturation stage.
+        let dc_free = sanitize_sample(dc_blocker_step(
+            &mut self.drive_dc_state[index],
+            sample,
+            0.9992,
+        ));
+        let hp_cutoff = 24.0 + drive * 14.0;
+        let hp_alpha = one_pole_alpha(hp_cutoff, sample_rate);
+        self.drive_hp_state[index] = sanitize_sample(
+            self.drive_hp_state[index] + hp_alpha * (dc_free - self.drive_hp_state[index]),
+        );
+        let conditioned = sanitize_sample(dc_free - self.drive_hp_state[index]);
 
-        // Stage 2: Input drive gain with subtle asymmetrical bias
-        let drive_gain = drive_to_gain(frame.drive);
-        let bias = frame.drive * frame.drive * 0.011;
-        let driven = sanitize_sample((dc_free + bias) * drive_gain);
+        // Stage 2: Input gain and a gentle pre-drive soft stage that rounds
+        // transients before the main clip. A tiny asymmetric bias seeds the
+        // even-harmonic warmth that gives the tone its body.
+        let drive_gain = drive_to_gain(drive);
+        let bias = drive * drive * 0.011;
+        let driven = sanitize_sample((conditioned + bias) * drive_gain);
+        let pre = fast_tanh(driven * 0.7);
 
-        // Stage 3: Cascaded soft-clip stages for musical harmonic richness
-        let stage1 = fast_tanh(driven * 0.7);
+        // Stage 3: Controlled asymmetry (even harmonics = warmth/body) feeding
+        // the main soft-clip waveshaper.
+        let asymmetry = drive * 0.19;
+        let pos = pre.max(0.0);
+        let neg = pre.min(0.0);
+        let shaped = pos * (1.0 + asymmetry) + neg;
+        let saturated = fast_tanh(shaped);
 
-        let asymmetry = frame.drive * 0.19;
-        let pos = stage1.max(0.0);
-        let neg = stage1.min(0.0);
-        let asymmetric_input = pos * (1.0 + asymmetry) + neg;
-        let stage2 = fast_tanh(asymmetric_input);
+        // Stage 4: Anti-fizz post damping. A drive-dependent one-pole low-pass
+        // pulls the corner down as drive rises, so harder settings stay warm and
+        // controlled instead of fizzy. It only touches the highs — the body is
+        // left intact.
+        let hf_cutoff = (18_000.0 - drive * drive * 15_800.0).max(2_000.0);
+        let hf_alpha = one_pole_alpha(hf_cutoff, sample_rate);
+        self.drive_hf_state[index] = sanitize_sample(
+            self.drive_hf_state[index] + hf_alpha * (saturated - self.drive_hf_state[index]),
+        );
+        let tamed = self.drive_hf_state[index];
 
-        // Stage 4: High-frequency damping — increases with drive to soften fizz
-        let drive_sq = frame.drive * frame.drive;
-        let hf_cutoff_hz = 18_000.0 - (drive_sq * 15_000.0);
-        let hf_cutoff_hz = hf_cutoff_hz.max(2_200.0);
-        let hf_alpha = (1.0
-            - (-core::f32::consts::TAU * hf_cutoff_hz / self.sample_rate.max(1.0)).exp())
-        .clamp(0.0, 1.0);
-        let hf = self.drive_hf_state[index] + hf_alpha * (stage2 - self.drive_hf_state[index]);
-        self.drive_hf_state[index] = sanitize_sample(hf);
+        // Stage 5: Gain compensation. The makeup shrinks as drive rises (the
+        // saturation already adds density/loudness), keeping perceived level
+        // consistent and avoiding an absurd volume jump on the way up.
+        let compensated = tamed * drive_mode_compensation(drive, drive_gain);
 
-        // Stage 5: Gain compensation — perceived-loudness-aware
-        let compensated = hf * drive_mode_compensation(frame.drive, drive_gain);
-
-        // Stage 6: Safety soft-clip to guard against overshoot from filter ringing
+        // Stage 6: Safety soft-clip to guard against overshoot from filter ringing.
         let safe = soft_clip_sample(compensated);
 
-        // Stage 7: Tone control
+        // Stage 7: Tone — darker/bodied when low, open (but pre-tamed, never
+        // harsh) when high.
         self.apply_tone(channel, safe, frame)
     }
 
     fn process_sweet(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
+        let sample_rate = self.sample_rate.max(1.0);
+        let drive = frame.drive;
+        let tone = frame.tone;
 
-        // Stage 1: Gentle asymmetric saturation emphasizing 2nd harmonic
-        let drive_amount = frame.drive;
-        let drive_gain = sweet_drive_to_gain(drive_amount);
-        let asymmetry = drive_amount * 0.24;
-        let pos = sample.max(0.0);
-        let neg = sample.min(0.0);
+        // Stage 1: DC blocker first — clean the offset before any shaping.
+        let dc_free = sanitize_sample(dc_blocker_step(
+            &mut self.sweet_dc_state[index],
+            sample,
+            0.9992,
+        ));
+
+        // Stage 2: Very gentle asymmetric saturation (2nd-harmonic warmth).
+        // Much milder than Drive — low gain, soft asymmetry — so low amounts
+        // stay nearly transparent and high amounts stay elegant.
+        let drive_gain = sweet_drive_to_gain(drive);
+        let asymmetry = drive * 0.24;
+        let pos = dc_free.max(0.0);
+        let neg = dc_free.min(0.0);
         let shaped = (pos * (1.0 + asymmetry) + neg) * drive_gain;
         let saturated = fast_tanh(shaped);
 
-        // Stage 2: DC removal from asymmetrical biasing
-        let dc_alpha = 0.9992;
-        let dc = self.sweet_dc_state[index];
-        self.sweet_dc_state[index] += (1.0 - dc_alpha) * (saturated - dc);
-        let dc_free = sanitize_sample(saturated - self.sweet_dc_state[index]);
+        // Stage 3: Controlled high-band exciter. Extract the highs, then
+        // *soft-saturate* them to generate musical harmonics (sheen) rather than
+        // a raw boost (which would just expose hiss). Tone moves the band corner
+        // and the amount, but the amount is capped so it never gets brittle.
+        let exciter_freq = 5_500.0 - tone * 3_500.0;
+        let exciter_alpha = one_pole_alpha(exciter_freq, sample_rate);
+        self.sweet_exciter_state[index] = sanitize_sample(
+            self.sweet_exciter_state[index]
+                + exciter_alpha * (saturated - self.sweet_exciter_state[index]),
+        );
+        let highs = saturated - self.sweet_exciter_state[index];
+        let exciter_amount = (tone * tone * 0.42).min(0.42);
+        let harmonics = soft_saturate(highs, 1.0 + drive * 1.2);
+        let excited = sanitize_sample(saturated + harmonics * exciter_amount);
 
-        // Stage 3: Presence exciter — tone controls air/presence via high-frequency emphasis
-        let tone = frame.tone;
-        let exciter_amount = tone * tone * 0.52;
-        let exciter_freq = 5_500.0 - (tone * 3_500.0);
-        let exciter_alpha = (1.0
-            - (-core::f32::consts::TAU * exciter_freq / self.sample_rate.max(1.0)).exp())
-        .clamp(0.0, 1.0);
-        let hpf = dc_free - self.sweet_exciter_state[index];
-        self.sweet_exciter_state[index] += exciter_alpha * hpf;
-        let excited = dc_free + (hpf * exciter_amount);
+        // Stage 4: Body preservation. The exciter only adds the high band, so the
+        // low/mid body of `saturated` passes through untouched — graves and
+        // médios keep their weight.
 
-        // Stage 4: Gain compensation — level-matched, with slight makeup for harmonics
-        let compensated = excited * sweet_compensation(drive_amount, drive_gain);
+        // Stage 5: Air/presence tilt — a gentle, band-limited high shelf. The air
+        // band is low-passed near the top so opening presence adds silk, not
+        // brittle ultra-high fizz.
+        let air_cut = 11_000.0 + tone * 3_500.0;
+        let air_alpha = one_pole_alpha(air_cut, sample_rate);
+        self.sweet_air_state[index] = sanitize_sample(
+            self.sweet_air_state[index] + air_alpha * (excited - self.sweet_air_state[index]),
+        );
+        let air = excited - self.sweet_air_state[index];
+        let tilted = sanitize_sample(excited + air * (tone * 0.18));
 
-        // Stage 5: Safety soft-clip
+        // Stage 6: Gain compensation — level-matched with a little makeup for the
+        // added harmonics, so the perceived level stays steady.
+        let compensated = tilted * sweet_compensation(drive, drive_gain);
+
+        // Stage 7: Safety soft-clip.
         soft_clip_sample(compensated)
     }
 
     fn process_fuzz(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
+        let sample_rate = self.sample_rate.max(1.0);
         let drive = frame.drive;
         let tone = frame.tone;
 
-        // Stage 1: Massive input gain — from subtle grit to full fuzz saturation
+        // Stage 1: Pre-filter. A gentle high-pass keeps sub-bass rumble out of
+        // the huge gain stage (no blocking-distortion mud) while leaving the
+        // bass fundamental intact. A small low-mid emphasis adds body so the
+        // fuzz stays thick instead of thin.
+        let hp_cutoff = 40.0 + drive * 40.0;
+        let hp_alpha = one_pole_alpha(hp_cutoff, sample_rate);
+        self.fuzz_hp_state[index] = sanitize_sample(
+            self.fuzz_hp_state[index] + hp_alpha * (sample - self.fuzz_hp_state[index]),
+        );
+        let conditioned = sanitize_sample(sample - self.fuzz_hp_state[index]);
+
+        let body_alpha = one_pole_alpha(280.0, sample_rate);
+        self.fuzz_body_state[index] = sanitize_sample(
+            self.fuzz_body_state[index] + body_alpha * (conditioned - self.fuzz_body_state[index]),
+        );
+        let bodied = sanitize_sample(conditioned + self.fuzz_body_state[index] * 0.18);
+
+        // Stage 2: Massive input gain — from subtle grit to full fuzz.
         let drive_gain = fuzz_drive_to_gain(drive);
 
-        // Stage 2: Pre-gain soft-clip safety — prevents extreme overshoot before waveshaper
-        let limited = (sample * drive_gain).clamp(-8.0, 8.0);
+        // Stage 3: Pre-gain safety clamp before the waveshaper.
+        let limited = (bodied * drive_gain).clamp(-8.0, 8.0);
 
-        // Stage 3: Asymmetric fuzz — thick, dense saturation with even harmonics
+        // Stage 4: Musical asymmetry — thick, dense, even-harmonic saturation.
         let asymmetry = drive * 0.35;
         let pos = limited.max(0.0);
         let neg = limited.min(0.0);
         let biased = pos * (1.0 + asymmetry) + neg;
 
-        // Stage 4: Hard-clip style saturation via cascaded tanh (each stage bounded)
+        // Stage 5: Combined hard/soft, multi-stage waveshaping. The tanh blend
+        // keeps the clip from being a brickwall, which softens ugly digital
+        // foldover; each stage is bounded.
         let stage1 = fuzz_hard_clip(biased, drive);
         let stage2 = fast_tanh(stage1 * (1.0 + drive * 0.6));
         let saturated = sanitize_sample(stage2);
 
-        // Stage 5: DC block — clean up offset from asymmetry
-        let dc_alpha = 0.9990;
-        let dc = self.fuzz_dc_state[index];
-        self.fuzz_dc_state[index] += (1.0 - dc_alpha) * (saturated - dc);
-        let dc_free = sanitize_sample(saturated - self.fuzz_dc_state[index]);
+        // Stage 6: DC blocker — mandatory right after the asymmetry stage.
+        let dc_free = sanitize_sample(dc_blocker_step(
+            &mut self.fuzz_dc_state[index],
+            saturated,
+            0.9990,
+        ));
 
-        // Stage 6: Post-fuzz tone filter — LPF controlled by tone parameter
-        let lpf_cutoff = 1_000.0 + (tone * tone * 14_500.0);
-        let lpf_alpha = (1.0
-            - (-core::f32::consts::TAU * lpf_cutoff / self.sample_rate.max(1.0)).exp())
-        .clamp(0.0, 1.0);
-        let toned =
-            self.fuzz_tone_state[index] + lpf_alpha * (dc_free - self.fuzz_tone_state[index]);
-        self.fuzz_tone_state[index] = sanitize_sample(toned);
+        // Stage 7: Post-fuzz tone low-pass. Low tone = thick/dark; high tone
+        // opens up — but the maximum opening shrinks as drive rises, so heavy
+        // fuzz keeps its aliased top in check and never turns to sandpaper.
+        let lpf_cutoff = 1_000.0 + tone * tone * (14_500.0 - drive * 6_000.0);
+        let lpf_alpha = one_pole_alpha(lpf_cutoff, sample_rate);
+        self.fuzz_tone_state[index] = sanitize_sample(
+            self.fuzz_tone_state[index] + lpf_alpha * (dc_free - self.fuzz_tone_state[index]),
+        );
+        let toned = self.fuzz_tone_state[index];
 
-        // Stage 7: Strong gain compensation — fuzz is dense, keep level safe
+        // Stage 8: Strong gain compensation — dense fuzz kept level-safe.
         let compensated = toned * fuzz_compensation(drive);
 
-        // Stage 8: Final safety clip
+        // Stage 9: Final safety soft-clip.
         soft_clip_sample(compensated)
     }
 
@@ -343,8 +425,7 @@ impl Character {
         let sample_rate = self.sample_rate.max(1.0);
 
         let hp_cutoff = 40.0 + drive * 30.0;
-        let hp_alpha =
-            (1.0 - (-core::f32::consts::TAU * hp_cutoff / sample_rate).exp()).clamp(0.0, 1.0);
+        let hp_alpha = one_pole_alpha(hp_cutoff, sample_rate);
         let input_hp =
             self.howl_input_hp_state[index] + hp_alpha * (sample - self.howl_input_hp_state[index]);
         self.howl_input_hp_state[index] = sanitize_sample(input_hp);
@@ -354,16 +435,18 @@ impl Character {
         let saturated = fast_tanh(conditioned * drive_gain);
 
         let body_cutoff = (250.0 + tone * 50.0 + drive * 30.0).clamp(250.0, 360.0);
-        let body_alpha =
-            (1.0 - (-core::f32::consts::TAU * body_cutoff / sample_rate).exp()).clamp(0.0, 1.0);
+        let body_alpha = one_pole_alpha(body_cutoff, sample_rate);
         let body_lp = self.howl_body_lp_state[index]
             + body_alpha * (saturated - self.howl_body_lp_state[index]);
         self.howl_body_lp_state[index] = sanitize_sample(body_lp);
 
         let f1 = howl_formant1_frequency(tone);
         let f2 = howl_formant2_frequency(f1, tone, drive);
-        let q = howl_q(drive);
+        let q = howl_q(drive, tone);
 
+        // Dual formant resonators. The lowpass output of each is used (never a
+        // bare bandpass), so the formants read as vowels with body rather than
+        // as thin peaks.
         let (f1_out, _) = howl_resonator_step(
             saturated,
             f1,
@@ -385,11 +468,13 @@ impl Character {
         let formant_mix =
             sanitize_sample(f1_out * (1.0 - formant_balance) + f2_out * formant_balance);
 
-        let formant_limited = soft_clip_sample(formant_mix * 0.72);
+        // Limited resonance: the formant contribution is scaled back a touch as
+        // tone rises so a bright vowel never tips into a whistle, then soft
+        // clipped so the peak can't run away.
+        let formant_limited = soft_clip_sample(formant_mix * (0.72 - tone * 0.08));
 
         let damping_hz = howl_output_damping(tone);
-        let damping_alpha =
-            (1.0 - (-core::f32::consts::TAU * damping_hz / sample_rate).exp()).clamp(0.0, 1.0);
+        let damping_alpha = one_pole_alpha(damping_hz, sample_rate);
         let damped = self.howl_damping_state[index]
             + damping_alpha * (formant_limited - self.howl_damping_state[index]);
         self.howl_damping_state[index] = sanitize_sample(damped);
@@ -507,9 +592,11 @@ fn drive_to_gain(drive: f32) -> f32 {
 
 #[inline]
 fn drive_mode_compensation(drive: f32, drive_gain: f32) -> f32 {
-    let compensation = 1.0 / drive_gain.powf(0.58);
+    let compensation = gain_compensation_curve(drive_gain, 0.58);
     let drive = drive.clamp(0.0, 1.0);
-    let makeup = 1.0 + (drive * 0.30);
+    // Less automatic makeup as drive rises — the saturation already adds density,
+    // so this keeps perceived loudness consistent without a volume jump.
+    let makeup = 1.0 + ((1.0 - drive) * 0.30);
     (compensation * makeup).clamp(0.19, 1.0)
 }
 
@@ -553,34 +640,47 @@ fn fuzz_compensation(drive: f32) -> f32 {
 
 #[inline]
 fn howl_formant1_frequency(tone: f32) -> f32 {
+    // Vowel-like first formant, kept in a musical 180–1800 Hz range.
     let tone = tone.clamp(0.0, 1.0);
-    200.0 + tone * 2_000.0
+    180.0 + tone * 1_620.0
 }
 
 #[inline]
 fn howl_formant2_frequency(f1: f32, tone: f32, drive: f32) -> f32 {
+    // Second formant a musical 1.45–2.2× above the first, capped at ~4.2 kHz so
+    // it opens the vowel without ever reaching a piercing whistle band.
     let tone = tone.clamp(0.0, 1.0);
     let drive = drive.clamp(0.0, 1.0);
-    let ratio = (1.40 + tone * 0.26 + drive * 0.08).clamp(1.40, 1.74);
-    (f1 * ratio).clamp(280.0, 3_200.0)
+    let ratio = (1.45 + tone * 0.45 + drive * 0.15).clamp(1.45, 2.2);
+    (f1 * ratio).clamp(300.0, 4_200.0)
 }
 
 #[inline]
-fn howl_q(drive: f32) -> f32 {
+fn howl_q(drive: f32, tone: f32) -> f32 {
+    // Resonance grows with drive but is *pulled back* as tone (brightness)
+    // rises — high formants at high Q are exactly what turns into a whistle, so
+    // bright settings trade some Q for musicality. Capped well below self-osc.
     let drive = drive.clamp(0.0, 1.0);
-    (0.65 + drive.powf(1.2) * 2.85).clamp(0.65, 3.50)
+    let tone = tone.clamp(0.0, 1.0);
+    safe_q(
+        (0.65 + drive.powf(1.2) * 2.45) * (1.0 - tone * 0.20),
+        0.6,
+        3.2,
+    )
 }
 
 #[inline]
 fn howl_body_mix(drive: f32) -> f32 {
-    (0.40 - drive.clamp(0.0, 1.0) * 0.15).clamp(0.25, 0.40)
+    // 20–40 % clean low body preserved in the wet so it never sounds like a
+    // bare resonator.
+    (0.40 - drive.clamp(0.0, 1.0) * 0.18).clamp(0.20, 0.40)
 }
 
 #[inline]
 fn howl_gain_compensation(drive: f32, q: f32) -> f32 {
     let drive = drive.clamp(0.0, 1.0);
-    let base = 1.0 / (1.0 + drive * 2.2 + q * 0.10);
-    (base * (1.0 + drive * 0.25)).clamp(0.18, 0.90)
+    let base = 1.0 / (1.0 + drive * 2.0 + q * 0.10);
+    (base * (1.0 + drive * 0.25)).clamp(0.20, 0.92)
 }
 
 #[inline]
@@ -592,9 +692,9 @@ fn howl_resonator_step(
     lp_state: &mut f32,
     bp_state: &mut f32,
 ) -> (f32, f32) {
-    let freq = frequency_hz.clamp(40.0, sample_rate.max(1.0) * 0.40);
+    let freq = safe_frequency(frequency_hz, 40.0, sample_rate.max(1.0) * 0.40);
     let f = (2.0 * (core::f32::consts::PI * freq / sample_rate.max(1.0)).sin()).clamp(0.0005, 0.82);
-    let q_safe = q.clamp(0.5, 3.80);
+    let q_safe = safe_q(q, 0.5, 3.80);
     let damping = (1.0 / q_safe + 0.015).clamp(0.24, 1.0);
 
     let high = sanitize_sample(input - *lp_state - damping * *bp_state);
@@ -610,8 +710,10 @@ fn howl_resonator_step(
 
 #[inline]
 fn howl_output_damping(tone: f32) -> f32 {
+    // Output damping opens with tone for brightness, but its ceiling is held at
+    // ~6.1 kHz (was 9.4 kHz) so the resonant top never becomes a thin whistle.
     let tone = tone.clamp(0.0, 1.0);
-    (1_400.0 + tone.powf(1.5) * 8_000.0).clamp(1_400.0, 9_400.0)
+    (1_800.0 + tone * 4_300.0).clamp(1_800.0, 6_100.0)
 }
 
 #[inline]
@@ -645,9 +747,15 @@ fn swell_envelope_step(
     if slow_env <= signal_floor * 0.45 {
         *open = false;
         *phase = 0.0;
-        let release_step = 1.0 / ((0.16 + drive.clamp(0.0, 1.0) * 0.20) * sample_rate);
-        *gain = (*gain - release_step).max(0.0);
-        return sanitize_sample(*gain);
+        // Smooth exponential release toward silence (volume-pedal feel) instead
+        // of a linear ramp, with a small floor so the tail actually reaches zero.
+        let release_time = 0.16 + drive.clamp(0.0, 1.0) * 0.20;
+        let release_alpha = (3.0 / (release_time * sample_rate)).clamp(0.0, 1.0);
+        *gain -= *gain * release_alpha;
+        if *gain < 0.000_5 {
+            *gain = 0.0;
+        }
+        return sanitize_sample((*gain).max(0.0));
     }
 
     if !*open {
@@ -672,7 +780,7 @@ fn swell_envelope_step(
 fn swell_tone_alpha(tone: f32, sample_rate: f32) -> f32 {
     let tone = tone.clamp(0.0, 1.0);
     let cutoff = 850.0 + tone.powf(1.7) * 14_500.0;
-    (1.0 - (-core::f32::consts::TAU * cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0)
+    one_pole_alpha(cutoff, sample_rate)
 }
 
 #[inline]
@@ -695,12 +803,6 @@ fn fast_tanh(x: f32) -> f32 {
     let num = x * (27.0 + x2);
     let den = 27.0 + 9.0 * x2;
     num / den
-}
-
-#[inline]
-fn smoothstep(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
 }
 
 #[inline]
@@ -882,6 +984,142 @@ mod tests {
             "high drive compensation should reduce peak level"
         );
         assert!(comp > 0.05, "compensation should not silence the signal");
+    }
+
+    #[test]
+    fn drive_makeup_shrinks_as_drive_rises() {
+        // Rule: less automatic makeup at higher drive (avoids a volume jump).
+        let low = drive_mode_compensation(0.1, drive_to_gain(0.1));
+        let high = drive_mode_compensation(0.9, drive_to_gain(0.9));
+        assert!(
+            high < low,
+            "makeup/compensation should be lower at high drive (low={low}, high={high})"
+        );
+    }
+
+    fn series_rms(buffer: &[f32]) -> f32 {
+        if buffer.is_empty() {
+            return 0.0;
+        }
+        let sum: f64 = buffer.iter().map(|s| (*s as f64).powi(2)).sum();
+        (sum / buffer.len() as f64).sqrt() as f32
+    }
+
+    // First-difference RMS approximates high-frequency energy.
+    fn series_hf_rms(buffer: &[f32]) -> f32 {
+        if buffer.len() < 2 {
+            return 0.0;
+        }
+        let sum: f64 = buffer
+            .windows(2)
+            .map(|w| ((w[1] - w[0]) as f64).powi(2))
+            .sum();
+        (sum / (buffer.len() - 1) as f64).sqrt() as f32
+    }
+
+    #[test]
+    fn drive_max_sine_110hz_does_not_explode() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = drive_frame(1.0, 0.5);
+
+        let mut peak = 0.0_f32;
+        let mut phase = 0.0_f32;
+        for _ in 0..(48_000 * 2) {
+            phase += 110.0 / 48_000.0;
+            let sine = (phase * core::f32::consts::TAU).sin() * 0.5;
+            let out = character.process_sample(0, sine, &frame);
+            assert!(out.is_finite(), "drive max 110Hz: NaN/inf");
+            peak = peak.max(out.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "drive max 110Hz should stay controlled, peak={peak}"
+        );
+        assert!(
+            peak > 0.02,
+            "drive max 110Hz should still produce output, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn drive_max_white_noise_does_not_add_fizz() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = drive_frame(1.0, 0.5);
+
+        let mut rng: u32 = 0x1234_5678;
+        let mut input = Vec::with_capacity(4096);
+        let mut output = Vec::with_capacity(4096);
+        for _ in 0..4096 {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            let noise = ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0) * 0.3;
+            let out = character.process_sample(0, noise, &frame);
+            assert!(out.is_finite());
+            assert!(out.abs() <= 8.0);
+            input.push(noise);
+            output.push(out);
+        }
+
+        // The high-to-total energy ratio must drop: the anti-fizz low-pass tames
+        // the highs instead of adding fizz on top.
+        let in_ratio = series_hf_rms(&input) / (series_rms(&input) + 1e-9);
+        let out_ratio = series_hf_rms(&output) / (series_rms(&output) + 1e-9);
+        assert!(
+            out_ratio < in_ratio,
+            "max drive should tame highs (in HF ratio {in_ratio}, out {out_ratio})"
+        );
+    }
+
+    #[test]
+    fn drive_max_impulse_has_no_dangerous_peak() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = drive_frame(1.0, 1.0);
+
+        let mut peak = 0.0_f32;
+        for index in 0..4096 {
+            let input = if index == 0 { 0.9 } else { 0.0 };
+            let out = character.process_sample(0, input, &frame);
+            assert!(out.is_finite());
+            peak = peak.max(out.abs());
+        }
+        assert!(peak < 1.5, "drive impulse peak should be safe, got {peak}");
+    }
+
+    #[test]
+    fn drive_sweep_has_no_zipper_or_clicks() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+
+        let total = 48_000usize; // 1 s sweep of drive 0 -> 1
+        let mut phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..total {
+            let drive = index as f32 / (total - 1) as f32;
+            let frame = drive_frame(drive, 0.5);
+            phase += 220.0 / 48_000.0;
+            let sine = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let out = character.process_sample(0, sine, &frame);
+            assert!(out.is_finite(), "drive sweep: NaN/inf");
+            peak = peak.max(out.abs());
+            if index > 0 {
+                max_step = max_step.max((out - previous).abs());
+            }
+            previous = out;
+        }
+        assert!(
+            peak < 2.0,
+            "drive sweep peak should stay controlled, got {peak}"
+        );
+        assert!(
+            max_step < 0.2,
+            "drive sweep should not click/zipper, max step {max_step}"
+        );
     }
 
     #[test]
@@ -1069,6 +1307,138 @@ mod tests {
     }
 
     #[test]
+    fn sweet_flat_low_drive_is_nearly_transparent() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        // drive 0, tone 0 → no saturation gain, no exciter, no air tilt.
+        let frame = sweet_frame(0.0, 0.0);
+
+        let mut phase = 0.0_f32;
+        let mut max_diff = 0.0_f32;
+        for _ in 0..2048 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite());
+            max_diff = max_diff.max((output - input).abs());
+        }
+        assert!(
+            max_diff < 0.05,
+            "sweet at flat/low drive should be near-transparent, max diff {max_diff}"
+        );
+    }
+
+    #[test]
+    fn sweet_tone_max_is_not_harsh() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = sweet_frame(0.6, 1.0); // full tone = max exciter/air
+
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..48_000 {
+            phase += 1_000.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.35;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 1.0,
+            "sweet at full tone should stay clean (no harsh clipping), peak {peak}"
+        );
+        assert!(peak > 0.05, "sweet should still be audible, peak {peak}");
+    }
+
+    #[test]
+    fn sweet_white_noise_peak_is_safe() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = sweet_frame(1.0, 1.0);
+
+        let mut rng: u32 = 0x00c0_ffee;
+        let mut peak = 0.0_f32;
+        for _ in 0..8192 {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            let noise = ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0) * 0.3;
+            let output = character.process_sample(0, noise, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "sweet white noise peak should be controlled, {peak}"
+        );
+    }
+
+    #[test]
+    fn sweet_sine_keeps_harmonics_controlled() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = sweet_frame(1.0, 0.5);
+
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..4096 {
+            phase += 220.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.35;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 1.0,
+            "sweet sine harmonics should stay controlled, peak {peak}"
+        );
+    }
+
+    #[test]
+    fn sweet_mix_zero_is_dry_and_mix_one_is_wet() {
+        let dry_frame = CharacterFrame {
+            mode: CharacterMode::Sweet,
+            drive: 0.7,
+            tone: 0.7,
+            mix: 0.0,
+            output_gain: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.0,
+            mode_fade: 1.0,
+        };
+        let wet_frame = CharacterFrame {
+            mix: 1.0,
+            ..dry_frame
+        };
+
+        let mut dry_chain = Character::default();
+        dry_chain.prepare(48_000.0);
+        let mut wet_chain = Character::default();
+        wet_chain.prepare(48_000.0);
+
+        let mut phase = 0.0_f32;
+        let mut max_dry_diff = 0.0_f32;
+        let mut max_wet_diff = 0.0_f32;
+        for _ in 0..2048 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let dry = dry_chain.process_sample(0, input, &dry_frame);
+            let wet = wet_chain.process_sample(0, input, &wet_frame);
+            max_dry_diff = max_dry_diff.max((dry - input).abs());
+            max_wet_diff = max_wet_diff.max((wet - input).abs());
+        }
+        assert!(
+            max_dry_diff < 1e-4,
+            "mix 0 should be a dry passthrough, max diff {max_dry_diff}"
+        );
+        assert!(
+            max_wet_diff > 0.001,
+            "mix 1 should be audibly processed, max diff {max_wet_diff}"
+        );
+    }
+
+    #[test]
     fn fuzz_output_stays_finite_with_sine() {
         let mut character = Character::default();
         character.prepare(48_000.0);
@@ -1204,6 +1574,116 @@ mod tests {
         assert!(low > 1.3, "min fuzz gain should be > 1, got {low}");
         assert!(mid > 5.0, "mid fuzz gain should be strong, got {mid}");
         assert!(high > 20.0, "max fuzz gain should be extreme, got {high}");
+    }
+
+    #[test]
+    fn fuzz_max_drive_10s_does_not_explode() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = fuzz_frame(1.0, 0.5);
+
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..(48_000 * 10) {
+            phase += 110.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.5;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite(), "fuzz 10s max drive: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "fuzz max drive over 10s should stay bounded, peak={peak}"
+        );
+        assert!(
+            peak > 0.02,
+            "fuzz should sustain audible output, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn fuzz_sine_110hz_has_no_absurd_dc() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = fuzz_frame(1.0, 0.4);
+
+        let total = 48_000 * 2;
+        let half = total / 2;
+        let mut phase = 0.0_f32;
+        let mut sum = 0.0_f64;
+        let mut count = 0u32;
+        for index in 0..total {
+            phase += 110.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.5;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite());
+            if index >= half {
+                sum += output as f64;
+                count += 1;
+            }
+        }
+        let dc = (sum / count as f64).abs() as f32;
+        assert!(
+            dc < 0.05,
+            "fuzz 110Hz should not build a DC offset, got {dc}"
+        );
+    }
+
+    #[test]
+    fn fuzz_white_noise_is_controlled() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = fuzz_frame(1.0, 0.7);
+
+        let mut rng: u32 = 0x0bad_f00d;
+        let mut peak = 0.0_f32;
+        for _ in 0..8192 {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            let noise = ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0) * 0.3;
+            let output = character.process_sample(0, noise, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "fuzz white noise peak should be controlled, {peak}"
+        );
+    }
+
+    #[test]
+    fn fuzz_tone_sweep_has_no_zipper() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+
+        let total = 48_000usize; // 1 s sweep of tone 0 -> 1
+        let mut phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..total {
+            let tone = index as f32 / (total - 1) as f32;
+            let frame = fuzz_frame(0.7, tone);
+            phase += 220.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite(), "fuzz tone sweep: NaN/inf");
+            peak = peak.max(output.abs());
+            if index > 0 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            peak < 2.0,
+            "fuzz tone sweep peak should stay controlled, {peak}"
+        );
+        assert!(
+            max_step < 0.3,
+            "fuzz tone sweep should not zipper/burst, max step {max_step}"
+        );
     }
 
     #[test]
@@ -1498,6 +1978,120 @@ mod tests {
     }
 
     #[test]
+    fn howl_chord_signal_stays_controlled() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(0.7, 0.6);
+
+        let freqs = [220.0_f32, 277.0, 330.0]; // a chord, three partials
+        let mut phases = [0.0_f32; 3];
+        let mut peak = 0.0_f32;
+        let mut audible = false;
+        for _ in 0..(48_000 * 2) {
+            let mut input = 0.0_f32;
+            for (phase, freq) in phases.iter_mut().zip(freqs) {
+                *phase += freq / 48_000.0;
+                input += (*phase * core::f32::consts::TAU).sin();
+            }
+            input *= 0.18;
+            let output = character.process_sample(0, input, &frame);
+            assert!(output.is_finite(), "howl chord: NaN/inf");
+            peak = peak.max(output.abs());
+            if output.abs() > 0.02 {
+                audible = true;
+            }
+        }
+        assert!(peak < 5.0, "howl chord should stay controlled, peak={peak}");
+        assert!(audible, "howl chord should produce audible output");
+    }
+
+    #[test]
+    fn howl_mix_endpoints_dry_50_100() {
+        let dry_frame = CharacterFrame {
+            mode: CharacterMode::Howl,
+            drive: 0.7,
+            tone: 0.6,
+            mix: 0.0,
+            output_gain: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.0,
+            mode_fade: 1.0,
+        };
+        let half_frame = CharacterFrame {
+            mix: 0.5,
+            ..dry_frame
+        };
+        let wet_frame = CharacterFrame {
+            mix: 1.0,
+            ..dry_frame
+        };
+
+        let mut dry_chain = Character::default();
+        dry_chain.prepare(48_000.0);
+        let mut half_chain = Character::default();
+        half_chain.prepare(48_000.0);
+        let mut wet_chain = Character::default();
+        wet_chain.prepare(48_000.0);
+
+        let mut phase = 0.0_f32;
+        let mut max_dry_diff = 0.0_f32;
+        let mut half_peak = 0.0_f32;
+        let mut wet_diff = 0.0_f32;
+        for _ in 0..2048 {
+            phase += 330.0 / 48_000.0;
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let dry = dry_chain.process_sample(0, input, &dry_frame);
+            let half = half_chain.process_sample(0, input, &half_frame);
+            let wet = wet_chain.process_sample(0, input, &wet_frame);
+            assert!(dry.is_finite() && half.is_finite() && wet.is_finite());
+            max_dry_diff = max_dry_diff.max((dry - input).abs());
+            half_peak = half_peak.max(half.abs());
+            wet_diff = wet_diff.max((wet - input).abs());
+        }
+        assert!(
+            max_dry_diff < 1e-4,
+            "howl mix 0 should be dry, diff {max_dry_diff}"
+        );
+        assert!(half_peak <= 8.0, "howl mix 50 should stay bounded");
+        assert!(
+            wet_diff > 0.001,
+            "howl mix 100 should be audibly processed, diff {wet_diff}"
+        );
+    }
+
+    #[test]
+    fn howl_tone_max_does_not_whistle() {
+        // A whistle/apito is a long-ringing narrow resonance. Excite with an
+        // impulse at full tone + drive and confirm the tail decays rather than
+        // sustaining.
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(1.0, 1.0);
+        for _ in 0..32 {
+            character.process_sample(0, 0.0, &frame);
+        }
+        let _ = character.process_sample(0, 0.9, &frame);
+
+        let mut early = 0.0_f64;
+        let mut late = 0.0_f64;
+        for index in 0..8000 {
+            let output = character.process_sample(0, 0.0, &frame);
+            let energy = (output as f64) * (output as f64);
+            if index < 1000 {
+                early += energy;
+            } else if index >= 7000 {
+                late += energy;
+            }
+        }
+        let early_rms = (early / 1000.0).sqrt() as f32;
+        let late_rms = (late / 1000.0).sqrt() as f32;
+        assert!(
+            late_rms < early_rms * 0.25 + 1e-6,
+            "howl at full tone should not sustain a whistle (early {early_rms}, late {late_rms})"
+        );
+    }
+
+    #[test]
     fn swell_impulse_attack_is_reduced() {
         let mut character = Character::default();
         character.prepare(48_000.0);
@@ -1721,6 +2315,31 @@ mod tests {
         assert!(
             steady > 0.20,
             "steady state should be near full level after warmup, got {steady}"
+        );
+    }
+
+    #[test]
+    fn swell_max_drive_does_not_stay_closed() {
+        // At maximum drive (longest swell), a sustained note must still open up
+        // and reach its sustain level instead of staying gated shut.
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = swell_frame(1.0, 0.5);
+
+        let amplitude = 0.35;
+        // Hold a steady tone well past the longest attack time (~0.44 s).
+        for _ in 0..(48_000) {
+            character.process_sample(0, amplitude, &frame);
+        }
+        let mut peak = 0.0_f32;
+        for _ in 0..2048 {
+            let output = character.process_sample(0, amplitude, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak > 0.20,
+            "max-drive swell should open to sustain, peak={peak}"
         );
     }
 }

@@ -3,10 +3,11 @@ use nih_plug::prelude::*;
 use crate::params::TextureParams;
 
 use super::{
-    chain::{sanitize_sample, ModuleCore},
+    chain::{sanitize_sample, soft_clip_sample, ModuleCore},
     dry_wet::DryWet,
     gain::db_to_gain,
     smoothing::LinearSmoother,
+    util::{dc_blocker_step, one_pole_alpha, smoothstep, soft_saturate},
 };
 
 const MAX_CHANNELS: usize = 2;
@@ -97,6 +98,7 @@ struct StereoDelay {
 struct TextureFilter {
     integrator_1: [f32; MAX_CHANNELS],
     integrator_2: [f32; MAX_CHANNELS],
+    cutoff_state: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,12 +108,33 @@ struct SquashState {
     linked_envelope: f32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct CassetteState {
     lowpass_state: [f32; MAX_CHANNELS],
     highpass_state: [f32; MAX_CHANNELS],
     highpass_input: [f32; MAX_CHANNELS],
     instability_state: [f32; MAX_CHANNELS],
+    bump_state: [f32; MAX_CHANNELS],
+    hiss_env: [f32; MAX_CHANNELS],
+    wear_state: [f32; MAX_CHANNELS],
+    wear_rng: [u32; MAX_CHANNELS],
+}
+
+impl Default for CassetteState {
+    fn default() -> Self {
+        Self {
+            lowpass_state: [0.0; MAX_CHANNELS],
+            highpass_state: [0.0; MAX_CHANNELS],
+            highpass_input: [0.0; MAX_CHANNELS],
+            instability_state: [0.0; MAX_CHANNELS],
+            bump_state: [0.0; MAX_CHANNELS],
+            hiss_env: [0.0; MAX_CHANNELS],
+            wear_state: [0.0; MAX_CHANNELS],
+            // Distinct non-zero xorshift seeds per channel so the slow wear
+            // wander is decorrelated L/R but fully deterministic.
+            wear_rng: [0x68B5_2F1D, 0x1C3A_77E9],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +146,7 @@ struct BrokenState {
     hold_counter: [u32; MAX_CHANNELS],
     held_sample: [f32; MAX_CHANNELS],
     post_filter_state: [f32; MAX_CHANNELS],
+    dc_state: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -130,6 +154,9 @@ struct InterferenceState {
     carrier_phase: [f32; MAX_CHANNELS],
     parasite_phase: [f32; MAX_CHANNELS],
     amplitude_state: [f32; MAX_CHANNELS],
+    noise_band_hi: [f32; MAX_CHANNELS],
+    noise_band_lo: [f32; MAX_CHANNELS],
+    damp_state: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone)]
@@ -353,14 +380,22 @@ impl Texture {
         let band_limited = self
             .cassette
             .process_bandwidth(index, delayed, frame, self.sample_rate);
-        let hiss = self.cassette_hiss(index, frame);
-        let with_hiss = sanitize_sample(band_limited + hiss);
+        let wear = self.cassette.next_wear_gain(
+            index,
+            frame.degrade,
+            frame.random_drift,
+            self.sample_rate,
+        );
+        let worn = band_limited * wear;
+        let gate = self.cassette.hiss_gate(index, sample);
+        let hiss = self.cassette_hiss(index, frame, gate);
+        let with_hiss = sanitize_sample(worn + hiss);
         let degraded = apply_cassette_degradation(with_hiss, frame.degrade, hiss);
 
         sanitize_sample(degraded * cassette_level_compensation(frame.noise_amount, frame.degrade))
     }
 
-    fn cassette_hiss(&mut self, channel: usize, frame: &TextureFrame) -> f32 {
+    fn cassette_hiss(&mut self, channel: usize, frame: &TextureFrame, gate: f32) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         let shared = self.noise[0].next_colored(frame.noise_color);
         let local = if index == 0 {
@@ -371,7 +406,7 @@ impl Texture {
         let spread = frame.stereo_spread.clamp(0.0, 1.0);
         let hiss = (shared * (1.0 - spread)) + (local * spread);
 
-        sanitize_sample(hiss * cassette_noise_gain(frame.noise_amount, frame.degrade))
+        sanitize_sample(hiss * cassette_noise_gain(frame.noise_amount, frame.degrade) * gate)
     }
 
     fn process_broken(&mut self, channel: usize, sample: f32, frame: &TextureFrame) -> f32 {
@@ -412,8 +447,12 @@ impl Texture {
             frame.degrade,
             self.sample_rate,
         );
+        let blocked = self.broken.block_dc(index, filtered, self.sample_rate);
+        let compensated = blocked * broken_level_compensation(frame.noise_amount, frame.degrade);
 
-        sanitize_sample(filtered * broken_level_compensation(frame.noise_amount, frame.degrade))
+        // Final safety limiter: crush + artifacts + dropout transitions can stack,
+        // so a soft clip guarantees a musical ceiling instead of a hard edge.
+        soft_clip_sample(compensated)
     }
 
     fn process_interference(&mut self, channel: usize, sample: f32, frame: &TextureFrame) -> f32 {
@@ -457,6 +496,12 @@ impl Texture {
         };
         let spread = frame.stereo_spread.clamp(0.0, 1.0);
         let electric_noise = (shared_noise * (1.0 - spread)) + (local_noise * spread);
+        let band_noise = self.interference.bandpass_noise(
+            index,
+            electric_noise,
+            carrier_frequency,
+            self.sample_rate,
+        );
 
         let am_depth = interference_am_depth(amount, frame.degrade) * amplitude_wobble;
         let ring_depth = interference_ring_depth(amount, frame.degrade);
@@ -465,9 +510,16 @@ impl Texture {
         let tonal = (carrier * 0.72 + parasite * 0.28)
             * interference_tone_gain(amount, frame.degrade)
             * amplitude_wobble;
-        let noisy = electric_noise * interference_noise_gain(amount, frame.degrade);
+        let noisy = band_noise * interference_noise_gain(amount, frame.degrade);
         let wet = linear_crossfade(modulated, ringed + tonal + noisy, ring_depth);
-        let clipped = interference_soft_clip(wet, frame.degrade, amount);
+        let damped = self.interference.damp(
+            index,
+            wet,
+            frame.noise_color,
+            frame.degrade,
+            self.sample_rate,
+        );
+        let clipped = interference_soft_clip(damped, frame.degrade, amount);
 
         sanitize_sample(clipped * interference_level_compensation(amount, frame.degrade))
     }
@@ -515,6 +567,7 @@ impl TextureFilter {
     fn reset(&mut self) {
         self.integrator_1 = [0.0; MAX_CHANNELS];
         self.integrator_2 = [0.0; MAX_CHANNELS];
+        self.cutoff_state = [0.0; MAX_CHANNELS];
     }
 
     fn process(
@@ -527,7 +580,15 @@ impl TextureFilter {
     ) -> FilterOutput {
         let index = channel.min(MAX_CHANNELS - 1);
         let sample_rate = sample_rate.max(1.0);
-        let cutoff_hz = cutoff_hz.clamp(20.0, sample_rate * 0.45);
+        // Glide the cutoff (~4 ms one-pole) so moving Color quickly can't produce
+        // zipper noise. State starts at the target to avoid an opening sweep.
+        let target_cutoff = cutoff_hz.clamp(20.0, sample_rate * 0.45);
+        if self.cutoff_state[index] <= 0.0 {
+            self.cutoff_state[index] = target_cutoff;
+        }
+        let smooth_alpha = (1.0 / (sample_rate * 0.004)).clamp(0.0, 1.0);
+        self.cutoff_state[index] += smooth_alpha * (target_cutoff - self.cutoff_state[index]);
+        let cutoff_hz = self.cutoff_state[index].clamp(20.0, sample_rate * 0.45);
         let g = (core::f32::consts::PI * cutoff_hz / sample_rate).tan();
         let k = (2.0 - resonance.clamp(0.0, 1.0) * 1.25).clamp(0.70, 2.0);
         let a1 = 1.0 / (1.0 + g * (g + k));
@@ -594,6 +655,10 @@ impl CassetteState {
         self.highpass_state = [0.0; MAX_CHANNELS];
         self.highpass_input = [0.0; MAX_CHANNELS];
         self.instability_state = [0.0; MAX_CHANNELS];
+        self.bump_state = [0.0; MAX_CHANNELS];
+        self.hiss_env = [0.0; MAX_CHANNELS];
+        self.wear_state = [0.0; MAX_CHANNELS];
+        self.wear_rng = [0x68B5_2F1D, 0x1C3A_77E9];
     }
 
     fn next_instability(&mut self, channel: usize, drift: f32, stereo_spread: f32) -> f32 {
@@ -601,6 +666,43 @@ impl CassetteState {
         let amount = 0.20 + stereo_spread.clamp(0.0, 1.0) * 0.80;
         self.instability_state[index] += 0.004 * ((drift * amount) - self.instability_state[index]);
         sanitize_sample(self.instability_state[index])
+    }
+
+    /// Smooth, slow level sag emulating tape wear / mild dropout. Only engages
+    /// when both `degrade` and `random_drift` allow it, never sags below 0.55,
+    /// and wanders at sub-Hz speed so it can never click.
+    fn next_wear_gain(
+        &mut self,
+        channel: usize,
+        degrade: f32,
+        random_drift: f32,
+        sample_rate: f32,
+    ) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let mut state = self.wear_rng[index];
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        self.wear_rng[index] = state;
+        let target = state as f32 / u32::MAX as f32; // [0, 1]
+        let coeff = one_pole_alpha(0.8, sample_rate);
+        self.wear_state[index] += coeff * (target - self.wear_state[index]);
+        self.wear_state[index] = sanitize_sample(self.wear_state[index].clamp(0.0, 1.0));
+        let depth = degrade.clamp(0.0, 1.0) * random_drift.clamp(0.0, 1.0) * 0.30;
+        (1.0 - self.wear_state[index] * depth).clamp(0.55, 1.0)
+    }
+
+    /// Program-dependent hiss gate: hiss ducks toward a low floor during silence
+    /// (so pauses stay clean) and opens up under signal, where it is masked. The
+    /// gate only scales the already-capped hiss, so effective hiss never exceeds
+    /// the documented noise gain.
+    fn hiss_gate(&mut self, channel: usize, program: f32) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let target = program.abs();
+        let env = self.hiss_env[index];
+        let coeff = if target > env { 0.02 } else { 0.000_8 };
+        self.hiss_env[index] = sanitize_sample(env + coeff * (target - env));
+        0.4 + 0.6 * smoothstep(self.hiss_env[index] * 9.0)
     }
 
     fn process_bandwidth(
@@ -625,12 +727,19 @@ impl CassetteState {
             index,
             sample_rate,
         );
-        let lowpass_alpha =
-            (1.0 - (-core::f32::consts::TAU * cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+        let lowpass_alpha = one_pole_alpha(cutoff, sample_rate);
         self.lowpass_state[index] += lowpass_alpha * (highpassed - self.lowpass_state[index]);
         self.lowpass_state[index] = sanitize_sample(self.lowpass_state[index]);
 
-        self.lowpass_state[index]
+        // Subtle tape "head bump": a low-frequency resonance lift derived from
+        // the DC-blocked (highpassed) signal, so it warms the low-mids without
+        // introducing any DC or subsonic energy.
+        let bump_alpha = one_pole_alpha(cassette_head_bump_hz(), sample_rate);
+        self.bump_state[index] += bump_alpha * (highpassed - self.bump_state[index]);
+        self.bump_state[index] = sanitize_sample(self.bump_state[index]);
+        let bump = self.bump_state[index] * cassette_head_bump_gain(frame.degrade);
+
+        sanitize_sample(self.lowpass_state[index] + bump)
     }
 }
 
@@ -644,6 +753,7 @@ impl Default for BrokenState {
             hold_counter: [0; MAX_CHANNELS],
             held_sample: [0.0; MAX_CHANNELS],
             post_filter_state: [0.0; MAX_CHANNELS],
+            dc_state: [0.0; MAX_CHANNELS],
         }
     }
 }
@@ -656,6 +766,15 @@ impl BrokenState {
         self.hold_counter = [0; MAX_CHANNELS];
         self.held_sample = [0.0; MAX_CHANNELS];
         self.post_filter_state = [0.0; MAX_CHANNELS];
+        self.dc_state = [0.0; MAX_CHANNELS];
+    }
+
+    /// Remove any DC offset the bit-crush / sample-and-hold rounding can bias
+    /// into the signal, so "degrade" never parks the waveform off-center.
+    fn block_dc(&mut self, channel: usize, input: f32, sample_rate: f32) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let alpha = 1.0 - one_pole_alpha(18.0, sample_rate);
+        sanitize_sample(dc_blocker_step(&mut self.dc_state[index], input, alpha))
     }
 
     fn next_dropout_gain(
@@ -725,8 +844,7 @@ impl BrokenState {
     ) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         let cutoff = broken_post_filter_cutoff_hz(noise_color, degrade, sample_rate);
-        let alpha =
-            (1.0 - (-core::f32::consts::TAU * cutoff / sample_rate.max(1.0)).exp()).clamp(0.0, 1.0);
+        let alpha = one_pole_alpha(cutoff, sample_rate);
         self.post_filter_state[index] += alpha * (input - self.post_filter_state[index]);
         self.post_filter_state[index] = sanitize_sample(self.post_filter_state[index]);
         self.post_filter_state[index]
@@ -752,6 +870,51 @@ impl InterferenceState {
         self.carrier_phase = [0.0; MAX_CHANNELS];
         self.parasite_phase = [0.37, 0.61];
         self.amplitude_state = [1.0; MAX_CHANNELS];
+        self.noise_band_hi = [0.0; MAX_CHANNELS];
+        self.noise_band_lo = [0.0; MAX_CHANNELS];
+        self.damp_state = [0.0; MAX_CHANNELS];
+    }
+
+    /// Band-limit the electric noise around the interference frequency (a
+    /// difference-of-low-pass band-pass), so it reads as tonal radio static
+    /// instead of broadband white hiss.
+    fn bandpass_noise(
+        &mut self,
+        channel: usize,
+        input: f32,
+        carrier_hz: f32,
+        sample_rate: f32,
+    ) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let nyquist_guard = sample_rate.max(1.0) * 0.45;
+        let hi = (carrier_hz * 2.0).clamp(120.0, nyquist_guard);
+        let lo = (carrier_hz * 0.5).clamp(40.0, nyquist_guard);
+        let a_hi = one_pole_alpha(hi, sample_rate);
+        let a_lo = one_pole_alpha(lo, sample_rate);
+        self.noise_band_hi[index] += a_hi * (input - self.noise_band_hi[index]);
+        self.noise_band_lo[index] += a_lo * (input - self.noise_band_lo[index]);
+        self.noise_band_hi[index] = sanitize_sample(self.noise_band_hi[index]);
+        self.noise_band_lo[index] = sanitize_sample(self.noise_band_lo[index]);
+        sanitize_sample(self.noise_band_hi[index] - self.noise_band_lo[index])
+    }
+
+    /// Tone / damping stage: a one-pole low-pass on the wet interference whose
+    /// cutoff opens with `noise_color` and closes with `degrade`. This is the
+    /// harshness control — it tames the bright ring-mod / static edge.
+    fn damp(
+        &mut self,
+        channel: usize,
+        input: f32,
+        noise_color: f32,
+        degrade: f32,
+        sample_rate: f32,
+    ) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let cutoff = interference_damping_hz(noise_color, degrade, sample_rate);
+        let alpha = one_pole_alpha(cutoff, sample_rate);
+        self.damp_state[index] += alpha * (input - self.damp_state[index]);
+        self.damp_state[index] = sanitize_sample(self.damp_state[index]);
+        self.damp_state[index]
     }
 
     fn next_carrier(&mut self, channel: usize, frequency_hz: f32, sample_rate: f32) -> f32 {
@@ -920,6 +1083,18 @@ fn cassette_lowpass_cutoff_hz(
 }
 
 #[inline]
+fn cassette_head_bump_hz() -> f32 {
+    95.0
+}
+
+#[inline]
+fn cassette_head_bump_gain(degrade: f32) -> f32 {
+    // A gentle low-mid lift that grows as the tape wears; capped so it stays a
+    // warming "bump", never a boomy resonance.
+    (0.06 + degrade.clamp(0.0, 1.0) * 0.16).clamp(0.0, 0.22)
+}
+
+#[inline]
 fn cassette_highpass_hz(degrade: f32, noise_color: f32) -> f32 {
     let degrade = degrade.clamp(0.0, 1.0);
     let color = noise_color.clamp(0.0, 1.0);
@@ -942,7 +1117,7 @@ fn apply_cassette_degradation(sample: f32, degrade: f32, hiss: f32) -> f32 {
 
     let drive = 1.0 + degrade * 1.35;
     let bias = hiss * degrade * 0.18;
-    let saturated = ((sample + bias) * drive).tanh() / drive.tanh();
+    let saturated = soft_saturate(sample + bias, drive);
     let blend = degrade * 0.24;
 
     sanitize_sample((sample * (1.0 - blend)) + (saturated * blend))
@@ -1085,7 +1260,7 @@ fn interference_noise_gain(noise_amount: f32, degrade: f32) -> f32 {
 #[inline]
 fn interference_soft_clip(sample: f32, degrade: f32, noise_amount: f32) -> f32 {
     let drive = 1.0 + degrade.clamp(0.0, 1.0) * 1.25 + noise_amount.clamp(0.0, 1.0) * 0.45;
-    (sample * drive).tanh() / drive.tanh()
+    soft_saturate(sample, drive)
 }
 
 #[inline]
@@ -1093,6 +1268,17 @@ fn interference_level_compensation(noise_amount: f32, degrade: f32) -> f32 {
     let amount = noise_amount.clamp(0.0, 1.0);
     let degrade = degrade.clamp(0.0, 1.0);
     (1.0 - amount * 0.025 - degrade * 0.035).clamp(0.90, 1.0)
+}
+
+#[inline]
+fn interference_damping_hz(noise_color: f32, degrade: f32, sample_rate: f32) -> f32 {
+    let color = noise_color.clamp(0.0, 1.0);
+    let degrade = degrade.clamp(0.0, 1.0);
+    // Brighter with color, darker (more damped) as degrade climbs — this is what
+    // keeps an aggressive setting from turning into a harsh fizz.
+    let bright = 3_000.0 + color * 9_000.0;
+    let damped = bright * (1.0 - degrade * 0.55);
+    damped.clamp(1_800.0, 16_000.0_f32.min(sample_rate.max(1.0) * 0.45))
 }
 
 #[inline]
@@ -1122,14 +1308,23 @@ fn squash_compression_gain(envelope: f32, degrade: f32) -> f32 {
 
     let threshold_db = -4.0 - degrade * 30.0;
     let ratio = 1.0 + degrade * degrade * 17.0;
+    let knee_db = 6.0;
     let level_db = amplitude_to_db(envelope);
-    if level_db <= threshold_db {
-        return 1.0;
-    }
+    let over = level_db - threshold_db;
+    let slope = 1.0 / ratio - 1.0; // gain reduction (dB) per dB over threshold
 
-    let compressed_db = threshold_db + ((level_db - threshold_db) / ratio);
-    let gain_db = (compressed_db - level_db).clamp(-36.0, 0.0);
-    db_to_gain(gain_db)
+    // Soft knee: no reduction below the knee, the full ratio above it, and a
+    // smooth quadratic blend across the ±3 dB knee so compression engages
+    // gradually instead of snapping on — that's what keeps it from pumping.
+    let gain_db = if over <= -knee_db * 0.5 {
+        0.0
+    } else if over >= knee_db * 0.5 {
+        slope * over
+    } else {
+        let knee_pos = over + knee_db * 0.5;
+        slope * knee_pos * knee_pos / (2.0 * knee_db)
+    };
+    db_to_gain(gain_db.clamp(-36.0, 0.0))
 }
 
 #[inline]
@@ -1146,7 +1341,7 @@ fn squash_makeup_gain(degrade: f32) -> f32 {
 fn squash_soft_clip(sample: f32, degrade: f32) -> f32 {
     let degrade = degrade.clamp(0.0, 1.0);
     let drive = 1.0 + degrade * 1.8;
-    let clipped = (sample * drive).tanh() / drive.tanh();
+    let clipped = soft_saturate(sample, drive);
     let blend = degrade * 0.55;
 
     sanitize_sample((sample * (1.0 - blend)) + (clipped * blend))
@@ -1160,7 +1355,7 @@ fn apply_filter_drive(sample: f32, degrade: f32) -> f32 {
     }
 
     let drive = 1.0 + degrade * 2.2;
-    let driven = (sample * drive).tanh() / drive.tanh();
+    let driven = soft_saturate(sample, drive);
     sanitize_sample((sample * (1.0 - degrade * 0.28)) + (driven * degrade * 0.28))
 }
 
@@ -1206,12 +1401,6 @@ fn texture_filter_level_compensation(degrade: f32) -> f32 {
 }
 
 #[inline]
-fn smoothstep(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
-}
-
-#[inline]
 fn read_interpolated(buffer: &[f32], write_pos: usize, delay_samples: f32) -> f32 {
     let len = buffer.len();
     let mut read_pos = write_pos as f32 - delay_samples;
@@ -1244,12 +1433,13 @@ mod tests {
     use super::{
         advance_phase, broken_artifact_gain, broken_bitcrush, broken_dropout_smoothing_coeff,
         broken_hold_period, broken_level_compensation, broken_rate_reduce_mix,
-        cassette_level_compensation, cassette_lowpass_cutoff_hz, cassette_noise_gain,
-        interference_am_depth, interference_frequency_hz, interference_level_compensation,
-        interference_noise_gain, interference_parasite_frequency_hz, interference_ring_depth,
-        interference_tone_gain, read_interpolated, squash_compression_gain, squash_makeup_gain,
-        texture_filter_cutoff_hz, texture_filter_resonance, BrokenState, DriftGenerator,
-        NoiseGenerator, StereoDelay, Texture, TextureFrame, TextureMode,
+        cassette_head_bump_gain, cassette_level_compensation, cassette_lowpass_cutoff_hz,
+        cassette_noise_gain, interference_am_depth, interference_damping_hz,
+        interference_frequency_hz, interference_level_compensation, interference_noise_gain,
+        interference_parasite_frequency_hz, interference_ring_depth, interference_tone_gain,
+        read_interpolated, squash_compression_gain, squash_makeup_gain, texture_filter_cutoff_hz,
+        texture_filter_resonance, BrokenState, DriftGenerator, NoiseGenerator, StereoDelay,
+        Texture, TextureFrame, TextureMode,
     };
 
     fn test_frame(mode: TextureMode) -> TextureFrame {
@@ -1446,6 +1636,152 @@ mod tests {
         assert!(cassette_level_compensation(1.0, 1.0) >= 0.90);
         assert!(cassette_lowpass_cutoff_hz(0.0, 1.0, 1.0, 0, 48_000.0) >= 1_800.0);
         assert!(cassette_lowpass_cutoff_hz(1.0, 0.0, 1.0, 1, 48_000.0) <= 16_000.0);
+        // Head bump is always a subtle lift that grows with wear and stays capped.
+        assert!(cassette_head_bump_gain(0.0) >= 0.0);
+        assert!(cassette_head_bump_gain(1.0) > cassette_head_bump_gain(0.0));
+        assert!(cassette_head_bump_gain(1.0) <= 0.22);
+    }
+
+    fn cassette_steady_output_rms(freq_hz: f32, degrade: f32, noise_color: f32) -> f32 {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // No hiss, no wow/flutter, no drift: isolate the tone-shaping path.
+        let frame = cassette_frame(0.0, 0.0, 0.0, 0.0, noise_color, degrade, 0.0);
+        let mut phase = 0.0_f32;
+        let mut sum = 0.0_f32;
+        let mut count = 0.0_f32;
+        for index in 0..20_000 {
+            phase += freq_hz / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 12_000 {
+                sum += output * output;
+                count += 1.0;
+            }
+        }
+        (sum / count).sqrt()
+    }
+
+    #[test]
+    fn cassette_tone_rolloff_attenuates_highs_more_than_lows() {
+        // A worn cassette should pass low-mids while clearly rolling off highs.
+        let low = cassette_steady_output_rms(300.0, 0.6, 0.25);
+        let high = cassette_steady_output_rms(8_000.0, 0.6, 0.25);
+        assert!(
+            low > high * 1.5,
+            "cassette should roll off highs musically (low={low}, high={high})"
+        );
+    }
+
+    #[test]
+    fn cassette_low_noise_silence_stays_subtle() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // Low noise amount, fully worn, on silence: must not become absurd.
+        let frame = cassette_frame(0.0, 0.0, 0.0, 0.15, 0.6, 1.0, 1.0);
+        let mut peak = 0.0_f32;
+        for _ in 0..8_000 {
+            let output = texture.process_sample_for_channel(0, 0.0, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 0.02,
+            "cassette low-noise silence should stay subtle, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn cassette_max_drive_wear_is_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // Everything maxed: drive, wear (degrade+drift), hiss, modulation.
+        let mut frame = cassette_frame(1.0, 1.0, 1.0, 1.0, 0.9, 1.0, 1.0);
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..32_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            frame.wow_phase = advance_phase(frame.wow_phase, 1.4, 48_000.0);
+            frame.flutter_phase = advance_phase(frame.flutter_phase, 11.0, 48_000.0);
+            let transient = if index % 4_000 == 0 { 0.9 } else { 0.0 };
+            let input = (phase * core::f32::consts::TAU).sin() * 0.7 + transient;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "cassette max: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 3.0,
+            "cassette at max drive/wear should stay safe, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn cassette_wow_flutter_has_no_clicks() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let mut frame = cassette_frame(1.0, 1.0, 0.6, 0.0, 0.5, 0.5, 0.6);
+        let mut phase = 0.0_f32;
+        let mut prev = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..40_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            frame.wow_phase = advance_phase(frame.wow_phase, 1.5, 48_000.0);
+            frame.flutter_phase = advance_phase(frame.flutter_phase, 12.0, 48_000.0);
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            if index > 2_000 {
+                max_step = max_step.max((output - prev).abs());
+            }
+            prev = output;
+        }
+        // A click would show up as a sample-to-sample jump far larger than the
+        // input slew; modulation must stay smooth (interpolated delay).
+        assert!(
+            max_step < 0.2,
+            "cassette wow/flutter produced a click (max step={max_step})"
+        );
+    }
+
+    #[test]
+    fn cassette_mono_sum_preserves_signal() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // Strong stereo instability, but a mono fold-down must not cancel away.
+        let mut frame = cassette_frame(0.5, 0.5, 0.5, 0.0, 0.5, 0.4, 1.0);
+        let mut phase = 0.0_f32;
+        let mut mono_sum = 0.0_f32;
+        let mut count = 0.0_f32;
+        for index in 0..16_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            frame.wow_phase = advance_phase(frame.wow_phase, 1.0, 48_000.0);
+            frame.flutter_phase = advance_phase(frame.flutter_phase, 9.0, 48_000.0);
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let left = texture.process_sample_for_channel(0, input, &frame);
+            let right = texture.process_sample_for_channel(1, input, &frame);
+            let mono = 0.5 * (left + right);
+            if index > 4_000 {
+                mono_sum += mono * mono;
+                count += 1.0;
+            }
+        }
+        let mono_rms = (mono_sum / count).sqrt();
+        assert!(
+            mono_rms > 0.02,
+            "cassette must stay mono-compatible (mono rms={mono_rms})"
+        );
     }
 
     fn broken_frame(
@@ -1599,6 +1935,80 @@ mod tests {
         assert!(broken_level_compensation(1.0, 1.0) >= 0.88);
     }
 
+    #[test]
+    fn broken_seed_is_stable_across_runs() {
+        // Same defaults + same input must give bit-identical output: the random
+        // generators are seeded, not wall-clock, so presets recall exactly.
+        let frame = broken_frame(0.9, 0.6, 0.6, 0.85, 0.7);
+        let render = || {
+            let mut texture = Texture::default();
+            texture.prepare(48_000.0);
+            let mut phase = 0.0_f32;
+            let mut out = Vec::with_capacity(8_000);
+            for _ in 0..8_000 {
+                phase += 220.0 / 48_000.0;
+                if phase >= 1.0 {
+                    phase -= phase.floor();
+                }
+                let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+                out.push(texture.process_sample_for_channel(0, input, &frame));
+            }
+            out
+        };
+        assert_eq!(render(), render(), "broken must be deterministic per seed");
+    }
+
+    #[test]
+    fn broken_removes_dc_offset() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // Heavy crush/hold can bias the waveform; feed a DC-heavy input and check
+        // the running mean of the output stays centered.
+        let frame = broken_frame(0.6, 0.4, 0.5, 0.9, 0.5);
+        let mut phase = 0.0_f32;
+        let mut sum = 0.0_f64;
+        let mut count = 0.0_f64;
+        for index in 0..40_000 {
+            phase += 110.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            // Asymmetric input with a deliberate +0.3 DC pedestal.
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3 + 0.3;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            if index > 8_000 {
+                sum += output as f64;
+                count += 1.0;
+            }
+        }
+        let mean = (sum / count).abs();
+        assert!(
+            mean < 0.02,
+            "broken should not leave a DC offset, mean={mean}"
+        );
+    }
+
+    #[test]
+    fn broken_max_amount_is_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let frame = broken_frame(1.0, 1.0, 0.9, 1.0, 1.0);
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..40_000 {
+            phase += 330.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let transient = if index % 3_000 == 0 { 1.0 } else { 0.0 };
+            let input = (phase * core::f32::consts::TAU).sin() * 0.8 + transient;
+            let output = texture.process_sample_for_channel(index % 2, input, &frame);
+            assert!(output.is_finite(), "broken max: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(peak < 2.0, "broken at max should stay safe, peak={peak}");
+    }
+
     fn interference_frame(
         random_drift: f32,
         noise_amount: f32,
@@ -1731,6 +2141,98 @@ mod tests {
         assert!(interference_tone_gain(1.0, 1.0) <= 0.023);
         assert!(interference_noise_gain(1.0, 1.0) <= 0.026);
         assert!(interference_level_compensation(1.0, 1.0) >= 0.90);
+        // Damping opens with color and closes with degrade (harshness control).
+        let bright = interference_damping_hz(1.0, 0.0, 48_000.0);
+        let dark = interference_damping_hz(0.0, 1.0, 48_000.0);
+        assert!(
+            bright > dark,
+            "color should open damping (bright={bright}, dark={dark})"
+        );
+        assert!(dark >= 1_800.0);
+        assert!(bright <= 16_000.0);
+    }
+
+    #[test]
+    fn interference_max_amount_is_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let frame = interference_frame(1.0, 1.0, 0.85, 1.0, 1.0);
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..40_000 {
+            phase += 440.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let input = (phase * core::f32::consts::TAU).sin() * 0.8;
+            let output = texture.process_sample_for_channel(index % 2, input, &frame);
+            assert!(output.is_finite(), "interference max: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "interference at max should stay safe, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn interference_color_sweep_has_no_zipper() {
+        // Sweeping the interference frequency (color) must not produce harsh
+        // zipper steps: the oscillators and filters are continuous.
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let mut frame = interference_frame(0.3, 0.7, 0.0, 0.5, 0.4);
+        let mut phase = 0.0_f32;
+        let mut prev = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..48_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            frame.noise_color = (index as f32 / 48_000.0).clamp(0.0, 1.0);
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 2_000 {
+                max_step = max_step.max((output - prev).abs());
+            }
+            prev = output;
+        }
+        assert!(
+            max_step < 0.25,
+            "interference color sweep should not zipper (max step={max_step})"
+        );
+    }
+
+    #[test]
+    fn interference_mono_sum_does_not_cancel() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // Full stereo spread, but a mono fold-down must not fully cancel.
+        let frame = interference_frame(0.4, 0.6, 0.4, 0.4, 1.0);
+        let mut phase = 0.0_f32;
+        let mut mono_sum = 0.0_f32;
+        let mut count = 0.0_f32;
+        for index in 0..16_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let left = texture.process_sample_for_channel(0, input, &frame);
+            let right = texture.process_sample_for_channel(1, input, &frame);
+            let mono = 0.5 * (left + right);
+            if index > 4_000 {
+                mono_sum += mono * mono;
+                count += 1.0;
+            }
+        }
+        let mono_rms = (mono_sum / count).sqrt();
+        assert!(
+            mono_rms > 0.02,
+            "interference must stay mono-compatible (mono rms={mono_rms})"
+        );
     }
 
     fn squash_frame(degrade: f32, noise_color: f32, stereo_spread: f32) -> TextureFrame {
@@ -1818,6 +2320,59 @@ mod tests {
         assert!(squash_compression_gain(1.0, 1.0) < 1.0);
         assert_eq!(squash_compression_gain(0.1, 0.0), 1.0);
         assert!(squash_makeup_gain(1.0) <= 1.90);
+    }
+
+    #[test]
+    fn squash_soft_knee_engages_gradually() {
+        // Just under the threshold the soft knee already applies a touch of
+        // reduction, where a hard knee would still be exactly unity.
+        let degrade = 0.6;
+        let threshold_db = -4.0 - degrade * 30.0;
+        let just_under = 10.0_f32.powf((threshold_db - 1.0) / 20.0);
+        let gain = squash_compression_gain(just_under, degrade);
+        assert!(
+            gain < 1.0 && gain > 0.9,
+            "soft knee should apply gentle reduction just under threshold, gain={gain}"
+        );
+    }
+
+    #[test]
+    fn squash_silence_stays_silent() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let frame = squash_frame(1.0, 0.5, 0.0);
+        let mut peak = 0.0_f32;
+        for _ in 0..8192 {
+            let output = texture.process_sample_for_channel(0, 0.0, &frame);
+            assert!(output.is_finite());
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 1e-6,
+            "squash should stay silent on silence, peak {peak}"
+        );
+    }
+
+    #[test]
+    fn squash_max_amount_is_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let frame = squash_frame(1.0, 0.5, 0.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for index in 0..16000 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.6 + if index % 2000 == 0 { 0.9 } else { 0.0 };
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "squash max amount: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 3.0,
+            "squash at max amount should stay safe, peak={peak}"
+        );
     }
 
     fn filter_frame(noise_color: f32, degrade: f32, stereo_spread: f32) -> TextureFrame {
@@ -1926,5 +2481,100 @@ mod tests {
         assert!(texture_filter_cutoff_hz(0.0, 1.0, 0, 48_000.0) >= 80.0);
         assert!(texture_filter_cutoff_hz(1.0, 1.0, 1, 48_000.0) <= 16_000.0);
         assert!(texture_filter_resonance(1.0) < 0.70);
+    }
+
+    #[test]
+    fn filter_color_sweep_has_no_strong_zipper() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+
+        let tau = core::f32::consts::TAU;
+        let total = 48_000usize;
+        let mut sig_phase = 0.0_f32;
+        let mut previous = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..total {
+            let color = index as f32 / (total - 1) as f32; // sweep Color 0 -> 1
+            let frame = filter_frame(color, 0.4, 0.0);
+            sig_phase += 220.0 / 48_000.0;
+            let input = (sig_phase * tau).sin() * 0.35;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            if index > 2000 {
+                max_step = max_step.max((output - previous).abs());
+            }
+            previous = output;
+        }
+        assert!(
+            max_step < 0.1,
+            "filter color sweep should not zipper, max step {max_step}"
+        );
+    }
+
+    #[test]
+    fn filter_max_resonance_does_not_explode() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // degrade = 1.0 maps to maximum resonance + drive.
+        let frame = filter_frame(0.55, 1.0, 0.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..48_000 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.4;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite(), "filter max resonance: NaN/inf");
+            peak = peak.max(output.abs());
+        }
+        assert!(
+            peak < 2.0,
+            "filter at max resonance should stay controlled, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn filter_white_noise_peak_is_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let frame = filter_frame(0.7, 0.8, 1.0);
+
+        let mut rng: u32 = 0xf117_e2a1;
+        let mut peak = 0.0_f32;
+        for _ in 0..8192 {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            let noise = ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0) * 0.3;
+            let output = texture.process_sample_for_channel(0, noise, &frame);
+            assert!(output.is_finite());
+            assert!(output.abs() <= 8.0);
+            peak = peak.max(output.abs());
+        }
+        assert!(peak < 1.5, "filter white noise peak should be safe, {peak}");
+    }
+
+    #[test]
+    fn filter_default_color_is_transparent() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        // Color 0.5 (morph midpoint) + degrade 0 = pass-through.
+        let frame = filter_frame(0.5, 0.0, 0.0);
+
+        let tau = core::f32::consts::TAU;
+        let mut phase = 0.0_f32;
+        let mut max_diff = 0.0_f32;
+        for _ in 0..4096 {
+            phase += 440.0 / 48_000.0;
+            let input = (phase * tau).sin() * 0.3;
+            let output = texture.process_sample_for_channel(0, input, &frame);
+            assert!(output.is_finite());
+            max_diff = max_diff.max((output - input).abs());
+        }
+        assert!(
+            max_diff < 1e-3,
+            "filter at default color should be transparent, max diff {max_diff}"
+        );
     }
 }

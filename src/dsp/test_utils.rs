@@ -96,6 +96,52 @@ pub fn assert_peak_below(label: &str, channels: &[Vec<f32>; 2], limit: f32) {
     }
 }
 
+/// Mean (DC) value of a channel over `[start, end)`. A well-behaved processor
+/// fed a symmetric signal should settle near zero.
+pub fn dc_offset_range(channels: &[Vec<f32>; 2], start: usize, end: usize) -> [f32; 2] {
+    let mut result = [0.0_f32; 2];
+    for (index, channel) in channels.iter().enumerate() {
+        let end = end.min(channel.len());
+        if end <= start {
+            continue;
+        }
+        let sum: f64 = channel[start..end].iter().map(|s| *s as f64).sum();
+        result[index] = (sum / (end - start) as f64) as f32;
+    }
+    result
+}
+
+/// RMS level of a channel over `[start, end)`.
+pub fn rms_range(channels: &[Vec<f32>; 2], start: usize, end: usize) -> [f32; 2] {
+    let mut result = [0.0_f32; 2];
+    for (index, channel) in channels.iter().enumerate() {
+        let end = end.min(channel.len());
+        if end <= start {
+            continue;
+        }
+        let sum_sq: f64 = channel[start..end]
+            .iter()
+            .map(|s| (*s as f64).powi(2))
+            .sum();
+        result[index] = (sum_sq / (end - start) as f64).sqrt() as f32;
+    }
+    result
+}
+
+/// Asserts the steady-state DC offset (measured over the latter half of the
+/// buffer, after transients settle) stays below `max_dc` on both channels.
+pub fn assert_no_dc_offset(label: &str, channels: &[Vec<f32>; 2], max_dc: f32) {
+    let len = channels[0].len();
+    let start = len / 2;
+    let dc = dc_offset_range(channels, start, len);
+    for (channel_index, value) in dc.iter().enumerate() {
+        assert!(
+            value.abs() <= max_dc,
+            "{label} has DC offset {value} on channel {channel_index} (limit {max_dc})"
+        );
+    }
+}
+
 pub fn max_abs_difference(left: &[Vec<f32>; 2], right: &[Vec<f32>; 2]) -> f32 {
     left.iter()
         .zip(right.iter())
