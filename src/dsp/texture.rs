@@ -7,7 +7,7 @@ use super::{
     dry_wet::DryWet,
     gain::db_to_gain,
     smoothing::LinearSmoother,
-    transport::{hz_for_division, TransportFrame},
+    transport::{hz_for_division, samples_for_division, TransportFrame},
     util::{dc_blocker_step, one_pole_alpha, smoothstep, soft_saturate},
 };
 
@@ -70,6 +70,9 @@ pub struct Texture {
     mode_crossfade: LinearSmoother,
     last_output: [f32; MAX_CHANNELS],
     has_processed: bool,
+    /// Tempo-synced Broken dropout period in samples (set per block when sync is
+    /// on); `None` keeps the original free-running random dropouts.
+    broken_sync_samples: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,6 +151,7 @@ struct BrokenState {
     held_sample: [f32; MAX_CHANNELS],
     post_filter_state: [f32; MAX_CHANNELS],
     dc_state: [f32; MAX_CHANNELS],
+    sync_counter: [usize; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -199,6 +203,7 @@ impl Default for Texture {
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
             last_output: [0.0; MAX_CHANNELS],
             has_processed: false,
+            broken_sync_samples: None,
         };
         texture.prepare(44_100.0);
         texture
@@ -260,6 +265,18 @@ impl Texture {
             hz_for_division(transport.bpm, params.sync_division.value()).clamp(0.1, 2.0)
         } else {
             manual_wow_rate
+        };
+        // Broken: tempo-locked dropout period (clamped so the glitch rate can't
+        // get absurdly fast), or free-running random when sync is off.
+        self.broken_sync_samples = if params.sync_enabled.value() {
+            let period = samples_for_division(
+                transport.bpm,
+                params.sync_division.value(),
+                self.sample_rate,
+            );
+            Some(period.max((self.sample_rate * 0.04) as usize))
+        } else {
+            None
         };
         let flutter_depth = params.flutter_depth.smoothed.next().clamp(0.0, 1.0);
         let flutter_rate_hz = params.flutter_rate.smoothed.next().clamp(3.0, 20.0);
@@ -438,6 +455,7 @@ impl Texture {
             frame.degrade,
             frame.random_drift,
             self.sample_rate,
+            self.broken_sync_samples,
         );
         let held = self.broken.next_held_sample(
             index,
@@ -767,6 +785,7 @@ impl Default for BrokenState {
             held_sample: [0.0; MAX_CHANNELS],
             post_filter_state: [0.0; MAX_CHANNELS],
             dc_state: [0.0; MAX_CHANNELS],
+            sync_counter: [0; MAX_CHANNELS],
         }
     }
 }
@@ -780,6 +799,7 @@ impl BrokenState {
         self.held_sample = [0.0; MAX_CHANNELS];
         self.post_filter_state = [0.0; MAX_CHANNELS];
         self.dc_state = [0.0; MAX_CHANNELS];
+        self.sync_counter = [0; MAX_CHANNELS];
     }
 
     /// Remove any DC offset the bit-crush / sample-and-hold rounding can bias
@@ -796,26 +816,46 @@ impl BrokenState {
         degrade: f32,
         random_drift: f32,
         sample_rate: f32,
+        sync_period: Option<usize>,
     ) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         let degrade = degrade.clamp(0.0, 1.0);
         let drift = random_drift.clamp(0.0, 1.0);
         let sample_rate = sample_rate.max(1.0);
 
-        if self.dropout_remaining[index] == 0 {
-            self.dropout_target[index] = 1.0;
-            let events_per_second = broken_dropout_events_per_second(degrade, drift);
-            if self.random_unit(index) < events_per_second / sample_rate {
-                let duration_ms = 4.0 + self.random_unit(index) * (10.0 + drift * 28.0);
-                self.dropout_remaining[index] =
-                    ((duration_ms * 0.001 * sample_rate).round() as u32).max(1);
-                self.dropout_target[index] =
-                    0.08 + self.random_unit(index) * (0.50 - degrade * 0.30);
+        if let Some(period) = sync_period {
+            // Tempo-locked gate: drop out for ~40% of each division, on the beat.
+            // The same mini-fade smoothing below keeps it click-free (no hard cut).
+            let period = period.max(1);
+            self.sync_counter[index] += 1;
+            if self.dropout_remaining[index] > 0 {
+                self.dropout_remaining[index] -= 1;
+                if self.dropout_remaining[index] == 0 {
+                    self.dropout_target[index] = 1.0;
+                }
+            }
+            if self.sync_counter[index] >= period {
+                self.sync_counter[index] = 0;
+                self.dropout_remaining[index] = ((period as f32) * 0.4).round().max(1.0) as u32;
+                self.dropout_target[index] = 0.08 + (1.0 - degrade) * 0.10;
             }
         } else {
-            self.dropout_remaining[index] -= 1;
+            self.sync_counter[index] = 0;
             if self.dropout_remaining[index] == 0 {
                 self.dropout_target[index] = 1.0;
+                let events_per_second = broken_dropout_events_per_second(degrade, drift);
+                if self.random_unit(index) < events_per_second / sample_rate {
+                    let duration_ms = 4.0 + self.random_unit(index) * (10.0 + drift * 28.0);
+                    self.dropout_remaining[index] =
+                        ((duration_ms * 0.001 * sample_rate).round() as u32).max(1);
+                    self.dropout_target[index] =
+                        0.08 + self.random_unit(index) * (0.50 - degrade * 0.30);
+                }
+            } else {
+                self.dropout_remaining[index] -= 1;
+                if self.dropout_remaining[index] == 0 {
+                    self.dropout_target[index] = 1.0;
+                }
             }
         }
 
@@ -1459,6 +1499,48 @@ mod tests {
     use nih_plug::prelude::{BoolParam, EnumParam};
 
     #[test]
+    fn texture_sync_broken_dropout_is_periodic_and_click_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let transport = TransportFrame {
+            bpm: 120.0,
+            ..TransportFrame::default()
+        };
+        let mut params = TextureParams::default();
+        params.mode = EnumParam::new("m", TextureMode::Broken);
+        params.bypass = BoolParam::new("b", false);
+        params.sync_enabled = BoolParam::new("s", true);
+        params.sync_division = EnumParam::new("d", NoteDivision::Sixteenth);
+        params.reset_smoothers();
+
+        let mut prev = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut phase = 0.0_f32;
+        for index in 0..48_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= 1.0;
+            }
+            let frame = texture.next_frame(&params, &transport);
+            let input = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let out = texture.process_sample_for_channel(0, input, &frame);
+            assert!(
+                out.is_finite() && out.abs() <= 8.0,
+                "broken sync output {out}"
+            );
+            if index > 1_000 {
+                max_step = max_step.max((out - prev).abs());
+            }
+            prev = out;
+        }
+        // The tempo gate uses the smoothed mini-fades, so no hard click.
+        assert!(
+            max_step < 0.5,
+            "broken sync produced a click (step {max_step})"
+        );
+    }
+
+    #[test]
     fn texture_sync_cassette_wow_stays_finite_across_divisions() {
         let mut texture = Texture::default();
         texture.prepare(48_000.0);
@@ -1963,7 +2045,7 @@ mod tests {
         let mut max_step = 0.0_f32;
 
         for _ in 0..128 {
-            let gain = state.next_dropout_gain(0, 1.0, 1.0, 48_000.0);
+            let gain = state.next_dropout_gain(0, 1.0, 1.0, 48_000.0, None);
             max_step = max_step.max((gain - previous).abs());
             previous = gain;
         }
