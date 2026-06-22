@@ -11,27 +11,33 @@ use super::theme::{
 };
 
 pub(crate) fn brand_mark(ui: &mut egui::Ui, colors: ModuleColors, theme: Theme) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(33.0, 24.0), Sense::hover());
+    // The CC-22 logo: a cream rounded square with four vertical bars in the
+    // module colours (Character / Movement / Diffusion / Texture).
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::hover());
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(8), theme.text_dark);
+        .rect_filled(rect, CornerRadius::same(7), theme.paper);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(7),
+        Stroke::new(1.0, theme.card_edge),
+        StrokeKind::Inside,
+    );
 
-    let dots = [
-        (colors.character, 0.22, 0.34),
-        (colors.movement, 0.46, 0.66),
-        (colors.diffusion, 0.70, 0.34),
-        (colors.texture, 0.34, 0.78),
-        (colors.eq, 0.76, 0.72),
+    let bars = [
+        colors.character,
+        colors.movement,
+        colors.diffusion,
+        colors.texture,
     ];
-
-    for (color, x, y) in dots {
-        ui.painter().circle_filled(
-            Pos2::new(
-                rect.left() + rect.width() * x,
-                rect.top() + rect.height() * y,
-            ),
-            2.6,
-            color,
+    let inner = rect.shrink2(Vec2::new(5.5, 6.0));
+    let bar_w = 2.3_f32;
+    for (index, color) in bars.iter().enumerate() {
+        let center_x = inner.left() + inner.width() * (index as f32 + 0.5) / bars.len() as f32;
+        let bar = Rect::from_center_size(
+            Pos2::new(center_x, inner.center().y),
+            Vec2::new(bar_w, inner.height()),
         );
+        ui.painter().rect_filled(bar, CornerRadius::same(1), *color);
     }
 }
 

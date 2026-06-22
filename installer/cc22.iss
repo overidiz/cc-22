@@ -27,6 +27,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 PrivilegesRequired=admin
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
+SetupIconFile=..\assets\cc22.ico
+UninstallDisplayIcon={app}\CC-22.exe
 
 [Types]
 Name: "full"; Description: "Full installation (VST3 + CLAP + Standalone)"
