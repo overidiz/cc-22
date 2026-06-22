@@ -12,6 +12,7 @@ pub mod ui;
 mod mode_exposure_tests;
 
 use dsp::denormals::FlushDenormals;
+use dsp::transport::{TransportFrame, DEFAULT_BPM};
 use dsp::Processor;
 use meters::Meters;
 use params::Cc22Params;
@@ -122,12 +123,27 @@ impl Plugin for Cc22 {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // Flush denormals to zero for the duration of this block so the IIR /
         // feedback loops in the chain can't spike CPU on a decaying tail.
         let _denormals = FlushDenormals::new();
-        self.process_block(buffer);
+
+        // Snapshot the host transport for tempo-synced modes. BPM is sanitized
+        // (NaN/out-of-range -> 120); positions are passed through as-is.
+        let host = context.transport();
+        let transport = TransportFrame {
+            bpm: TransportFrame::sanitize_bpm(host.tempo.unwrap_or(DEFAULT_BPM as f64) as f32),
+            playing: host.playing,
+            ppq_position: host.pos_beats(),
+            bar_position: host.bar_start_pos_beats(),
+            time_sig_numerator: host.time_sig_numerator.map(|n| n.max(0) as u32),
+            time_sig_denominator: host.time_sig_denominator.map(|n| n.max(0) as u32),
+            sample_rate: self.sample_rate,
+        };
+
+        self.processor
+            .process_block_with_transport(buffer, &self.params, &self.meters, &transport);
         ProcessStatus::Tail((self.sample_rate * TAIL_SECONDS) as u32)
     }
 }

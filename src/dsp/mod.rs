@@ -9,6 +9,7 @@ pub mod gain;
 pub mod movement;
 pub mod smoothing;
 pub mod texture;
+pub mod transport;
 pub mod util;
 
 #[cfg(test)]
@@ -25,6 +26,7 @@ use bypass::BypassCrossfade;
 use chain::{safety_limit_sample, EffectChain};
 use dry_wet::DryWet;
 use gain::GainStage;
+use transport::TransportFrame;
 
 pub struct Processor {
     input_gain: GainStage,
@@ -33,6 +35,7 @@ pub struct Processor {
     dry_wet: DryWet,
     bypass: BypassCrossfade,
     sample_rate: f32,
+    transport: TransportFrame,
 }
 
 impl Default for Processor {
@@ -44,6 +47,7 @@ impl Default for Processor {
             dry_wet: DryWet,
             bypass: BypassCrossfade::default(),
             sample_rate: 44_100.0,
+            transport: TransportFrame::default(),
         };
         processor.prepare(44_100.0);
         processor
@@ -63,6 +67,20 @@ impl Processor {
     }
 
     pub fn process_block(&mut self, buffer: &mut Buffer, params: &Cc22Params, meters: &Meters) {
+        self.process_block_with_transport(buffer, params, meters, &TransportFrame::default());
+    }
+
+    /// Same as [`process_block`](Self::process_block) but with the host transport
+    /// snapshot for this block. The snapshot is stored for tempo-synced modes;
+    /// it does not alter processing on its own.
+    pub fn process_block_with_transport(
+        &mut self,
+        buffer: &mut Buffer,
+        params: &Cc22Params,
+        meters: &Meters,
+        transport: &TransportFrame,
+    ) {
+        self.transport = *transport;
         self.bypass.set_bypassed(params.global_bypass.value());
         meters.set_analyzer_sample_rate(self.sample_rate);
         let mut input_peak = 0.0_f32;
