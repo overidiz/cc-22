@@ -11,6 +11,7 @@ use super::{
     gain::db_to_gain,
     movement::{Movement, MovementFrame},
     texture::{Texture, TextureFrame},
+    transport::TransportFrame,
 };
 
 pub const SAFETY_LIMIT_CEILING: f32 = 8.0;
@@ -288,6 +289,7 @@ pub struct EffectChain {
     movement: Movement,
     diffusion: Diffusion,
     texture: Texture,
+    transport: TransportFrame,
 }
 
 impl Default for EffectChain {
@@ -298,6 +300,7 @@ impl Default for EffectChain {
             movement: Movement::default(),
             diffusion: Diffusion::default(),
             texture: Texture::default(),
+            transport: TransportFrame::default(),
         }
     }
 }
@@ -388,11 +391,17 @@ impl EffectChain {
         self.texture.reset();
     }
 
+    /// Store the host transport snapshot for this block (used by tempo-synced
+    /// modes). Call once per block before `next_frame`.
+    pub fn set_transport(&mut self, transport: &TransportFrame) {
+        self.transport = *transport;
+    }
+
     pub fn next_frame(&mut self, params: &Cc22Params) -> ChainFrame {
         ChainFrame {
             eq_rack: self.eq_rack.next_frame(params),
             character: self.character.next_frame(&params.character),
-            movement: self.movement.next_frame(&params.movement),
+            movement: self.movement.next_frame(&params.movement, &self.transport),
             diffusion: self.diffusion.next_frame(&params.diffusion),
             texture: self.texture.next_frame(&params.texture),
         }

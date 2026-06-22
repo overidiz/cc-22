@@ -35,7 +35,6 @@ pub struct Processor {
     dry_wet: DryWet,
     bypass: BypassCrossfade,
     sample_rate: f32,
-    transport: TransportFrame,
 }
 
 impl Default for Processor {
@@ -47,7 +46,6 @@ impl Default for Processor {
             dry_wet: DryWet,
             bypass: BypassCrossfade::default(),
             sample_rate: 44_100.0,
-            transport: TransportFrame::default(),
         };
         processor.prepare(44_100.0);
         processor
@@ -80,7 +78,7 @@ impl Processor {
         meters: &Meters,
         transport: &TransportFrame,
     ) {
-        self.transport = *transport;
+        self.chain.set_transport(transport);
         self.bypass.set_bypassed(params.global_bypass.value());
         meters.set_analyzer_sample_rate(self.sample_rate);
         let mut input_peak = 0.0_f32;

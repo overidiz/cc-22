@@ -11,6 +11,7 @@ use crate::dsp::{
     movement::LfoShape,
     movement::MovementMode,
     texture::TextureMode,
+    transport::NoteDivision,
 };
 use crate::ui::{BASE_HEIGHT, BASE_WIDTH};
 
@@ -240,6 +241,12 @@ pub struct MovementParams {
 
     #[id = "movement_mix"]
     pub mix: FloatParam,
+
+    #[id = "movement_sync_enabled"]
+    pub sync_enabled: BoolParam,
+
+    #[id = "movement_sync_division"]
+    pub sync_division: EnumParam<NoteDivision>,
 }
 
 impl Default for MovementParams {
@@ -291,6 +298,8 @@ impl Default for MovementParams {
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
             tone: percent_param("Tone", 0.55, 50.0),
             mix: percent_param("Mix", 0.45, 50.0),
+            sync_enabled: BoolParam::new("Movement Sync", false),
+            sync_division: EnumParam::new("Movement Sync Rate", NoteDivision::Eighth),
         }
     }
 }

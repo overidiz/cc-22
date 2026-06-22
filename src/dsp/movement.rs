@@ -6,6 +6,7 @@ use super::{
     chain::{sanitize_sample, soft_clip_sample, ModuleCore},
     dry_wet::DryWet,
     smoothing::LinearSmoother,
+    transport::{hz_for_division, ms_for_division, TransportFrame},
     util::safe_feedback,
 };
 
@@ -168,7 +169,11 @@ impl Movement {
         self.pitch_read_b = [0.0; MAX_CHANNELS];
     }
 
-    pub fn next_frame(&mut self, params: &MovementParams) -> MovementFrame {
+    pub fn next_frame(
+        &mut self,
+        params: &MovementParams,
+        transport: &TransportFrame,
+    ) -> MovementFrame {
         let mode = params.mode.value();
         self.set_mode(mode);
         let requested_shape = params.shape.value();
@@ -179,9 +184,25 @@ impl Movement {
             MovementMode::Phaser => 5.0,
             MovementMode::Pitch => 4.0,
         };
-        let rate_hz = params.rate.smoothed.next().clamp(0.05, max_rate_hz);
+        // Always advance the smoothers so toggling sync never jumps the manual
+        // value; tempo sync just overrides the result for this block.
+        let manual_rate = params.rate.smoothed.next().clamp(0.05, max_rate_hz);
+        let manual_delay = params.delay.smoothed.next().clamp(5.0, 30.0);
+        let synced = params.sync_enabled.value();
+        let division = params.sync_division.value();
+        let rate_hz = if synced {
+            // LFO modes (Vibrato/Phaser/Tremolo/Pitch) lock their rate to tempo.
+            hz_for_division(transport.bpm, division).clamp(0.05, max_rate_hz)
+        } else {
+            manual_rate
+        };
         let depth = params.depth.smoothed.next().clamp(0.0, 1.0);
-        let delay_ms = params.delay.smoothed.next().clamp(5.0, 30.0);
+        let delay_ms = if synced {
+            // Doubler is delay-based; keep it inside the safe short-delay range.
+            ms_for_division(transport.bpm, division).clamp(5.0, 30.0)
+        } else {
+            manual_delay
+        };
         let feedback = safe_feedback(params.feedback.smoothed.next(), 0.58);
         let width = params.width.smoothed.next().clamp(0.0, 1.0);
         let phase_degrees = params.phase.smoothed.next().clamp(0.0, 180.0);
@@ -236,8 +257,9 @@ impl Movement {
     }
 
     pub fn process_block(&mut self, buffer: &mut Buffer, params: &MovementParams) {
+        let transport = TransportFrame::default();
         for channel_samples in buffer.iter_samples() {
-            let frame = self.next_frame(params);
+            let frame = self.next_frame(params, &transport);
             for (channel_index, sample) in channel_samples.into_iter().enumerate() {
                 *sample = self.process_sample_for_channel(channel_index, *sample, &frame);
             }
@@ -696,6 +718,68 @@ mod tests {
         doubler_level_compensation, lfo_value, phaser_level_compensation, read_interpolated,
         sine_lfo, square_smooth_lfo, LfoShape, Movement, MovementFrame, MovementMode, StereoDelay,
     };
+    use crate::dsp::transport::{NoteDivision, TransportFrame};
+    use crate::params::MovementParams;
+    use nih_plug::prelude::{BoolParam, EnumParam};
+
+    #[test]
+    fn movement_sync_locks_doubler_delay_to_tempo() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        let mut params = MovementParams::default();
+        params.mode = EnumParam::new("m", MovementMode::Doubler);
+        params.sync_enabled = BoolParam::new("s", true);
+        params.sync_division = EnumParam::new("d", NoteDivision::Sixteenth);
+        params.reset_smoothers();
+
+        let transport = TransportFrame {
+            bpm: 120.0,
+            ..TransportFrame::default()
+        };
+        // 1/16 @ 120 BPM = 125 ms, clamped to the Doubler's safe 30 ms ceiling.
+        let synced = movement.next_frame(&params, &transport);
+        assert!(
+            (synced.delay_ms - 30.0).abs() < 0.01,
+            "synced doubler delay {}",
+            synced.delay_ms
+        );
+
+        // Sync off returns to the manual short-delay range, finite, no panic.
+        params.sync_enabled = BoolParam::new("s", false);
+        params.reset_smoothers();
+        let manual = movement.next_frame(&params, &transport);
+        assert!((5.0..=30.0).contains(&manual.delay_ms) && manual.delay_ms.is_finite());
+    }
+
+    #[test]
+    fn movement_sync_tremolo_stays_finite_across_divisions() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        let transport = TransportFrame {
+            bpm: 128.0,
+            ..TransportFrame::default()
+        };
+        for division in [
+            NoteDivision::Quarter,
+            NoteDivision::Eighth,
+            NoteDivision::SixteenthTriplet,
+            NoteDivision::DottedEighth,
+        ] {
+            let mut params = MovementParams::default();
+            params.mode = EnumParam::new("m", MovementMode::Tremolo);
+            params.sync_enabled = BoolParam::new("s", true);
+            params.sync_division = EnumParam::new("d", division);
+            params.reset_smoothers();
+            for _ in 0..4_000 {
+                let frame = movement.next_frame(&params, &transport);
+                let out = movement.process_sample_for_channel(0, 0.5, &frame);
+                assert!(
+                    out.is_finite() && out.abs() <= 2.0,
+                    "tremolo sync {division:?} produced {out}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn interpolated_delay_reads_between_samples() {
