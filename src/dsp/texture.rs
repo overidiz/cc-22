@@ -70,9 +70,9 @@ pub struct Texture {
     mode_crossfade: LinearSmoother,
     last_output: [f32; MAX_CHANNELS],
     has_processed: bool,
-    /// Tempo-synced Broken dropout period in samples (set per block when sync is
-    /// on); `None` keeps the original free-running random dropouts.
-    broken_sync_samples: Option<usize>,
+    /// Tempo-synced period in samples (set per block when sync is on), used by
+    /// the Broken dropout gate and Interference pulse; `None` = free-running.
+    sync_samples: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -162,6 +162,7 @@ struct InterferenceState {
     noise_band_hi: [f32; MAX_CHANNELS],
     noise_band_lo: [f32; MAX_CHANNELS],
     damp_state: [f32; MAX_CHANNELS],
+    sync_counter: [usize; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone)]
@@ -203,7 +204,7 @@ impl Default for Texture {
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
             last_output: [0.0; MAX_CHANNELS],
             has_processed: false,
-            broken_sync_samples: None,
+            sync_samples: None,
         };
         texture.prepare(44_100.0);
         texture
@@ -268,7 +269,7 @@ impl Texture {
         };
         // Broken: tempo-locked dropout period (clamped so the glitch rate can't
         // get absurdly fast), or free-running random when sync is off.
-        self.broken_sync_samples = if params.sync_enabled.value() {
+        self.sync_samples = if params.sync_enabled.value() {
             let period = samples_for_division(
                 transport.bpm,
                 params.sync_division.value(),
@@ -455,7 +456,7 @@ impl Texture {
             frame.degrade,
             frame.random_drift,
             self.sample_rate,
-            self.broken_sync_samples,
+            self.sync_samples,
         );
         let held = self.broken.next_held_sample(
             index,
@@ -534,7 +535,13 @@ impl Texture {
             self.sample_rate,
         );
 
-        let am_depth = interference_am_depth(amount, frame.degrade) * amplitude_wobble;
+        // Tempo sync: swell the interference rhythmically with a smooth pulse
+        // (never fully gone, so it breathes on the beat). Off = steady.
+        let intensity = match self.sync_samples {
+            Some(period) => 0.25 + 0.75 * self.interference.next_sync_pulse(index, period),
+            None => 1.0,
+        };
+        let am_depth = interference_am_depth(amount, frame.degrade) * amplitude_wobble * intensity;
         let ring_depth = interference_ring_depth(amount, frame.degrade);
         let modulated = sample * (1.0 + carrier * am_depth);
         let ringed = sample * carrier;
@@ -542,7 +549,7 @@ impl Texture {
             * interference_tone_gain(amount, frame.degrade)
             * amplitude_wobble;
         let noisy = band_noise * interference_noise_gain(amount, frame.degrade);
-        let wet = linear_crossfade(modulated, ringed + tonal + noisy, ring_depth);
+        let wet = linear_crossfade(modulated, (ringed + tonal + noisy) * intensity, ring_depth);
         let damped = self.interference.damp(
             index,
             wet,
@@ -926,6 +933,20 @@ impl InterferenceState {
         self.noise_band_hi = [0.0; MAX_CHANNELS];
         self.noise_band_lo = [0.0; MAX_CHANNELS];
         self.damp_state = [0.0; MAX_CHANNELS];
+        self.sync_counter = [0; MAX_CHANNELS];
+    }
+
+    /// Tempo-locked pulse envelope (0..1) that swells once per division — a
+    /// raised cosine, so it's smooth (no clicks). Drives a rhythmic radio-pulse.
+    fn next_sync_pulse(&mut self, channel: usize, period: usize) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let period = period.max(1);
+        self.sync_counter[index] += 1;
+        if self.sync_counter[index] >= period {
+            self.sync_counter[index] = 0;
+        }
+        let phase = self.sync_counter[index] as f32 / period as f32;
+        0.5 - 0.5 * (phase * core::f32::consts::TAU).cos()
     }
 
     /// Band-limit the electric noise around the interference frequency (a
@@ -1496,7 +1517,50 @@ mod tests {
     };
     use crate::dsp::transport::{NoteDivision, TransportFrame};
     use crate::params::TextureParams;
-    use nih_plug::prelude::{BoolParam, EnumParam};
+    use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, FloatRange};
+
+    #[test]
+    fn texture_sync_interference_pulse_is_click_safe() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let transport = TransportFrame {
+            bpm: 120.0,
+            ..TransportFrame::default()
+        };
+        let mut params = TextureParams::default();
+        params.mode = EnumParam::new("m", TextureMode::Interference);
+        params.bypass = BoolParam::new("b", false);
+        params.noise_amount = FloatParam::new("n", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 });
+        params.sync_enabled = BoolParam::new("s", true);
+        params.sync_division = EnumParam::new("d", NoteDivision::Eighth);
+        params.reset_smoothers();
+
+        let mut prev = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        let mut phase = 0.0_f32;
+        for index in 0..48_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= 1.0;
+            }
+            let frame = texture.next_frame(&params, &transport);
+            let input = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let out = texture.process_sample_for_channel(0, input, &frame);
+            assert!(
+                out.is_finite() && out.abs() <= 8.0,
+                "interference sync {out}"
+            );
+            if index > 1_000 {
+                max_step = max_step.max((out - prev).abs());
+            }
+            prev = out;
+        }
+        // The pulse is a raised cosine, so the swell never clicks.
+        assert!(
+            max_step < 0.6,
+            "interference sync produced a click ({max_step})"
+        );
+    }
 
     #[test]
     fn texture_sync_broken_dropout_is_periodic_and_click_safe() {
