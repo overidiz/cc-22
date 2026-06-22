@@ -402,7 +402,9 @@ impl EffectChain {
             eq_rack: self.eq_rack.next_frame(params),
             character: self.character.next_frame(&params.character),
             movement: self.movement.next_frame(&params.movement, &self.transport),
-            diffusion: self.diffusion.next_frame(&params.diffusion),
+            diffusion: self
+                .diffusion
+                .next_frame(&params.diffusion, &self.transport),
             texture: self.texture.next_frame(&params.texture),
         }
     }

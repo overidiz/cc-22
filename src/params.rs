@@ -354,6 +354,12 @@ pub struct DiffusionParams {
 
     #[id = "diffusion_width"]
     pub width: FloatParam,
+
+    #[id = "diffusion_sync_enabled"]
+    pub sync_enabled: BoolParam,
+
+    #[id = "diffusion_sync_division"]
+    pub sync_division: EnumParam<NoteDivision>,
 }
 
 impl Default for DiffusionParams {
@@ -414,6 +420,8 @@ impl Default for DiffusionParams {
             .with_value_to_string(formatters::v2s_f32_percentage(1))
             .with_string_to_value(formatters::s2v_f32_percentage()),
             width: percent_param("Width", 1.0, 50.0),
+            sync_enabled: BoolParam::new("Diffusion Sync", false),
+            sync_division: EnumParam::new("Diffusion Sync Rate", NoteDivision::Quarter),
         }
     }
 }

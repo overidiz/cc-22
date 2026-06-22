@@ -6,6 +6,7 @@ use super::{
     chain::{sanitize_sample, ModuleCore},
     dry_wet::DryWet,
     smoothing::LinearSmoother,
+    transport::{ms_for_division, TransportFrame},
     util::{equal_power_crossfade, one_pole_alpha, safe_feedback, smoothstep},
 };
 
@@ -226,10 +227,22 @@ impl Diffusion {
         self.reels_feedback_level_state = [0.0; MAX_CHANNELS];
     }
 
-    pub fn next_frame(&mut self, params: &DiffusionParams) -> DiffusionFrame {
+    pub fn next_frame(
+        &mut self,
+        params: &DiffusionParams,
+        transport: &TransportFrame,
+    ) -> DiffusionFrame {
         let mode = params.mode.value();
         self.set_mode(mode);
-        let time_ms = params.time.smoothed.next().clamp(1.0, 2_000.0);
+        // Tempo sync drives the base time, which every time-based mode (Cascade,
+        // Reels, Reverse, Collage) derives from. Space ignores `time_ms` (its
+        // tail comes from size/decay), so its reverb stays free as required.
+        let manual_time = params.time.smoothed.next().clamp(1.0, 2_000.0);
+        let time_ms = if params.sync_enabled.value() {
+            ms_for_division(transport.bpm, params.sync_division.value()).clamp(1.0, 2_000.0)
+        } else {
+            manual_time
+        };
         let feedback = safe_feedback(params.feedback.smoothed.next(), 0.949);
         let size = params.size.smoothed.next().clamp(0.0, 1.0);
         let decay = params.decay.smoothed.next().clamp(0.0, 1.0);
@@ -259,8 +272,9 @@ impl Diffusion {
     }
 
     pub fn process_block(&mut self, buffer: &mut Buffer, params: &DiffusionParams) {
+        let transport = TransportFrame::default();
         for channel_samples in buffer.iter_samples() {
-            let frame = self.next_frame(params);
+            let frame = self.next_frame(params, &transport);
             for (channel_index, sample) in channel_samples.into_iter().enumerate() {
                 *sample = self.process_sample_for_channel(channel_index, *sample, &frame);
             }
@@ -1404,6 +1418,44 @@ mod tests {
         reverse_level_compensation, reverse_segment_length_samples, reverse_window_samples,
         space_reverb_feedback, Diffusion, DiffusionFrame, DiffusionMode,
     };
+    use crate::dsp::transport::{NoteDivision, TransportFrame};
+    use crate::params::DiffusionParams;
+    use nih_plug::prelude::{BoolParam, EnumParam};
+
+    #[test]
+    fn diffusion_sync_locks_time_to_tempo() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let transport = TransportFrame {
+            bpm: 120.0,
+            ..TransportFrame::default()
+        };
+        // 120 BPM: 1/4 = 500 ms, 1/8 = 250 ms, 1 bar = 2000 ms.
+        for (division, expected_ms) in [
+            (NoteDivision::Quarter, 500.0),
+            (NoteDivision::Eighth, 250.0),
+            (NoteDivision::Bar1, 2_000.0),
+        ] {
+            let mut params = DiffusionParams::default();
+            params.mode = EnumParam::new("m", DiffusionMode::Reels);
+            params.sync_enabled = BoolParam::new("s", true);
+            params.sync_division = EnumParam::new("d", division);
+            params.reset_smoothers();
+            let frame = diffusion.next_frame(&params, &transport);
+            assert!(
+                (frame.time_ms - expected_ms).abs() < 0.5,
+                "synced {division:?} time {}",
+                frame.time_ms
+            );
+        }
+
+        // Sync off keeps the manual time, finite and in range.
+        let mut params = DiffusionParams::default();
+        params.sync_enabled = BoolParam::new("s", false);
+        params.reset_smoothers();
+        let frame = diffusion.next_frame(&params, &transport);
+        assert!(frame.time_ms.is_finite() && frame.time_ms >= 1.0);
+    }
 
     #[test]
     fn interpolated_delay_reads_between_samples() {
