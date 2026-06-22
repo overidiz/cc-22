@@ -7,6 +7,7 @@ use super::{
     dry_wet::DryWet,
     gain::db_to_gain,
     smoothing::LinearSmoother,
+    transport::{hz_for_division, TransportFrame},
     util::{dc_blocker_step, one_pole_alpha, smoothstep, soft_saturate},
 };
 
@@ -244,11 +245,22 @@ impl Texture {
         self.has_processed = false;
     }
 
-    pub fn next_frame(&mut self, params: &TextureParams) -> TextureFrame {
+    pub fn next_frame(
+        &mut self,
+        params: &TextureParams,
+        transport: &TransportFrame,
+    ) -> TextureFrame {
         let mode = params.mode.value();
         self.set_mode(mode);
         let wow_depth = params.wow_depth.smoothed.next().clamp(0.0, 1.0);
-        let wow_rate_hz = params.wow_rate.smoothed.next().clamp(0.1, 2.0);
+        // Cassette wow can lock to tempo (kept subtle inside its slow range).
+        // Filter/Squash don't use wow, so sync is a no-op for them.
+        let manual_wow_rate = params.wow_rate.smoothed.next().clamp(0.1, 2.0);
+        let wow_rate_hz = if params.sync_enabled.value() {
+            hz_for_division(transport.bpm, params.sync_division.value()).clamp(0.1, 2.0)
+        } else {
+            manual_wow_rate
+        };
         let flutter_depth = params.flutter_depth.smoothed.next().clamp(0.0, 1.0);
         let flutter_rate_hz = params.flutter_rate.smoothed.next().clamp(3.0, 20.0);
         let random_drift = params.random_drift.smoothed.next().clamp(0.0, 1.0);
@@ -281,8 +293,9 @@ impl Texture {
     }
 
     pub fn process_block(&mut self, buffer: &mut Buffer, params: &TextureParams) {
+        let transport = TransportFrame::default();
         for channel_samples in buffer.iter_samples() {
-            let frame = self.next_frame(params);
+            let frame = self.next_frame(params, &transport);
             for (channel_index, sample) in channel_samples.into_iter().enumerate() {
                 *sample = self.process_sample_for_channel(channel_index, *sample, &frame);
             }
@@ -1441,6 +1454,46 @@ mod tests {
         texture_filter_resonance, BrokenState, DriftGenerator, NoiseGenerator, StereoDelay,
         Texture, TextureFrame, TextureMode,
     };
+    use crate::dsp::transport::{NoteDivision, TransportFrame};
+    use crate::params::TextureParams;
+    use nih_plug::prelude::{BoolParam, EnumParam};
+
+    #[test]
+    fn texture_sync_cassette_wow_stays_finite_across_divisions() {
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let transport = TransportFrame {
+            bpm: 120.0,
+            ..TransportFrame::default()
+        };
+        for division in [
+            NoteDivision::Bar1,
+            NoteDivision::Half,
+            NoteDivision::Quarter,
+            NoteDivision::DottedQuarter,
+        ] {
+            let mut params = TextureParams::default();
+            params.mode = EnumParam::new("m", TextureMode::Cassette);
+            params.bypass = BoolParam::new("b", false);
+            params.sync_enabled = BoolParam::new("s", true);
+            params.sync_division = EnumParam::new("d", division);
+            params.reset_smoothers();
+            let mut phase = 0.0_f32;
+            for _ in 0..6_000 {
+                phase += 220.0 / 48_000.0;
+                if phase >= 1.0 {
+                    phase -= 1.0;
+                }
+                let frame = texture.next_frame(&params, &transport);
+                let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+                let out = texture.process_sample_for_channel(0, input, &frame);
+                assert!(
+                    out.is_finite() && out.abs() <= 8.0,
+                    "cassette sync {division:?} produced {out}"
+                );
+            }
+        }
+    }
 
     fn test_frame(mode: TextureMode) -> TextureFrame {
         TextureFrame {

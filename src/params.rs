@@ -480,6 +480,12 @@ pub struct TextureParams {
 
     #[id = "texture_mix"]
     pub mix: FloatParam,
+
+    #[id = "texture_sync_enabled"]
+    pub sync_enabled: BoolParam,
+
+    #[id = "texture_sync_division"]
+    pub sync_division: EnumParam<NoteDivision>,
 }
 
 impl Default for TextureParams {
@@ -519,6 +525,8 @@ impl Default for TextureParams {
             degrade: percent_param("Degrade", 0.0, 80.0),
             stereo_spread: percent_param("Stereo Spread", 0.75, 80.0),
             mix: percent_param("Mix", 0.35, 60.0),
+            sync_enabled: BoolParam::new("Texture Sync", false),
+            sync_division: EnumParam::new("Texture Sync Rate", NoteDivision::Eighth),
         }
     }
 }

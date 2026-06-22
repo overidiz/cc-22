@@ -405,7 +405,7 @@ impl EffectChain {
             diffusion: self
                 .diffusion
                 .next_frame(&params.diffusion, &self.transport),
-            texture: self.texture.next_frame(&params.texture),
+            texture: self.texture.next_frame(&params.texture, &self.transport),
         }
     }
 
