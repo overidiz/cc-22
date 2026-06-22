@@ -22,7 +22,6 @@ use eq_view::eq_workbench;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
-use signal_flow::signal_chain_row;
 use theme::{Look, ModuleColors, Theme};
 pub(crate) use theme::{BASE_HEIGHT, BASE_WIDTH};
 use top_bar::top_bar;
@@ -70,7 +69,6 @@ pub fn create_editor(
                                 ui.spacing_mut().item_spacing.y = 8.0;
                                 top_bar(ui, setter, state, &params, colors, theme, now);
                                 center_modules(ui, setter, state, &params, look);
-                                signal_chain_row(ui, &params, colors, theme);
                                 let eq_width = ui.available_width();
                                 state.spectrum.update(
                                     &meters,
