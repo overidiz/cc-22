@@ -31,7 +31,6 @@ use super::{
     },
 };
 
-const LIFT_AMOUNT: f32 = 3.0;
 struct ModuleCardSpec<'a> {
     title: &'static str,
     accent: Color32,
@@ -277,17 +276,26 @@ fn render_module_card(
     } else {
         theme.card_dim
     };
-    let lift = if hovered { LIFT_AMOUNT } else { 0.0 };
-    let alloc_h = CARD_HEIGHT + 6.0;
+    // Fixed reserved rect — identical in idle / hover / active / drag, so hover is
+    // purely visual and never reflows anything below (EQ / Master stay put). Every
+    // hover change beyond this point is paint-only.
+    let (card_rect, _) = ui.allocate_exact_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT), Sense::hover());
 
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(CARD_WIDTH, alloc_h), Sense::hover());
-    let card_rect = Rect::from_min_size(
-        Pos2::new(rect.min.x, rect.min.y - lift),
-        Vec2::new(CARD_WIDTH, CARD_HEIGHT),
-    );
-
+    // Drop shadow (painter-only). Accent-tinted on hover; constant offset so it
+    // never reserves space.
     let shadow_accent = if hovered { Some(spec.accent) } else { None };
-    card_shadow(ui.painter(), card_rect, lift, shadow_accent);
+    card_shadow(ui.painter(), card_rect, 0.0, shadow_accent);
+
+    // Hover glow as a painter overlay — may visually exceed the card but reserves
+    // no layout space (replaces the old position "lift").
+    if hovered {
+        ui.painter().rect_stroke(
+            card_rect.expand(2.0),
+            CornerRadius::same(16),
+            Stroke::new(1.5, spec.accent.gamma_multiply(0.45)),
+            StrokeKind::Outside,
+        );
+    }
 
     // Neutral, restrained border (no saturated colour edge); the colour identity
     // comes from the slim top accent bar and the mode dots instead.
