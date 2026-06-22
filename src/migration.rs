@@ -13,6 +13,22 @@
 //!
 //! No legacy enum variants are kept: the migration happens purely at the state
 //! level, so the runtime enums only ever contain the 20 official modes.
+//!
+//! ## EQ simplification (10 banks → 2)
+//!
+//! The plugin used to expose ten EQ banks (Global Pre/Post plus a Pre/Post pair
+//! per module). It now has just two: a single Pre EQ and a single Post EQ. No
+//! state-rewriting is needed for this, because the two surviving banks keep their
+//! original serialization IDs:
+//!
+//! * **Pre EQ** keeps the legacy `global_pre_eq_*` IDs, so an old Global Pre EQ
+//!   loads straight into it.
+//! * **Post EQ** keeps the legacy `eq_*` IDs, so an old Global Post EQ (and the
+//!   single-EQ state from the very first builds) loads straight into it.
+//! * The eight per-module EQ banks (`character_pre_eq_*`, `texture_post_eq_*`,
+//!   …) no longer exist as parameters. nih-plug ignores their unknown IDs on
+//!   load, so that saved data is simply dropped — intentional, since those EQs no
+//!   longer have a place in the signal flow.
 
 use nih_plug::prelude::PluginState;
 use nih_plug::wrapper::state::ParamValue;

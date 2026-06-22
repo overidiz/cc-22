@@ -6,40 +6,7 @@ use nih_plug_egui::egui::{
 
 use crate::params::Cc22Params;
 
-use super::theme::{
-    ModuleColors, Theme, FONT_CONTROL_LABEL, FONT_HINT, FONT_SECONDARY, FONT_VALUE_LABEL,
-};
-
-pub(crate) fn brand_mark(ui: &mut egui::Ui, colors: ModuleColors, theme: Theme) {
-    // The CC-22 logo: a cream rounded square with four vertical bars in the
-    // module colours (Character / Movement / Diffusion / Texture).
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(26.0, 26.0), Sense::hover());
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(7), theme.paper);
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(7),
-        Stroke::new(1.0, theme.card_edge),
-        StrokeKind::Inside,
-    );
-
-    let bars = [
-        colors.character,
-        colors.movement,
-        colors.diffusion,
-        colors.texture,
-    ];
-    let inner = rect.shrink2(Vec2::new(5.5, 6.0));
-    let bar_w = 2.3_f32;
-    for (index, color) in bars.iter().enumerate() {
-        let center_x = inner.left() + inner.width() * (index as f32 + 0.5) / bars.len() as f32;
-        let bar = Rect::from_center_size(
-            Pos2::new(center_x, inner.center().y),
-            Vec2::new(bar_w, inner.height()),
-        );
-        ui.painter().rect_filled(bar, CornerRadius::same(1), *color);
-    }
-}
+use super::theme::{Theme, FONT_CONTROL_LABEL, FONT_HINT, FONT_SECONDARY, FONT_VALUE_LABEL};
 
 pub(crate) fn small_strip_knob(
     ui: &mut egui::Ui,
@@ -48,34 +15,37 @@ pub(crate) fn small_strip_knob(
     label: &'static str,
     accent: Color32,
     theme: Theme,
+    size: f32,
 ) {
     ui.vertical_centered(|ui| {
-        ui.set_min_width(46.0);
-        let size = 30.0;
+        ui.set_min_width(size + 16.0);
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
         handle_float_drag(ui, setter, param, &response);
         let center = rect.center();
         let normalized = param.unmodulated_normalized_value().clamp(0.0, 1.0);
+        // Inner radii scale with the dial size so a larger knob (Dry/Wet) stays
+        // proportional to the small Input/Output dials.
+        let s = size / 30.0;
         ui.painter()
-            .circle_filled(center, 12.0, Color32::from_rgb(238, 232, 216));
+            .circle_filled(center, 12.0 * s, Color32::from_rgb(238, 232, 216));
         ui.painter().circle_stroke(
             center,
-            13.0,
+            13.0 * s,
             Stroke::new(1.5, Color32::from_rgb(92, 84, 72)),
         );
         let start = core::f32::consts::PI * 0.75;
         let end = core::f32::consts::PI * 2.25;
         let current = start + ((end - start) * normalized);
-        paint_arc(ui, center, 16.0, start, current, accent, 2.3);
+        paint_arc(ui, center, 16.0 * s, start, current, accent, 2.3 * s);
         ui.painter().line_segment(
             [
                 center,
                 Pos2::new(
-                    center.x + current.cos() * 8.0,
-                    center.y + current.sin() * 8.0,
+                    center.x + current.cos() * 8.0 * s,
+                    center.y + current.sin() * 8.0 * s,
                 ),
             ],
-            Stroke::new(1.8, accent),
+            Stroke::new(1.8 * s, accent),
         );
         ui.label(
             RichText::new(label)
@@ -288,7 +258,7 @@ pub(crate) fn paint_colored_knob(
             center.y + angle.sin() * (radius + 17.0),
         );
         ui.painter()
-            .line_segment([inner, outer], Stroke::new(0.75, theme.muted_dark));
+            .line_segment([inner, outer], Stroke::new(0.6, theme.muted));
     }
 
     let indicator = Pos2::new(
@@ -359,30 +329,51 @@ pub(crate) fn global_bypass_button(
     param: &BoolParam,
     theme: Theme,
 ) {
+    // Pill switch consistent with the module ON/OFF and EQ ON toggles: a sliding
+    // white knob on a colour-coded track — green = processing, amber = bypassed.
     let bypassed = param.value();
-    // Explicit text colour (the default button colour rendered nearly invisible
-    // on the paper fill) plus a state-driven look so the global state reads at a
-    // glance: amber "BYPASSED" vs. a green-edged "GLOBAL ON".
-    let (label, fill, edge) = if bypassed {
-        ("BYPASSED", theme.warning, theme.text_dark)
-    } else {
-        ("GLOBAL ON", theme.paper, Color32::from_rgb(48, 198, 112))
-    };
-    let response = ui.add(
-        egui::Button::new(
-            RichText::new(label)
-                .font(FontId::monospace(FONT_SECONDARY + 1.5))
-                .strong()
-                .color(theme.text_dark),
-        )
-        .fill(fill)
-        .stroke(Stroke::new(1.6, edge))
-        .corner_radius(CornerRadius::same(10))
-        .min_size(Vec2::new(104.0, 30.0)),
-    );
+    let active = !bypassed;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(92.0, 26.0), Sense::click());
     if response.clicked() {
         set_param(setter, param, !bypassed);
     }
+    let track = if active {
+        Color32::from_rgb(48, 178, 100)
+    } else {
+        theme.warning
+    };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(13), track.gamma_multiply(0.92));
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(13),
+        Stroke::new(1.0, track.gamma_multiply(0.7)),
+        StrokeKind::Inside,
+    );
+    let knob_x = if active {
+        rect.right() - 13.0
+    } else {
+        rect.left() + 13.0
+    };
+    ui.painter().circle_filled(
+        Pos2::new(knob_x, rect.center().y),
+        9.0,
+        Color32::from_rgb(250, 247, 240),
+    );
+    // State label on the side opposite the knob.
+    let text_x = if active {
+        rect.left() + 30.0
+    } else {
+        rect.right() - 30.0
+    };
+    ui.painter().text(
+        Pos2::new(text_x, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        if active { "GLOBAL" } else { "BYPASS" },
+        FontId::monospace(FONT_SECONDARY),
+        Color32::WHITE,
+    );
+    response.on_hover_text("Global bypass — entire plugin");
 }
 
 pub(crate) fn compact_button(

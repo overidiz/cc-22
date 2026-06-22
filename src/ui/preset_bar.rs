@@ -107,6 +107,7 @@ fn paint_master_row(
             "INPUT",
             colors.master,
             theme,
+            30.0,
         );
     });
     fixed_child_ui(ui, clip, knob_x + knob_w + knob_gap, y, knob_w, h, |ui| {
@@ -117,6 +118,7 @@ fn paint_master_row(
             "OUTPUT",
             colors.master,
             theme,
+            30.0,
         );
     });
     fixed_child_ui(
@@ -127,7 +129,15 @@ fn paint_master_row(
         knob_w,
         h,
         |ui| {
-            small_strip_knob(ui, setter, &params.dry_wet, "DRY/WET", colors.eq, theme);
+            small_strip_knob(
+                ui,
+                setter,
+                &params.dry_wet,
+                "DRY/WET",
+                colors.eq,
+                theme,
+                38.0,
+            );
         },
     );
 }
@@ -136,11 +146,11 @@ fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: boo
     ui.vertical_centered(|ui| {
         ui.label(
             RichText::new(label)
-                .font(FontId::monospace(7.0))
+                .font(FontId::monospace(8.0))
                 .strong()
                 .color(Color32::from_rgb(245, 237, 218)),
         );
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(15.0, 32.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(18.0, 34.0), Sense::hover());
         ui.painter()
             .rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(18, 15, 12));
         let fill_bounds = rect.shrink2(Vec2::new(2.5, 2.5));

@@ -10,7 +10,7 @@ use crate::{
 };
 
 use super::{
-    meters::{EqBandSelection, EqPositionSelection, EqTargetSelection},
+    meters::{EqBandSelection, EqPositionSelection},
     theme::{ModuleColors, Theme},
     widgets::set_param,
 };
@@ -21,8 +21,8 @@ pub(crate) const EQ_DISPLAY_MAX_HZ: f32 = 20_000.0;
 const EQ_DISPLAY_DB_RANGE: f32 = 24.0;
 const EQ_CURVE_POINTS: usize = 240;
 const EQ_NODE_COUNT: usize = 5;
-pub(crate) const EQ_WORKBENCH_HEIGHT: f32 = 236.0;
-const EQ_CANVAS_HEIGHT: f32 = 184.0;
+pub(crate) const EQ_WORKBENCH_HEIGHT: f32 = 190.0;
+const EQ_CANVAS_HEIGHT: f32 = 126.0;
 const EQ_INNER_PADDING: i8 = 8;
 const EQ_NODE_EDGE_INSET: f32 = 20.0;
 const EQ_GAIN_MIN_DB: f32 = -24.0;
@@ -31,32 +31,20 @@ const EQ_Q_MIN: f32 = 0.1;
 const EQ_Q_MAX: f32 = 12.0;
 const EQ_RESET_FREQUENCIES: [f32; EQ_NODE_COUNT] = [80.0, 250.0, 1_000.0, 4_000.0, 12_000.0];
 
-fn target_color(target: EqTargetSelection, colors: ModuleColors) -> Color32 {
-    match target {
-        EqTargetSelection::Global => colors.eq,
-        EqTargetSelection::Character => colors.character,
-        EqTargetSelection::Movement => colors.movement,
-        EqTargetSelection::Diffusion => colors.diffusion,
-        EqTargetSelection::Texture => colors.texture,
-    }
+/// The EQ has a single accent colour now (no per-module target).
+fn eq_accent_color(colors: ModuleColors) -> Color32 {
+    colors.eq
 }
 
-pub(crate) fn selected_eq_params<'a>(
-    params: &'a Cc22Params,
-    target: EqTargetSelection,
+/// Resolve the parameter bank for the position the UI is currently editing. Both
+/// banks always run in the DSP; this only picks which one the workbench shows.
+pub(crate) fn selected_eq_params(
+    params: &Cc22Params,
     position: EqPositionSelection,
-) -> &'a dyn EqParamRefs {
-    match (target, position) {
-        (EqTargetSelection::Global, EqPositionSelection::Pre) => &params.global_pre_eq,
-        (EqTargetSelection::Global, EqPositionSelection::Post) => &params.global_post_eq,
-        (EqTargetSelection::Character, EqPositionSelection::Pre) => &params.character_pre_eq,
-        (EqTargetSelection::Character, EqPositionSelection::Post) => &params.character_post_eq,
-        (EqTargetSelection::Movement, EqPositionSelection::Pre) => &params.movement_pre_eq,
-        (EqTargetSelection::Movement, EqPositionSelection::Post) => &params.movement_post_eq,
-        (EqTargetSelection::Diffusion, EqPositionSelection::Pre) => &params.diffusion_pre_eq,
-        (EqTargetSelection::Diffusion, EqPositionSelection::Post) => &params.diffusion_post_eq,
-        (EqTargetSelection::Texture, EqPositionSelection::Pre) => &params.texture_pre_eq,
-        (EqTargetSelection::Texture, EqPositionSelection::Post) => &params.texture_post_eq,
+) -> &dyn EqParamRefs {
+    match position {
+        EqPositionSelection::Pre => &params.pre_eq,
+        EqPositionSelection::Post => &params.post_eq,
     }
 }
 
@@ -68,10 +56,8 @@ pub(crate) fn eq_workbench(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
-    selected_eq_target: &mut EqTargetSelection,
     selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
-    advanced_open: &mut bool,
     spectrum: &[f32],
     colors: ModuleColors,
     theme: Theme,
@@ -102,18 +88,15 @@ pub(crate) fn eq_workbench(
                         ui,
                         setter,
                         params,
-                        selected_eq_target,
                         selected_eq_position,
                         selected_eq_band,
-                        advanced_open,
                         colors,
                         theme,
                     );
                     ui.add_space(3.0);
                     eq_separator(ui, theme);
                     ui.add_space(4.0);
-                    let eq_params =
-                        selected_eq_params(params, *selected_eq_target, *selected_eq_position);
+                    let eq_params = selected_eq_params(params, *selected_eq_position);
                     eq_body(
                         ui,
                         setter,
@@ -132,13 +115,16 @@ fn eq_header(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     params: &Cc22Params,
-    selected_eq_target: &mut EqTargetSelection,
     selected_eq_position: &mut EqPositionSelection,
     selected_eq_band: &mut EqBandSelection,
-    advanced_open: &mut bool,
     colors: ModuleColors,
     theme: Theme,
 ) {
+    // EQUALIZER   [PRE] [POST]   [ON]   B1–B5   [RESET]
+    let accent = eq_accent_color(colors);
+    let eq_params = selected_eq_params(params, *selected_eq_position);
+    let active = eq_active(eq_params);
+
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.label(
@@ -147,104 +133,37 @@ fn eq_header(
                 .strong()
                 .color(theme.text_dark),
         );
-        ui.add_space(6.0);
-        eq_selection_badge(
-            ui,
-            *selected_eq_target,
-            *selected_eq_position,
-            colors,
-            theme,
-        );
-        if eq_advanced_button(ui, *advanced_open, theme).clicked() {
-            *advanced_open = !*advanced_open;
+        ui.add_space(4.0);
+        eq_position_tabs(ui, selected_eq_position, accent, theme);
+        eq_toolbar_divider(ui, theme);
+        if eq_toggle_button(ui, active, accent, theme)
+            .on_hover_text(
+                "Enable/bypass this EQ. Pre and Post both run; this toggles the one shown.",
+            )
+            .clicked()
+        {
+            if active {
+                set_param(setter, eq_params.bypass(), true);
+            } else {
+                set_param(setter, eq_params.mode(), EqMode::On);
+                set_param(setter, eq_params.bypass(), false);
+            }
         }
-        if *advanced_open {
-            eq_toolbar_divider(ui, theme);
-            eq_target_tabs(ui, selected_eq_target, colors, theme);
-            let eq_accent = target_color(*selected_eq_target, colors);
-            eq_toolbar_divider(ui, theme);
-            eq_position_tabs(ui, selected_eq_position, eq_accent, colors, theme);
-        } else {
-            eq_toolbar_divider(ui, theme);
-            let eq_accent = target_color(*selected_eq_target, colors);
-            let eq_params = selected_eq_params(params, *selected_eq_target, *selected_eq_position);
-            let active = eq_active(eq_params);
-            if eq_toggle_button(ui, active, eq_accent, theme).clicked() {
-                if active {
-                    set_param(setter, eq_params.bypass(), true);
-                } else {
-                    set_param(setter, eq_params.mode(), EqMode::On);
-                    set_param(setter, eq_params.bypass(), false);
-                }
-            }
-            eq_toolbar_divider(ui, theme);
-            eq_band_tabs(ui, selected_eq_band, colors, theme);
-            eq_toolbar_divider(ui, theme);
-            if eq_reset_button(ui, eq_accent, theme).clicked() {
-                reset_eq_params_to_defaults(
-                    setter,
-                    params,
-                    *selected_eq_target,
-                    *selected_eq_position,
-                );
-                *selected_eq_band = EqBandSelection::Band1;
-            }
+        eq_toolbar_divider(ui, theme);
+        eq_band_tabs(ui, selected_eq_band, colors, theme);
+        eq_toolbar_divider(ui, theme);
+        let reset_tip = format!(
+            "Reset the {} EQ back to flat defaults.",
+            selected_eq_position.label()
+        );
+        if eq_reset_button(ui, accent, theme)
+            .on_hover_text(reset_tip)
+            .clicked()
+        {
+            reset_eq_params_to_defaults(setter, eq_params);
+            *selected_eq_band = EqBandSelection::Band1;
         }
     });
-}
-
-fn eq_selection_badge(
-    ui: &mut egui::Ui,
-    target: EqTargetSelection,
-    position: EqPositionSelection,
-    colors: ModuleColors,
-    theme: Theme,
-) {
-    let accent = target_color(target, colors);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(88.0, 20.0), Sense::hover());
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius::same(6),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 34),
-    );
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(6),
-        Stroke::new(1.0, accent.gamma_multiply(0.7)),
-        StrokeKind::Inside,
-    );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        format!("{} · {}", target.label(), position.label()),
-        FontId::monospace(7.5),
-        theme.text_dark,
-    );
-}
-
-fn eq_advanced_button(ui: &mut egui::Ui, open: bool, theme: Theme) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(82.0, 20.0), Sense::click());
-    ui.painter().rect_filled(
-        rect,
-        CornerRadius::same(6),
-        if open || response.hovered() {
-            Color32::from_rgb(52, 48, 42)
-        } else {
-            Color32::from_rgb(225, 219, 207)
-        },
-    );
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        if open { "CLOSE TARGET" } else { "EQ TARGET" },
-        FontId::monospace(7.2),
-        if open || response.hovered() {
-            Color32::WHITE
-        } else {
-            theme.muted_dark
-        },
-    );
-    response
 }
 
 fn eq_toggle_button(
@@ -359,60 +278,12 @@ fn eq_band_tabs(
     }
 }
 
-fn eq_target_tabs(
-    ui: &mut egui::Ui,
-    selected_eq_target: &mut EqTargetSelection,
-    colors: ModuleColors,
-    theme: Theme,
-) {
-    for target in EqTargetSelection::ALL {
-        let active = *selected_eq_target == target;
-        let label = target.label();
-        let (rect, response) = ui.allocate_exact_size(Vec2::new(48.0, 20.0), Sense::click());
-        if response.clicked() {
-            *selected_eq_target = target;
-        }
-        let fill = if active {
-            target_color(target, colors)
-        } else if response.hovered() {
-            Color32::from_rgba_premultiplied(
-                target_color(target, colors).r(),
-                target_color(target, colors).g(),
-                target_color(target, colors).b(),
-                58,
-            )
-        } else {
-            Color32::from_rgb(244, 239, 229)
-        };
-        ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(7),
-            Stroke::new(1.0, theme.card_edge.gamma_multiply(0.72)),
-            StrokeKind::Inside,
-        );
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            label,
-            FontId::monospace(7.5),
-            if active {
-                Color32::WHITE
-            } else {
-                theme.muted_dark
-            },
-        );
-    }
-}
-
 fn eq_position_tabs(
     ui: &mut egui::Ui,
     selected_eq_position: &mut EqPositionSelection,
     eq_accent: Color32,
-    colors: ModuleColors,
     theme: Theme,
 ) {
-    let _ = colors;
     for position in EqPositionSelection::ALL {
         let active = *selected_eq_position == position;
         let label = position.label();
@@ -600,7 +471,7 @@ fn eq_canvas(
                     Pos2::new(x, plot_rect.top()),
                     Pos2::new(x, plot_rect.bottom()),
                 ],
-                Stroke::new(0.35, Color32::from_rgba_premultiplied(128, 116, 96, 34)),
+                Stroke::new(0.3, Color32::from_rgba_premultiplied(128, 116, 96, 20)),
             );
         }
     }
@@ -612,7 +483,7 @@ fn eq_canvas(
                 Pos2::new(x, plot_rect.top()),
                 Pos2::new(x, plot_rect.bottom()),
             ],
-            Stroke::new(0.65, Color32::from_rgba_premultiplied(119, 106, 88, 64)),
+            Stroke::new(0.55, Color32::from_rgba_premultiplied(119, 106, 88, 40)),
         );
         let align = if frequency <= 20.0 {
             egui::Align2::LEFT_CENTER
@@ -648,11 +519,11 @@ fn eq_canvas(
                 Pos2::new(plot_rect.right(), y),
             ],
             Stroke::new(
-                if is_zero { 1.2 } else { 0.45 },
+                if is_zero { 1.0 } else { 0.4 },
                 if is_zero {
-                    Color32::from_rgb(171, 158, 138)
+                    Color32::from_rgba_premultiplied(171, 158, 138, 200)
                 } else {
-                    Color32::from_rgba_premultiplied(116, 104, 88, 42)
+                    Color32::from_rgba_premultiplied(116, 104, 88, 28)
                 },
             ),
         );
@@ -713,16 +584,18 @@ fn eq_canvas(
         ));
     }
 
+    // Elegant warm-orange curve (chroma-like): a thin stroke over a very soft
+    // fill to zero, so the shape reads clearly without veiling the grid.
     let curve_color = if eq_active(params) {
-        Color32::from_rgb(255, 139, 42)
+        Color32::from_rgb(255, 140, 50)
     } else {
         theme.muted
     };
     let zero_y = y_from_gain_db(plot_rect, 0.0);
     let fill_color = if eq_active(params) {
-        Color32::from_rgba_premultiplied(255, 141, 45, 15)
+        Color32::from_rgba_premultiplied(255, 140, 50, 12)
     } else {
-        Color32::from_rgba_premultiplied(theme.muted.r(), theme.muted.g(), theme.muted.b(), 9)
+        Color32::from_rgba_premultiplied(theme.muted.r(), theme.muted.g(), theme.muted.b(), 7)
     };
     for segment in curve.windows(2) {
         painter.add(egui::Shape::convex_polygon(
@@ -738,7 +611,7 @@ fn eq_canvas(
     }
     painter.add(egui::Shape::line(
         curve,
-        Stroke::new(if eq_active(params) { 2.4 } else { 2.0 }, curve_color),
+        Stroke::new(if eq_active(params) { 1.7 } else { 1.4 }, curve_color),
     ));
 
     let node_specs = eq_node_specs(params, colors, plot_rect);
@@ -809,101 +682,74 @@ fn eq_canvas(
 
         let hovered = node_response.hovered();
         let selected = node_band == *selected_eq_band;
-        let glow_radius = if selected {
-            18.0
+
+        // Chroma-style "bubble" node: a soft colored halo, a white ring, the
+        // colored dot, and a white outline — clearest when selected, dimmed and
+        // discreet when the band is Off (not draggable).
+        let halo = if selected {
+            12.0
         } else if hovered {
-            13.5
+            9.0
         } else {
-            0.0
+            7.0
         };
-        if glow_radius > 0.0 {
-            painter.circle_filled(
-                node.center,
-                glow_radius,
-                Color32::from_rgba_premultiplied(
-                    node.color.r(),
-                    node.color.g(),
-                    node.color.b(),
-                    if selected { 72 } else { 42 },
-                ),
-            );
-        }
-        if selected {
-            painter.circle_stroke(
-                node.center,
-                14.0,
-                Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 255, 255, 210)),
-            );
-            painter.circle_stroke(
-                node.center,
-                17.0,
-                Stroke::new(
-                    1.1,
-                    Color32::from_rgba_premultiplied(
-                        node.color.r(),
-                        node.color.g(),
-                        node.color.b(),
-                        160,
-                    ),
-                ),
-            );
-        }
+        let halo_alpha: u8 = if selected {
+            90
+        } else if hovered {
+            56
+        } else {
+            28
+        };
+        let dot_r = if selected {
+            6.5
+        } else if hovered {
+            6.0
+        } else {
+            5.0
+        };
+        let dot_color = if node.draggable {
+            node.color
+        } else {
+            Color32::from_rgba_premultiplied(node.color.r(), node.color.g(), node.color.b(), 80)
+        };
+
         painter.circle_filled(
             node.center,
-            if selected {
-                8.4
-            } else if hovered {
-                6.2
-            } else {
-                4.8
-            },
-            if node.draggable {
-                node.color
-            } else {
-                Color32::from_rgba_premultiplied(node.color.r(), node.color.g(), node.color.b(), 78)
-            },
-        );
-        painter.circle_stroke(
-            node.center,
-            if selected {
-                10.8
-            } else if hovered {
-                8.4
-            } else {
-                6.4
-            },
-            Stroke::new(
-                if selected { 1.9 } else { 1.2 },
-                Color32::from_rgb(255, 252, 244),
+            halo,
+            Color32::from_rgba_premultiplied(
+                node.color.r(),
+                node.color.g(),
+                node.color.b(),
+                halo_alpha,
             ),
         );
-        if hovered || selected {
-            let label = node.label;
-            let label_size = Vec2::new(34.0, 13.0);
-            let label_pos = Pos2::new(
-                node.center.x.clamp(
-                    rect.left() + label_size.x * 0.5,
-                    rect.right() - label_size.x * 0.5,
-                ),
-                (node.center.y - 18.0).clamp(
-                    rect.top() + label_size.y * 0.5,
-                    rect.bottom() - label_size.y * 0.5,
-                ),
-            );
-            let label_rect = egui::Rect::from_center_size(label_pos, label_size);
-            painter.rect_filled(
-                label_rect,
-                CornerRadius::same(4),
-                Color32::from_rgba_premultiplied(38, 33, 28, 205),
-            );
-            painter.text(
-                label_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                label,
-                FontId::monospace(8.0),
-                Color32::from_rgb(248, 241, 226),
-            );
-        }
+        painter.circle_filled(
+            node.center,
+            dot_r + 1.2,
+            Color32::from_rgba_premultiplied(255, 255, 255, 190),
+        );
+        painter.circle_filled(node.center, dot_r, dot_color);
+        painter.circle_stroke(
+            node.center,
+            dot_r,
+            Stroke::new(
+                if selected { 1.6 } else { 1.0 },
+                Color32::from_rgba_premultiplied(255, 255, 255, if selected { 235 } else { 150 }),
+            ),
+        );
+        // Band number above the node (always visible, like the old chroma EQ).
+        painter.text(
+            Pos2::new(node.center.x, node.center.y - dot_r - 7.0),
+            egui::Align2::CENTER_CENTER,
+            format!("{}", node.index + 1),
+            FontId::monospace(7.5),
+            Color32::from_rgba_premultiplied(
+                theme.text_dark.r(),
+                theme.text_dark.g(),
+                theme.text_dark.b(),
+                if selected { 235 } else { 150 },
+            ),
+        );
     }
     let _ = canvas_response;
 }
@@ -917,10 +763,10 @@ fn eq_body(
     colors: ModuleColors,
     theme: Theme,
 ) {
-    // The curve is the whole instrument now: no side inspector / knob column.
-    // Every parameter is edited directly on the graph — drag a node for
-    // frequency + gain, scroll on it for Q, right-click for the band type
-    // (Off disables it), and double-click to reset the band.
+    // The curve is the instrument: bands are edited directly on the graph — drag a
+    // node for frequency + gain, scroll for Q, right-click for the band type (Off
+    // disables it), double-click to reset. A single compact readout line below
+    // summarises the selected band (the "inspector", chroma-style).
     let canvas_width = ui.available_width().max(0.0);
     eq_canvas(
         ui,
@@ -932,6 +778,109 @@ fn eq_body(
         theme,
         canvas_width,
     );
+
+    ui.add_space(4.0);
+    eq_band_readout(ui, setter, params, *selected_eq_band, colors, theme);
+}
+
+/// Compact, *editable* inspector for the selected band: a colored dot, the band
+/// label/type, and Freq / Gain / Q drag-values (click to type for precision;
+/// gain hidden for HP/LP, which ignore it). The graph stays the primary way to
+/// edit; these give exact numeric entry.
+fn eq_band_readout(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    params: &dyn EqParamRefs,
+    selected_eq_band: EqBandSelection,
+    colors: ModuleColors,
+    theme: Theme,
+) {
+    let index = selected_eq_band.index();
+    let band_type = params.band_type(index).value();
+    let dot = eq_band_color(selected_eq_band, colors);
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (dot_rect, _) = ui.allocate_exact_size(Vec2::new(9.0, 14.0), Sense::hover());
+        ui.painter().circle_filled(dot_rect.center(), 3.5, dot);
+        ui.label(
+            RichText::new(format!("B{}", index + 1))
+                .font(FontId::monospace(9.5))
+                .strong()
+                .color(theme.text_dark),
+        );
+        ui.label(
+            RichText::new(eq_band_type_menu_label(band_type))
+                .font(FontId::monospace(9.0))
+                .color(theme.muted_dark),
+        );
+
+        // Freq (typeable). Coarse drag here; the graph is the fine control.
+        let mut freq = params.band_frequency(index).value();
+        if ui
+            .add(
+                egui::DragValue::new(&mut freq)
+                    .speed(2.0)
+                    .range(20.0..=20_000.0)
+                    .max_decimals(0)
+                    .suffix(" Hz"),
+            )
+            .on_hover_text("Centre frequency (click to type)")
+            .changed()
+        {
+            set_param(
+                setter,
+                params.band_frequency(index),
+                freq.clamp(20.0, 20_000.0),
+            );
+        }
+
+        // Gain only for types that use it.
+        if eq_type_uses_gain(band_type) {
+            let mut gain = params.band_gain(index).value();
+            if ui
+                .add(
+                    egui::DragValue::new(&mut gain)
+                        .speed(0.1)
+                        .range(-24.0..=24.0)
+                        .max_decimals(1)
+                        .suffix(" dB"),
+                )
+                .on_hover_text("Gain (click to type)")
+                .changed()
+            {
+                set_param(setter, params.band_gain(index), gain.clamp(-24.0, 24.0));
+            }
+        }
+
+        // Q / bandwidth.
+        let mut q = params.band_q(index).value();
+        if ui
+            .add(
+                egui::DragValue::new(&mut q)
+                    .speed(0.02)
+                    .range(0.1..=12.0)
+                    .max_decimals(2)
+                    .prefix("Q "),
+            )
+            .on_hover_text("Q / bandwidth (click to type)")
+            .changed()
+        {
+            set_param(setter, params.band_q(index), q.clamp(0.1, 12.0));
+        }
+
+        // Discreet gesture hint (right-aligned) so the canvas interactions stay
+        // discoverable.
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            ui.label(
+                RichText::new(
+                    "drag \u{00B7} scroll=Q \u{00B7} dbl-click=reset \u{00B7} right-click=type",
+                )
+                .font(FontId::monospace(8.0))
+                .color(theme.muted),
+            );
+        });
+    });
 }
 
 fn eq_band_tab_label(band: EqBandSelection) -> &'static str {
@@ -989,7 +938,6 @@ struct EqNodeSpec {
     center: Pos2,
     color: Color32,
     draggable: bool,
-    label: &'static str,
 }
 
 fn eq_node_specs(
@@ -1012,20 +960,8 @@ fn eq_node_specs(
             center: node_pos(rect, params.band_frequency(index).value(), gain),
             color: eq_band_color(band, colors),
             draggable,
-            label: eq_node_type_label(band_type),
         }
     })
-}
-
-fn eq_node_type_label(band_type: EqBandType) -> &'static str {
-    match band_type {
-        EqBandType::Off => "OFF",
-        EqBandType::Bell => "BEL",
-        EqBandType::LowShelf => "LS",
-        EqBandType::HighShelf => "HS",
-        EqBandType::HighPass => "HP",
-        EqBandType::LowPass => "LP",
-    }
 }
 
 fn node_pos(rect: egui::Rect, frequency: f32, gain_db: f32) -> Pos2 {
@@ -1236,13 +1172,7 @@ fn reset_eq_band(setter: &ParamSetter<'_>, params: &dyn EqParamRefs, band: usize
     set_param(setter, params.band_q(band), 1.0);
 }
 
-fn reset_eq_params_to_defaults(
-    setter: &ParamSetter<'_>,
-    params: &Cc22Params,
-    target: EqTargetSelection,
-    position: EqPositionSelection,
-) {
-    let eq_params = selected_eq_params(params, target, position);
+fn reset_eq_params_to_defaults(setter: &ParamSetter<'_>, eq_params: &dyn EqParamRefs) {
     set_param(setter, eq_params.mode(), EqMode::On);
     set_param(setter, eq_params.bypass(), false);
     for band in 0..EQ_NODE_COUNT {
@@ -1519,14 +1449,9 @@ fn y_from_real_gain_db(rect: egui::Rect, gain_db: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use nih_plug::prelude::EnumParam;
 
-    use crate::{
-        params::Cc22Params,
-        ui::meters::{EqPositionSelection, EqTargetSelection},
-    };
+    use crate::{params::Cc22Params, ui::meters::EqPositionSelection};
 
     use super::{
         direct_right_click_band_type, safe_eq_reset_frequency, selected_eq_params, EqBandType,
@@ -1548,82 +1473,30 @@ mod tests {
     }
 
     #[test]
-    fn every_target_and_position_selects_a_distinct_eq_bank() {
+    fn pre_and_post_select_distinct_banks() {
         let params = Cc22Params::default();
-        let targets = [
-            EqTargetSelection::Global,
-            EqTargetSelection::Character,
-            EqTargetSelection::Movement,
-            EqTargetSelection::Diffusion,
-            EqTargetSelection::Texture,
-        ];
-        let positions = [EqPositionSelection::Pre, EqPositionSelection::Post];
-        let expected = [
-            &params.global_pre_eq.band1_gain as *const _ as usize,
-            &params.global_post_eq.band1_gain as *const _ as usize,
-            &params.character_pre_eq.band1_gain as *const _ as usize,
-            &params.character_post_eq.band1_gain as *const _ as usize,
-            &params.movement_pre_eq.band1_gain as *const _ as usize,
-            &params.movement_post_eq.band1_gain as *const _ as usize,
-            &params.diffusion_pre_eq.band1_gain as *const _ as usize,
-            &params.diffusion_post_eq.band1_gain as *const _ as usize,
-            &params.texture_pre_eq.band1_gain as *const _ as usize,
-            &params.texture_post_eq.band1_gain as *const _ as usize,
-        ];
-        let mut band1_gain_addresses = BTreeSet::new();
-        let mut index = 0;
-
-        for target in targets {
-            for position in positions {
-                let eq = selected_eq_params(&params, target, position);
-                let address = eq.band_gain(0) as *const _ as usize;
-                assert_eq!(
-                    address, expected[index],
-                    "resolver returned the wrong EQ bank"
-                );
-                index += 1;
-                assert!(
-                    band1_gain_addresses.insert(address),
-                    "selection reused an EQ parameter bank"
-                );
-            }
-        }
-
-        assert_eq!(band1_gain_addresses.len(), 10);
+        let pre =
+            selected_eq_params(&params, EqPositionSelection::Pre).band_gain(0) as *const _ as usize;
+        let post = selected_eq_params(&params, EqPositionSelection::Post).band_gain(0) as *const _
+            as usize;
+        assert_ne!(pre, post, "Pre and Post must be independent EQ banks");
+        // And they resolve to the actual pre_eq / post_eq params.
+        assert_eq!(pre, &params.pre_eq.band1_gain as *const _ as usize);
+        assert_eq!(post, &params.post_eq.band1_gain as *const _ as usize);
     }
 
     #[test]
-    fn texture_post_band5_right_click_does_not_change_other_eqs() {
+    fn editing_post_band_does_not_change_pre_band() {
         let mut params = Cc22Params::default();
-        let before = [
-            params.global_pre_eq.band5_type.value(),
-            params.global_post_eq.band5_type.value(),
-            params.character_pre_eq.band5_type.value(),
-            params.character_post_eq.band5_type.value(),
-            params.movement_pre_eq.band5_type.value(),
-            params.movement_post_eq.band5_type.value(),
-            params.diffusion_pre_eq.band5_type.value(),
-            params.diffusion_post_eq.band5_type.value(),
-            params.texture_pre_eq.band5_type.value(),
-        ];
+        let pre_before = params.pre_eq.band5_type.value();
         let right_click_type = direct_right_click_band_type(4).unwrap();
-        params.texture_post_eq.band5_type = EnumParam::new("Type", right_click_type);
+        params.post_eq.band5_type = EnumParam::new("Type", right_click_type);
 
+        assert_eq!(params.post_eq.band5_type.value(), EqBandType::LowPass);
         assert_eq!(
-            params.texture_post_eq.band5_type.value(),
-            EqBandType::LowPass
+            params.pre_eq.band5_type.value(),
+            pre_before,
+            "editing Post must not change Pre"
         );
-        let after = [
-            params.global_pre_eq.band5_type.value(),
-            params.global_post_eq.band5_type.value(),
-            params.character_pre_eq.band5_type.value(),
-            params.character_post_eq.band5_type.value(),
-            params.movement_pre_eq.band5_type.value(),
-            params.movement_post_eq.band5_type.value(),
-            params.diffusion_pre_eq.band5_type.value(),
-            params.diffusion_post_eq.band5_type.value(),
-            params.texture_pre_eq.band5_type.value(),
-        ];
-        assert_eq!(after, before);
     }
 }

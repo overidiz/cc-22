@@ -259,98 +259,6 @@ fn center_fixed_width_row(ui: &mut egui::Ui, target_width: f32) {
     }
 }
 
-// ── reorder arrow buttons ───────────────────────────────────────────────
-
-fn reorder_arrows(
-    ui: &mut egui::Ui,
-    card_rect: Rect,
-    position_num: usize,
-    accent: Color32,
-    theme: Theme,
-    hovered: bool,
-    setter: &ParamSetter<'_>,
-    params: &Cc22Params,
-) -> bool {
-    if !hovered {
-        return false;
-    }
-
-    let btn_w = 18.0;
-    let btn_h = 14.0;
-    let y = card_rect.min.y + 10.0;
-    let gap = 4.0;
-
-    let left_center = Pos2::new(card_rect.min.x + 36.0, y + btn_h * 0.5);
-    let right_center = Pos2::new(card_rect.min.x + 36.0 + btn_w + gap, y + btn_h * 0.5);
-
-    let left_rect = Rect::from_center_size(left_center, Vec2::new(btn_w, btn_h));
-    let right_rect = Rect::from_center_size(right_center, Vec2::new(btn_w, btn_h));
-
-    let can_left = position_num > 1;
-    let can_right = position_num < 4;
-
-    let left_color = if can_left { accent } else { theme.muted };
-    let right_color = if can_right { accent } else { theme.muted };
-
-    // left arrow
-    ui.painter().rect_filled(
-        left_rect,
-        CornerRadius::same(4),
-        Color32::from_rgba_premultiplied(
-            left_color.r(),
-            left_color.g(),
-            left_color.b(),
-            if can_left { 50 } else { 20 },
-        ),
-    );
-    ui.painter().text(
-        left_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "\u{25C0}",
-        FontId::monospace(8.0),
-        left_color,
-    );
-
-    // right arrow
-    ui.painter().rect_filled(
-        right_rect,
-        CornerRadius::same(4),
-        Color32::from_rgba_premultiplied(
-            right_color.r(),
-            right_color.g(),
-            right_color.b(),
-            if can_right { 50 } else { 20 },
-        ),
-    );
-    ui.painter().text(
-        right_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "\u{25B6}",
-        FontId::monospace(8.0),
-        right_color,
-    );
-
-    let left_id = egui::Id::new(format!("reorder-left-{}", position_num));
-    let right_id = egui::Id::new(format!("reorder-right-{}", position_num));
-
-    let left_clicked = ui.interact(left_rect, left_id, Sense::click()).clicked() && can_left;
-    let right_clicked = ui.interact(right_rect, right_id, Sense::click()).clicked() && can_right;
-
-    if left_clicked || right_clicked {
-        let order = params.chain_order();
-        let src = position_num - 1;
-        let dst = if left_clicked {
-            src.saturating_sub(1)
-        } else {
-            (src + 1).min(3)
-        };
-        let new_order = crate::dsp::chain::reorder_module(order, src, dst);
-        set_chain_params(setter, params, &new_order);
-        return true;
-    }
-    false
-}
-
 // ── card rendering ──────────────────────────────────────────────────────
 
 fn render_module_card(
@@ -381,16 +289,12 @@ fn render_module_card(
     let shadow_accent = if hovered { Some(spec.accent) } else { None };
     card_shadow(ui.painter(), card_rect, lift, shadow_accent);
 
-    let border_alpha: u8 = if hovered { 255 } else { 180 };
-    let border_color = if spec.active {
-        Color32::from_rgba_premultiplied(
-            spec.accent.r(),
-            spec.accent.g(),
-            spec.accent.b(),
-            border_alpha,
-        )
-    } else {
+    // Neutral, restrained border (no saturated colour edge); the colour identity
+    // comes from the slim top accent bar and the mode dots instead.
+    let border_color = if hovered {
         theme.card_edge
+    } else {
+        theme.card_edge.gamma_multiply(0.8)
     };
     let card_bg = if hovered && !spec.active {
         theme.card
@@ -405,29 +309,37 @@ fn render_module_card(
         |ui| {
             egui::Frame::new()
                 .fill(card_bg)
-                .stroke(Stroke::new(1.4, border_color))
+                .stroke(Stroke::new(1.0, border_color))
                 .corner_radius(CornerRadius::same(14))
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
                     ui.set_width(CARD_WIDTH - 16.0);
                     ui.set_min_height(CARD_HEIGHT - 16.0);
 
+                    // Slim top accent bar — the card's colour identity, kept as a
+                    // tasteful tab rather than a neon outline.
+                    let accent_bar = Rect::from_min_size(
+                        Pos2::new(card_rect.left() + 16.0, card_rect.top() + 4.0),
+                        Vec2::new(CARD_WIDTH - 32.0, 3.0),
+                    );
+                    let bar_color = if spec.active {
+                        spec.accent.gamma_multiply(if hovered { 1.0 } else { 0.9 })
+                    } else {
+                        Color32::from_rgba_premultiplied(
+                            spec.accent.r(),
+                            spec.accent.g(),
+                            spec.accent.b(),
+                            90,
+                        )
+                    };
+                    ui.painter()
+                        .rect_filled(accent_bar, CornerRadius::same(2), bar_color);
+
                     position_badge(
                         ui,
-                        Pos2::new(card_rect.right() - 20.0, card_rect.bottom() - 24.0),
+                        Pos2::new(card_rect.right() - 18.0, card_rect.bottom() - 16.0),
                         position_num,
                         spec.accent,
-                    );
-
-                    reorder_arrows(
-                        ui,
-                        card_rect,
-                        position_num,
-                        spec.accent,
-                        theme,
-                        hovered,
-                        setter,
-                        params,
                     );
 
                     let handle_resp =
@@ -457,78 +369,83 @@ fn module_header(
     theme: Theme,
     hovered: bool,
 ) {
-    let line = Rect::from_min_size(
-        Pos2::new(ui.min_rect().left(), ui.cursor().min.y),
-        Vec2::new(ui.available_width(), 18.0),
-    );
-    let line_alpha: u8 = if spec.active {
-        38
-    } else if hovered {
-        24
-    } else {
-        16
-    };
-    ui.painter().rect_filled(
-        line,
-        CornerRadius::same(3),
-        Color32::from_rgba_premultiplied(
-            spec.accent.r(),
-            spec.accent.g(),
-            spec.accent.b(),
-            line_alpha,
-        ),
-    );
-    ui.painter().text(
-        line.center(),
-        egui::Align2::CENTER_CENTER,
-        spec.title,
-        FontId::monospace(FONT_MODULE_TITLE),
-        if spec.active {
-            theme.text_dark
-        } else {
-            theme.muted_dark
-        },
-    );
-    let power_rect = Rect::from_center_size(
-        Pos2::new(line.left() + 16.0, line.center().y),
-        Vec2::new(28.0, 14.0),
-    );
+    let top = ui.cursor().min.y;
+    let left = ui.min_rect().left();
+    let width = ui.available_width();
+    let row_h = 20.0;
+    let center_y = top + row_h * 0.5;
+
+    // Premium ON/OFF pill switch — a small sliding knob rather than a loose
+    // "ON/BYP" badge stuck to the title.
     let bypassed = spec.bypass.value();
+    let on = !bypassed;
+    let sw = Rect::from_min_size(Pos2::new(left, center_y - 8.0), Vec2::new(30.0, 16.0));
     let power = ui.interact(
-        power_rect,
+        sw,
         egui::Id::new(("module-power", spec.title)),
         Sense::click(),
     );
     if power.clicked() {
         set_param(setter, spec.bypass, !bypassed);
     }
-    ui.painter().rect_filled(
-        power_rect,
-        CornerRadius::same(7),
-        if bypassed {
-            Color32::from_rgb(184, 177, 165)
-        } else {
-            spec.accent.gamma_multiply(0.9)
-        },
+    let track = if on {
+        spec.accent.gamma_multiply(0.92)
+    } else {
+        theme.card_dim
+    };
+    ui.painter().rect_filled(sw, CornerRadius::same(8), track);
+    ui.painter().rect_stroke(
+        sw,
+        CornerRadius::same(8),
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.7)),
+        StrokeKind::Inside,
     );
+    let knob_x = if on {
+        sw.right() - 8.0
+    } else {
+        sw.left() + 8.0
+    };
+    ui.painter().circle_filled(
+        Pos2::new(knob_x, sw.center().y),
+        6.0,
+        Color32::from_rgb(250, 247, 240),
+    );
+    ui.painter().circle_stroke(
+        Pos2::new(knob_x, sw.center().y),
+        6.0,
+        Stroke::new(1.0, theme.card_edge.gamma_multiply(0.6)),
+    );
+    power.on_hover_text(if on {
+        "Module on \u{2014} click to bypass"
+    } else {
+        "Bypassed \u{2014} click to enable"
+    });
+
+    // Module title with clear hierarchy (largest text on the card).
     ui.painter().text(
-        power_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        if bypassed {
-            "BYP"
-        } else if spec.active {
-            "ON"
+        Pos2::new(sw.right() + 10.0, center_y),
+        egui::Align2::LEFT_CENTER,
+        spec.title,
+        FontId::monospace(FONT_MODULE_TITLE),
+        if on {
+            theme.text_dark
         } else {
-            "OFF"
-        },
-        FontId::monospace(7.0),
-        if bypassed {
             theme.muted_dark
-        } else {
-            Color32::WHITE
         },
     );
-    ui.add_space(22.0);
+
+    // Subtle accent underline separates the header from the mode list without a
+    // heavy filled band.
+    let underline_y = top + row_h + 3.0;
+    ui.painter().line_segment(
+        [
+            Pos2::new(left, underline_y),
+            Pos2::new(left + width, underline_y),
+        ],
+        Stroke::new(1.0, spec.accent.gamma_multiply(if on { 0.5 } else { 0.22 })),
+    );
+    let _ = hovered;
+    ui.add_space(row_h + 8.0);
 }
 
 /// The exact set of modes the Character selector exposes, in display order.
@@ -619,9 +536,10 @@ fn render_premium_mode_selector(
         ),
     }
 
+    ui.add_space(3.0);
     ui.label(
         RichText::new(current_mode_description(spec.module, params))
-            .font(FontId::monospace(8.5))
+            .font(FontId::monospace(super::theme::FONT_HINT))
             .color(theme.muted_dark),
     );
 }
@@ -653,23 +571,43 @@ fn render_mode_list<T>(
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
 
-        // Neutral background; only a faint accent wash on hover so the bold
-        // selected label is what carries the selection state.
-        if response.hovered() && !selected {
+        // Subtle row backing: a quiet accent wash on the active row (and a fainter
+        // one on hover) so selection reads as a soft highlight, never clutter.
+        if selected {
             ui.painter().rect_filled(
                 rect,
                 radius,
-                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 26),
+                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 22),
+            );
+        } else if response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                radius,
+                Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 14),
             );
         }
 
-        // Per-row colored square (red, yellow, green, blue, purple by position).
-        let square = Rect::from_center_size(
-            Pos2::new(rect.left() + 8.0, rect.center().y),
-            Vec2::splat(6.0),
-        );
-        ui.painter()
-            .rect_filled(square, CornerRadius::same(2), mode_option_color(index));
+        // Per-row colored dot ("bolinha"): red, yellow, green, blue, purple by
+        // position. These are the plugin's visual identity, so they are always
+        // drawn; the active one is a touch larger and brighter with a soft halo,
+        // while the others stay legible but quieter.
+        let dot_center = Pos2::new(rect.left() + 9.0, rect.center().y);
+        let base = mode_option_color(index);
+        let dot_radius = if selected { 4.3 } else { 3.4 };
+        if selected {
+            ui.painter().circle_filled(
+                dot_center,
+                dot_radius + 2.0,
+                Color32::from_rgba_premultiplied(base.r(), base.g(), base.b(), 60),
+            );
+            ui.painter().circle_filled(dot_center, dot_radius, base);
+        } else {
+            ui.painter().circle_filled(
+                dot_center,
+                dot_radius,
+                Color32::from_rgba_premultiplied(base.r(), base.g(), base.b(), 135),
+            );
+        }
 
         // Selected mode: bold name (a second offset pass thickens the strokes,
         // since egui's monospace family has no dedicated bold weight). Others
@@ -679,10 +617,10 @@ fn render_mode_list<T>(
         } else {
             theme.muted_dark
         };
-        let offsets: &[f32] = if selected { &[0.0, 0.6] } else { &[0.0] };
+        let offsets: &[f32] = if selected { &[0.0, 0.55] } else { &[0.0] };
         for &dx in offsets {
             ui.painter().text(
-                Pos2::new(rect.left() + 17.0 + dx, rect.center().y),
+                Pos2::new(rect.left() + 22.0 + dx, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 label,
                 FontId::monospace(10.0),
@@ -701,32 +639,32 @@ fn render_mode_list<T>(
 fn current_mode_description(module: ChainModule, params: &Cc22Params) -> &'static str {
     match module {
         ChainModule::Character => match params.character.mode.value() {
-            CharacterMode::Drive => "FOCUSED ANALOG PUSH",
-            CharacterMode::Sweet => "SOFT PRESENCE & SHINE",
-            CharacterMode::Fuzz => "DENSE BROKEN GRAIN",
-            CharacterMode::Howl => "VOCAL RESONANT COLOR",
-            CharacterMode::Swell => "BLOOMING ATTACK SHAPE",
+            CharacterMode::Drive => "Focused Analog Push",
+            CharacterMode::Sweet => "Soft Presence & Shine",
+            CharacterMode::Fuzz => "Dense Broken Grain",
+            CharacterMode::Howl => "Vocal Resonant Color",
+            CharacterMode::Swell => "Blooming Attack Shape",
         },
         ChainModule::Movement => match params.movement.mode.value() {
-            MovementMode::Doubler => "SHORT STEREO DOUBLE",
-            MovementMode::Vibrato => "PURE PITCH WOBBLE",
-            MovementMode::Phaser => "RESONANT PHASE SWEEP",
-            MovementMode::Tremolo => "RHYTHMIC LEVEL PULSE",
-            MovementMode::Pitch => "DRIFTING MICRO-PITCH",
+            MovementMode::Doubler => "Short Stereo Double",
+            MovementMode::Vibrato => "Pure Pitch Wobble",
+            MovementMode::Phaser => "Resonant Phase Sweep",
+            MovementMode::Tremolo => "Rhythmic Level Pulse",
+            MovementMode::Pitch => "Drifting Micro-Pitch",
         },
         ChainModule::Diffusion => match params.diffusion.mode.value() {
-            DiffusionMode::Cascade => "MULTI-TAP ECHO CLOUD",
-            DiffusionMode::Reels => "UNSTABLE TAPE REPEATS",
-            DiffusionMode::Space => "WIDE MODULATED SPACE",
-            DiffusionMode::Collage => "FRAGMENTED DELAY FIELD",
-            DiffusionMode::Reverse => "REVERSED CAPTURE BLOOM",
+            DiffusionMode::Cascade => "Multi-Tap Echo Cloud",
+            DiffusionMode::Reels => "Unstable Tape Repeats",
+            DiffusionMode::Space => "Wide Modulated Space",
+            DiffusionMode::Collage => "Fragmented Delay Field",
+            DiffusionMode::Reverse => "Reversed Capture Bloom",
         },
         ChainModule::Texture => match params.texture.mode.value() {
-            TextureMode::Filter => "TILTED TONAL COLOR",
-            TextureMode::Squash => "DENSE DYNAMIC GRAIN",
-            TextureMode::Cassette => "COMPACT TAPE DAMAGE",
-            TextureMode::Broken => "DROPOUTS & DIGITAL WEAR",
-            TextureMode::Interference => "ELECTRIC PARASITE TONE",
+            TextureMode::Filter => "Tilted Tonal Color",
+            TextureMode::Squash => "Dense Dynamic Grain",
+            TextureMode::Cassette => "Compact Tape Damage",
+            TextureMode::Broken => "Dropouts & Digital Wear",
+            TextureMode::Interference => "Electric Parasite Tone",
         },
     }
 }
@@ -991,14 +929,14 @@ fn render_module_content(
                     "RESO",
                     &params.character.drive,
                     Some(
-                        "RESO controls the real Drive parameter: input push, resonant howl, and feedback-like aggression.",
+                        "RESO - howl intensity: input push, resonant grind and feedback-like aggression.",
                     ),
                 ),
                 CharacterMode::Swell => (
-                    "ATTACK",
+                    "AMOUNT",
                     &params.character.drive,
                     Some(
-                        "ATTACK controls the real Drive parameter: swell attack time, transient removal, and retrigger sensitivity.",
+                        "AMOUNT - swell length: attack/decay (low = fast, high = long/cinematic).",
                     ),
                 ),
                 _ => ("DRIVE", &params.character.drive, None),
@@ -1008,13 +946,15 @@ fn render_module_content(
                     "FORMANT",
                     &params.character.tone,
                     Some(
-                        "FORMANT controls the real Tone parameter: vocal formant center and final brightness.",
+                        "FORMANT - vowel center and final brightness.",
                     ),
                 ),
                 CharacterMode::Swell => (
-                    "TONE",
+                    "SENSE",
                     &params.character.tone,
-                    Some("TONE controls the real Tone parameter for post-swell brightness."),
+                    Some(
+                        "SENSE - swell sensitivity / onset threshold (high = lighter touch retriggers).",
+                    ),
                 ),
                 _ => ("TONE", &params.character.tone, None),
             };
@@ -1097,6 +1037,7 @@ fn render_module_content(
                 )),
                 spec.accent,
                 theme,
+                true,
             );
         }
         ChainModule::Diffusion => {
@@ -1116,18 +1057,26 @@ fn render_module_content(
                 theme,
             );
             ui.add_space(2.0);
+            // The PRE option only governs the Space pre-delay, so it appears only
+            // for Space; the other diffusion modes show a clean SYNC chip.
+            let pre_extra = if mode == DiffusionMode::Space {
+                Some((
+                    "PRE",
+                    &params.diffusion.sync_pre_delay,
+                    "Lock the Space pre-delay to tempo (decay stays free).",
+                ))
+            } else {
+                None
+            };
             sync_controls(
                 ui,
                 setter,
                 &params.diffusion.sync_enabled,
                 &params.diffusion.sync_division,
-                Some((
-                    "PRE",
-                    &params.diffusion.sync_pre_delay,
-                    "Lock the Space pre-delay to tempo (decay stays free).",
-                )),
+                pre_extra,
                 spec.accent,
                 theme,
+                true,
             );
         }
         ChainModule::Texture => {
@@ -1147,6 +1096,12 @@ fn render_module_content(
                 theme,
             );
             ui.add_space(2.0);
+            // Texture only reacts to tempo on its time-smeared modes; Filter and
+            // Squash show a disabled SYNC chip with an explanatory tooltip.
+            let sync_applicable = matches!(
+                mode,
+                TextureMode::Cassette | TextureMode::Broken | TextureMode::Interference
+            );
             sync_controls(
                 ui,
                 setter,
@@ -1155,6 +1110,7 @@ fn render_module_content(
                 None,
                 spec.accent,
                 theme,
+                sync_applicable,
             );
         }
     }
@@ -1204,8 +1160,11 @@ fn primary_control_row(
     });
 }
 
-/// Compact SYNC toggle + tempo-division selector for the time-based modules.
-/// The division is a click-to-cycle chip (right-click goes back) to stay tiny.
+/// Compact, musical sync control for the time-based modules. Renders as a single
+/// unified "SYNC · 1/8" chip (left half toggles tempo-sync, right half cycles the
+/// division), with any LOCK/PRE option reduced to a small dot indicator rather
+/// than a competing button. When `applicable` is false (e.g. Texture modes that
+/// ignore tempo) it shows a quiet, disabled "SYNC —" chip with a tooltip.
 fn sync_controls(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
@@ -1214,92 +1173,141 @@ fn sync_controls(
     extra: Option<(&'static str, &BoolParam, &'static str)>,
     accent: Color32,
     theme: Theme,
+    applicable: bool,
 ) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let on = enabled.value();
+        ui.spacing_mut().item_spacing.x = 6.0;
 
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(44.0, 16.0), Sense::click());
-        if resp.clicked() {
-            set_param(setter, enabled, !on);
+        if !applicable {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(96.0, 16.0), Sense::hover());
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(8),
+                theme.card_dim.gamma_multiply(0.9),
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "SYNC \u{2014}",
+                FontId::monospace(8.5),
+                theme.muted,
+            );
+            resp.on_hover_text("This mode doesn't use tempo sync.");
+            return;
         }
+
+        let on = enabled.value();
+        let names = NoteDivision::variants();
+        let count = names.len();
+        let current = division.value().to_index();
+
+        // One pill, two halves: SYNC (toggle) · division (cycle).
+        let pill_w = 98.0;
+        let (pill, _) = ui.allocate_exact_size(Vec2::new(pill_w, 16.0), Sense::hover());
+        let split_x = pill.left() + 48.0;
+        let left_rect = Rect::from_min_max(pill.min, Pos2::new(split_x, pill.bottom()));
+        let right_rect = Rect::from_min_max(Pos2::new(split_x, pill.top()), pill.max);
+
+        // Backing: accent-tinted left when armed, neutral paper right.
         ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(4),
-            if on { accent } else { theme.card_dim },
+            pill,
+            CornerRadius::same(8),
+            if on { theme.paper } else { theme.card_dim },
+        );
+        if on {
+            ui.painter().rect_filled(
+                left_rect,
+                CornerRadius {
+                    nw: 8,
+                    sw: 8,
+                    ne: 0,
+                    se: 0,
+                },
+                accent.gamma_multiply(0.92),
+            );
+        }
+        ui.painter().rect_stroke(
+            pill,
+            CornerRadius::same(8),
+            Stroke::new(1.0, theme.card_edge.gamma_multiply(0.7)),
+            StrokeKind::Inside,
+        );
+        ui.painter().line_segment(
+            [
+                Pos2::new(split_x, pill.top() + 3.0),
+                Pos2::new(split_x, pill.bottom() - 3.0),
+            ],
+            Stroke::new(1.0, theme.card_edge.gamma_multiply(0.5)),
         );
         ui.painter().text(
-            rect.center(),
+            left_rect.center(),
             egui::Align2::CENTER_CENTER,
             "SYNC",
             FontId::monospace(8.0),
             if on { Color32::WHITE } else { theme.muted_dark },
         );
-        resp.on_hover_text("Lock the rate/time to the DAW tempo (BPM; falls back to 120).");
-
-        let names = NoteDivision::variants();
-        let count = names.len();
-        let current = division.value().to_index();
-        let (drect, dresp) = ui.allocate_exact_size(Vec2::new(52.0, 16.0), Sense::click());
-        ui.painter().rect_filled(
-            drect,
-            CornerRadius::same(4),
-            if on { theme.paper } else { theme.card_dim },
-        );
-        ui.painter().rect_stroke(
-            drect,
-            CornerRadius::same(4),
-            Stroke::new(1.0, theme.card_edge),
-            StrokeKind::Inside,
-        );
         ui.painter().text(
-            drect.center(),
+            right_rect.center(),
             egui::Align2::CENTER_CENTER,
             names[current],
-            FontId::monospace(8.0),
+            FontId::monospace(8.5),
             if on {
                 theme.text_dark
             } else {
                 theme.muted_dark
             },
         );
-        if dresp.clicked() {
+
+        let sync_resp = ui.interact(
+            left_rect,
+            ui.make_persistent_id(("sync-toggle", enabled as *const _ as usize)),
+            Sense::click(),
+        );
+        if sync_resp.clicked() {
+            set_param(setter, enabled, !on);
+        }
+        sync_resp.on_hover_text("Sync uses DAW BPM (falls back to 120).");
+
+        let div_resp = ui.interact(
+            right_rect,
+            ui.make_persistent_id(("sync-division", division as *const _ as usize)),
+            Sense::click(),
+        );
+        if div_resp.clicked() {
             set_param(
                 setter,
                 division,
                 NoteDivision::from_index((current + 1) % count),
             );
-        } else if dresp.secondary_clicked() {
+        } else if div_resp.secondary_clicked() {
             set_param(
                 setter,
                 division,
                 NoteDivision::from_index((current + count - 1) % count),
             );
         }
-        dresp.on_hover_text("Click to cycle the sync division (right-click for previous).");
+        div_resp.on_hover_text("Click to cycle the sync division (right-click for previous).");
 
-        // Optional extra toggle (e.g. Movement phase-lock, Diffusion pre-delay sync).
+        // Optional LOCK/PRE option as a discreet dot indicator, not a button.
         if let Some((label, param, tip)) = extra {
             let active = param.value();
-            let (erect, eresp) = ui.allocate_exact_size(Vec2::new(40.0, 16.0), Sense::click());
+            let (erect, eresp) = ui.allocate_exact_size(Vec2::new(42.0, 16.0), Sense::click());
             if eresp.clicked() {
                 set_param(setter, param, !active);
             }
-            ui.painter().rect_filled(
-                erect,
-                CornerRadius::same(4),
-                if active { accent } else { theme.card_dim },
-            );
+            let dot = Pos2::new(erect.left() + 6.0, erect.center().y);
+            if active {
+                ui.painter().circle_filled(dot, 3.0, accent);
+            } else {
+                ui.painter()
+                    .circle_stroke(dot, 3.0, Stroke::new(1.0, theme.muted));
+            }
             ui.painter().text(
-                erect.center(),
-                egui::Align2::CENTER_CENTER,
+                Pos2::new(erect.left() + 13.0, erect.center().y),
+                egui::Align2::LEFT_CENTER,
                 label,
                 FontId::monospace(8.0),
-                if active {
-                    Color32::WHITE
-                } else {
-                    theme.muted_dark
-                },
+                if active { theme.text_dark } else { theme.muted },
             );
             eresp.on_hover_text(tip);
         }
@@ -1362,7 +1370,7 @@ fn movement_first_control<'a>(mode: MovementMode, params: &'a Cc22Params) -> Flo
         MovementMode::Doubler => FloatControlSpec {
             label: "TIME",
             param: &params.movement.delay,
-            tip: Some("TIME controls the real Delay parameter for the doubler offset."),
+            tip: Some("TIME - doubler offset (the 'second take' delay)."),
         },
         _ => FloatControlSpec {
             label: "RATE",
@@ -1397,7 +1405,7 @@ fn movement_third_control<'a>(mode: MovementMode, params: &'a Cc22Params) -> Flo
         MovementMode::Phaser => FloatControlSpec {
             label: "RESO",
             param: &params.movement.feedback,
-            tip: Some("RESO controls the phaser feedback path."),
+            tip: Some("RESO - phaser feedback / resonance."),
         },
         _ => FloatControlSpec {
             label: "WIDTH",
@@ -1415,16 +1423,12 @@ fn diffusion_first_control<'a>(
         DiffusionMode::Reels => FloatControlSpec {
             label: "TIME",
             param: &params.diffusion.time,
-            tip: Some(
-                "TIME controls the real Time parameter: smoothed base delay time for the tape echo.",
-            ),
+            tip: Some("TIME - tape echo base delay time."),
         },
         DiffusionMode::Reverse => FloatControlSpec {
             label: "TIME",
             param: &params.diffusion.time,
-            tip: Some(
-                "TIME controls the real Time parameter: reverse capture window and delay feel.",
-            ),
+            tip: Some("TIME - playback speed/pitch: left = down, centre = normal, right = up."),
         },
         DiffusionMode::Space | DiffusionMode::Collage => FloatControlSpec {
             label: "SIZE",
@@ -1447,16 +1451,12 @@ fn diffusion_second_control<'a>(
         DiffusionMode::Reels => FloatControlSpec {
             label: "WOW/DRIFT",
             param: &params.diffusion.size,
-            tip: Some(
-                "WOW/DRIFT controls the real Size parameter: tape wow, flutter, and random drift amount.",
-            ),
+            tip: Some("WOW/DRIFT - tape wow, flutter and random drift."),
         },
         DiffusionMode::Reverse => FloatControlSpec {
             label: "LENGTH",
             param: &params.diffusion.size,
-            tip: Some(
-                "LENGTH controls the real Size parameter: reverse segment length and density.",
-            ),
+            tip: Some("LENGTH - reverse segment length / density."),
         },
         DiffusionMode::Space => FloatControlSpec {
             label: "DECAY",
@@ -1466,9 +1466,7 @@ fn diffusion_second_control<'a>(
         DiffusionMode::Collage => FloatControlSpec {
             label: "DENSITY",
             param: &params.diffusion.feedback,
-            tip: Some(
-                "DENSITY controls the real Feedback parameter used by Collage fragment density.",
-            ),
+            tip: Some("DENSITY - Collage fragment density."),
         },
         _ => FloatControlSpec {
             label: "REPEATS",
@@ -1509,7 +1507,7 @@ fn diffusion_secondary_controls<'a>(
     let mix = FloatControlSpec {
         label: "MIX",
         param: &params.diffusion.mix,
-        tip: Some("MIX controls the real Mix parameter: dry/wet blend."),
+        tip: Some("MIX - dry/wet blend."),
     };
 
     match mode {
@@ -1518,9 +1516,7 @@ fn diffusion_secondary_controls<'a>(
             FloatControlSpec {
                 label: "REPEATS",
                 param: &params.diffusion.feedback,
-                tip: Some(
-                    "REPEATS controls the real Feedback parameter: amount of colored tape echo returned to the feedback path.",
-                ),
+                tip: Some("REPEATS - amount of colored tape echo fed back."),
             },
         ),
         DiffusionMode::Reverse => (
@@ -1528,9 +1524,7 @@ fn diffusion_secondary_controls<'a>(
             FloatControlSpec {
                 label: "REPEATS",
                 param: &params.diffusion.feedback,
-                tip: Some(
-                    "REPEATS controls the real Feedback parameter: how much reversed signal is written back for repeats.",
-                ),
+                tip: Some("REPEATS - how much reversed signal feeds the repeats."),
             },
         ),
         _ => (
@@ -1549,12 +1543,12 @@ fn texture_first_control<'a>(mode: TextureMode, params: &'a Cc22Params) -> Float
         TextureMode::Filter => FloatControlSpec {
             label: "COLOR",
             param: &params.texture.noise_color,
-            tip: Some("COLOR controls the real Noise Color parameter for the filter character."),
+            tip: Some("COLOR - filter character / tilt."),
         },
         TextureMode::Squash => FloatControlSpec {
             label: "WEAR",
             param: &params.texture.degrade,
-            tip: Some("AMOUNT controls the real Degrade parameter for squash intensity."),
+            tip: Some("WEAR - squash intensity."),
         },
         TextureMode::Broken => FloatControlSpec {
             label: "WEAR",
@@ -1564,7 +1558,7 @@ fn texture_first_control<'a>(mode: TextureMode, params: &'a Cc22Params) -> Float
         TextureMode::Interference => FloatControlSpec {
             label: "NOISE",
             param: &params.texture.noise_amount,
-            tip: Some("AMOUNT controls the real Noise Amount parameter for interference level."),
+            tip: Some("NOISE - interference level."),
         },
         _ => FloatControlSpec {
             label: "WOW",
@@ -1579,27 +1573,27 @@ fn texture_second_control<'a>(mode: TextureMode, params: &'a Cc22Params) -> Floa
         TextureMode::Filter => FloatControlSpec {
             label: "WEAR",
             param: &params.texture.degrade,
-            tip: Some("RES/DEG controls the real Degrade parameter, mapped to filter drive/resonance."),
+            tip: Some("WEAR - filter drive / resonance."),
         },
         TextureMode::Squash => FloatControlSpec {
             label: "COLOR",
             param: &params.texture.noise_color,
-            tip: Some("TONE controls the real Noise Color parameter for squash detector color."),
+            tip: Some("COLOR - squash detector color/tone."),
         },
         TextureMode::Cassette => FloatControlSpec {
             label: "NOISE",
             param: &params.texture.noise_amount,
-            tip: Some("NOISE controls the real Noise Amount parameter."),
+            tip: Some("NOISE - tape hiss amount."),
         },
         TextureMode::Broken => FloatControlSpec {
             label: "DRIFT",
             param: &params.texture.random_drift,
-            tip: Some("DRIFT controls the real Random Drift parameter."),
+            tip: Some("DRIFT - random instability."),
         },
         TextureMode::Interference => FloatControlSpec {
             label: "COLOR",
             param: &params.texture.noise_color,
-            tip: Some("FREQ/COL controls the real Noise Color parameter, mapped to interference frequency and color."),
+            tip: Some("COLOR - interference frequency & color."),
         },
     }
 }
@@ -1670,7 +1664,7 @@ fn shape_selector(
             StrokeKind::Inside,
         );
 
-        response.on_hover_text("SHAPE controls the real Shape enum parameter for Tremolo.")
+        response.on_hover_text("SHAPE - tremolo LFO waveform.")
     })
     .inner
 }

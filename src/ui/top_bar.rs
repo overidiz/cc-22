@@ -12,10 +12,31 @@ use super::{
         save_user_snapshot,
     },
     theme::{ModuleColors, Theme},
-    widgets::{brand_mark, compact_button, global_bypass_button},
+    widgets::{compact_button, global_bypass_button},
 };
 
 pub(crate) const TOP_BAR_HEIGHT: f32 = 76.0;
+
+/// CC-22 logo, pre-decoded to raw RGBA at build time (96×96) so no image-decoder
+/// dependency is needed at runtime.
+const LOGO_RGBA: &[u8] = include_bytes!("logo_rgba.bin");
+const LOGO_SIZE: usize = 80;
+
+/// Lazily upload the logo texture (once) and paint it into a square slot.
+fn draw_logo(ui: &mut egui::Ui, state: &mut UiState, side: f32) {
+    let texture = state.logo_texture.get_or_insert_with(|| {
+        let image = egui::ColorImage::from_rgba_unmultiplied([LOGO_SIZE, LOGO_SIZE], LOGO_RGBA);
+        ui.ctx()
+            .load_texture("cc22-logo", image, egui::TextureOptions::LINEAR)
+    });
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
+    ui.painter().image(
+        texture.id(),
+        rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+}
 
 pub(crate) fn top_bar(
     ui: &mut egui::Ui,
@@ -52,7 +73,7 @@ pub(crate) fn top_bar(
                     ui.horizontal_centered(|ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
-                                brand_mark(ui, colors, theme);
+                                draw_logo(ui, state, 40.0);
                                 ui.label(
                                     RichText::new("CC-22")
                                         .font(FontId::proportional(24.0))
@@ -62,7 +83,7 @@ pub(crate) fn top_bar(
                             });
                             ui.label(
                                 RichText::new("MODULAR COLOR PROCESSOR")
-                                    .font(FontId::monospace(8.5))
+                                    .font(FontId::monospace(9.0))
                                     .color(theme.muted_dark),
                             );
                         });
@@ -78,14 +99,20 @@ pub(crate) fn top_bar(
                             280.0,
                         );
 
-                        if compact_button(ui, "PREV", theme, colors.master).clicked() {
+                        if compact_button(ui, "\u{25C0}", theme, colors.master)
+                            .on_hover_text("Previous preset")
+                            .clicked()
+                        {
                             previous_preset(setter, state, params);
                         }
-                        if compact_button(ui, "NEXT", theme, colors.master).clicked() {
+                        if compact_button(ui, "\u{25B6}", theme, colors.master)
+                            .on_hover_text("Next preset")
+                            .clicked()
+                        {
                             next_preset(setter, state, params);
                         }
                         if compact_button(ui, "RND", theme, colors.texture)
-                            .on_hover_text("Randomize musical control values")
+                            .on_hover_text("Randomize the musical controls")
                             .clicked()
                         {
                             randomize_controls(setter, state, params);

@@ -25,24 +25,21 @@ pub(crate) fn card_shadow(
 // ── signal flow arrows ──────────────────────────────────────────────────
 
 pub(crate) fn position_badge(ui: &mut egui::Ui, pos: Pos2, number: usize, accent: Color32) {
-    let badge_rect = egui::Rect::from_center_size(pos, Vec2::new(18.0, 18.0));
+    // A discreet chain-order marker ("01".."04"): a tiny accent tick plus a
+    // muted two-digit number, deliberately understated so it reads as "order"
+    // rather than an unread-notification badge.
+    let tick = egui::Rect::from_min_size(Pos2::new(pos.x - 12.0, pos.y - 4.0), Vec2::new(3.0, 8.0));
     ui.painter().rect_filled(
-        badge_rect,
-        CornerRadius::same(5),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 70),
-    );
-    ui.painter().rect_stroke(
-        badge_rect,
-        CornerRadius::same(5),
-        Stroke::new(1.0, accent),
-        StrokeKind::Inside,
+        tick,
+        CornerRadius::same(1),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 150),
     );
     ui.painter().text(
-        badge_rect.center(),
-        Align2::CENTER_CENTER,
-        format!("{}", number),
-        FontId::monospace(10.0),
-        accent,
+        Pos2::new(pos.x - 5.0, pos.y),
+        Align2::LEFT_CENTER,
+        format!("{number:02}"),
+        FontId::monospace(9.5),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 175),
     );
 }
 

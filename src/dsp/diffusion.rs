@@ -12,6 +12,9 @@ use super::{
 
 const MAX_CHANNELS: usize = 2;
 const MAX_DELAY_SECONDS: f32 = 2.1;
+// Reverse keeps a longer buffer so a slow (0.5×) varispeed playback of a long
+// segment finishes before the write head laps the captured region.
+const MAX_REVERSE_SECONDS: f32 = 4.5;
 const MAX_REVERB_PRE_DELAY_SECONDS: f32 = 0.13;
 const NUM_REVERB_COMBS: usize = 6;
 const NUM_REVERB_ALLPASSES: usize = 3;
@@ -106,6 +109,10 @@ pub struct DiffusionFrame {
     width: f32,
     active_mix: f32,
     tone_alpha: f32,
+    // Reverse-only: TIME maps to a 0.5×–2× playback speed/pitch ratio, and TONE
+    // becomes a drift amount that wobbles that ratio. Unused by other modes.
+    reverse_ratio: f32,
+    reverse_drift: f32,
     mode_fade: f32,
 }
 
@@ -147,14 +154,17 @@ struct ReverseState {
     write_positions: [usize; MAX_CHANNELS],
     segment_starts: [usize; MAX_CHANNELS],
     segment_lengths: [usize; MAX_CHANNELS],
-    playback_positions: [usize; MAX_CHANNELS],
+    // Fractional read heads so the segment can be played back at a variable
+    // speed (TIME → 0.5×..2×) with linear interpolation.
+    playback_positions: [f32; MAX_CHANNELS],
     previous_segment_starts: [usize; MAX_CHANNELS],
     previous_segment_lengths: [usize; MAX_CHANNELS],
-    previous_playback_positions: [usize; MAX_CHANNELS],
+    previous_playback_positions: [f32; MAX_CHANNELS],
     crossfade_position_samples: [usize; MAX_CHANNELS],
     crossfade_length_samples: [usize; MAX_CHANNELS],
     filter_state: [f32; MAX_CHANNELS],
     feedback_filter_state: [f32; MAX_CHANNELS],
+    drift_phase: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -276,6 +286,10 @@ impl Diffusion {
             width,
             active_mix: module_frame.active_mix,
             tone_alpha: tone_to_alpha(tone, self.sample_rate),
+            // TIME knob (normalized) → 0.5×..2× varispeed, centred at 1× when the
+            // knob is at noon. TONE → drift depth for the reverse warble.
+            reverse_ratio: reverse_ratio_from_norm(params.time.unmodulated_normalized_value()),
+            reverse_drift: tone,
             mode_fade: self.mode_crossfade.next_value().clamp(0.0, 1.0),
         }
     }
@@ -486,8 +500,13 @@ impl Diffusion {
             );
         }
 
-        // Smooth tail + wide stereo
-        wet = sanitize_sample((wet * 0.76) + (self.reverb.last_wet[index] * 0.24));
+        // Smooth tail + wide stereo. The tail smoothing now tracks `damping`, so
+        // turning damping up makes the reverb darker/denser (less metallic top)
+        // rather than just quieter — a more musical damping control.
+        let tail_smooth = (0.24 + frame.damping.clamp(0.0, 1.0) * 0.22).clamp(0.24, 0.46);
+        wet = sanitize_sample(
+            (wet * (1.0 - tail_smooth)) + (self.reverb.last_wet[index] * tail_smooth),
+        );
         let other = self.reverb.last_wet[1 - index];
         self.reverb.last_wet[index] = wet;
 
@@ -641,6 +660,17 @@ impl Diffusion {
 
         let write_pos = self.reverse.write_positions[index];
 
+        // Varispeed: TIME sets the base playback ratio (0.5×..2×), and TONE adds a
+        // slow drift wobble on top — a tape-style pitch warble on the repeats. The
+        // dry input is never modulated (only the reverse read head is).
+        let drift_depth = frame.reverse_drift.clamp(0.0, 1.0) * 0.06;
+        let drift_rate = 0.45 + frame.reverse_drift.clamp(0.0, 1.0) * 0.90;
+        self.reverse.drift_phase[index] =
+            (self.reverse.drift_phase[index] + drift_rate / self.sample_rate.max(1.0)).fract();
+        let drift_mod =
+            1.0 + (self.reverse.drift_phase[index] * core::f32::consts::TAU).sin() * drift_depth;
+        let ratio = (frame.reverse_ratio.clamp(0.25, 4.0) * drift_mod).clamp(0.25, 4.0);
+
         let current_pos = self.reverse.playback_positions[index];
         let current_len = self.reverse.segment_lengths[index];
         let current_sample = reverse_read_sample(
@@ -649,8 +679,12 @@ impl Diffusion {
             current_len,
             current_pos,
         );
-        let current_env =
-            reverse_playback_envelope(current_pos, current_len, frame.decay, self.sample_rate);
+        let current_env = reverse_playback_envelope(
+            current_pos as usize,
+            current_len,
+            frame.decay,
+            self.sample_rate,
+        );
         let mut wet = sanitize_sample(current_sample * current_env);
 
         let crossfade_len = self.reverse.crossfade_length_samples[index];
@@ -663,8 +697,12 @@ impl Diffusion {
                 prev_len,
                 prev_pos,
             );
-            let prev_env =
-                reverse_playback_envelope(prev_pos, prev_len, frame.decay, self.sample_rate);
+            let prev_env = reverse_playback_envelope(
+                prev_pos as usize,
+                prev_len,
+                frame.decay,
+                self.sample_rate,
+            );
             let prev_wet = sanitize_sample(prev_sample * prev_env);
             let amount =
                 self.reverse.crossfade_position_samples[index] as f32 / crossfade_len as f32;
@@ -672,9 +710,9 @@ impl Diffusion {
         }
 
         if crossfade_len > 0 {
+            let prev_max = self.reverse.previous_segment_lengths[index].saturating_sub(1) as f32;
             self.reverse.previous_playback_positions[index] =
-                (self.reverse.previous_playback_positions[index] + 1)
-                    .min(self.reverse.previous_segment_lengths[index].saturating_sub(1));
+                (self.reverse.previous_playback_positions[index] + ratio).min(prev_max);
             self.reverse.crossfade_position_samples[index] += 1;
             if self.reverse.crossfade_position_samples[index] >= crossfade_len {
                 self.reverse.crossfade_position_samples[index] = 0;
@@ -705,8 +743,10 @@ impl Diffusion {
         self.reverse.buffers[index][write_pos] = sanitize_sample(sample + fb_saturated);
         self.reverse.write_positions[index] = (write_pos + 1) % buf_len;
 
-        self.reverse.playback_positions[index] += 1;
-        if self.reverse.playback_positions[index] >= self.reverse.segment_lengths[index].max(1) {
+        self.reverse.playback_positions[index] += ratio;
+        if self.reverse.playback_positions[index]
+            >= self.reverse.segment_lengths[index].max(1) as f32
+        {
             self.capture_reverse_segment(index, frame, buf_len, true);
         }
 
@@ -738,7 +778,7 @@ impl Diffusion {
                     self.reverse.segment_starts[channel];
                 self.reverse.previous_segment_lengths[channel] = prev_len;
                 self.reverse.previous_playback_positions[channel] =
-                    prev_len.saturating_sub(xfade_len.max(1));
+                    prev_len.saturating_sub(xfade_len.max(1)) as f32;
                 self.reverse.crossfade_position_samples[channel] = 0;
                 self.reverse.crossfade_length_samples[channel] = xfade_len;
             }
@@ -749,7 +789,7 @@ impl Diffusion {
 
         self.reverse.segment_starts[channel] = start;
         self.reverse.segment_lengths[channel] = segment_len;
-        self.reverse.playback_positions[channel] = 0;
+        self.reverse.playback_positions[channel] = 0.0;
     }
 
     fn set_mode(&mut self, mode: DiffusionMode) {
@@ -827,7 +867,7 @@ impl CollageState {
 
 impl ReverseState {
     fn prepare(&mut self, sample_rate: f32) {
-        let samples = ((sample_rate.max(1.0) * MAX_DELAY_SECONDS).ceil() as usize).max(4);
+        let samples = ((sample_rate.max(1.0) * MAX_REVERSE_SECONDS).ceil() as usize).max(4);
         for buffer in &mut self.buffers {
             buffer.resize(samples, 0.0);
             buffer.fill(0.0);
@@ -846,14 +886,15 @@ impl ReverseState {
         self.write_positions = [0; MAX_CHANNELS];
         self.segment_starts = [0; MAX_CHANNELS];
         self.segment_lengths = [0; MAX_CHANNELS];
-        self.playback_positions = [0; MAX_CHANNELS];
+        self.playback_positions = [0.0; MAX_CHANNELS];
         self.previous_segment_starts = [0; MAX_CHANNELS];
         self.previous_segment_lengths = [0; MAX_CHANNELS];
-        self.previous_playback_positions = [0; MAX_CHANNELS];
+        self.previous_playback_positions = [0.0; MAX_CHANNELS];
         self.crossfade_position_samples = [0; MAX_CHANNELS];
         self.crossfade_length_samples = [0; MAX_CHANNELS];
         self.filter_state = [0.0; MAX_CHANNELS];
         self.feedback_filter_state = [0.0; MAX_CHANNELS];
+        self.drift_phase = [0.0, 0.5];
     }
 }
 
@@ -1038,16 +1079,34 @@ fn reverse_read_sample(
     buffer: &[f32],
     segment_start: usize,
     segment_len: usize,
-    playback_pos: usize,
+    playback_pos: f32,
 ) -> f32 {
     if buffer.is_empty() || segment_len == 0 {
         return 0.0;
     }
 
     let len = buffer.len();
-    let pos = playback_pos.min(segment_len - 1);
-    let reverse_offset = segment_len - 1 - pos;
-    sanitize_sample(buffer[(segment_start + reverse_offset) % len])
+    let max_pos = (segment_len - 1) as f32;
+    let pos = playback_pos.clamp(0.0, max_pos);
+    // Reverse playback in segment space, with linear interpolation so a
+    // fractional (varispeed) read head doesn't quantise/click. `pos` increases
+    // from 0; the segment is read end-to-start.
+    let i0 = pos.floor() as usize;
+    let frac = pos - i0 as f32;
+    let i1 = (i0 + 1).min(segment_len - 1);
+    let r0 = segment_len - 1 - i0;
+    let r1 = segment_len - 1 - i1;
+    let s0 = sanitize_sample(buffer[(segment_start + r0) % len]);
+    let s1 = sanitize_sample(buffer[(segment_start + r1) % len]);
+    sanitize_sample(s0 * (1.0 - frac) + s1 * frac)
+}
+
+/// Maps the normalised TIME knob (0..1) to a 0.5×..2× playback ratio, centred at
+/// 1× when the knob is at noon: 0.0 → 0.5× (≈ −1 octave), 1.0 → 2× (≈ +1 octave).
+#[inline]
+fn reverse_ratio_from_norm(time_norm: f32) -> f32 {
+    let t = time_norm.clamp(0.0, 1.0);
+    2.0_f32.powf(2.0 * t - 1.0).clamp(0.5, 2.0)
 }
 
 #[inline]
@@ -1218,13 +1277,14 @@ fn reverse_segment_length_samples(
     sample_rate: f32,
     buf_len: usize,
 ) -> usize {
-    let time_ms = frame.time_ms.clamp(60.0, 2_000.0);
+    // TIME now controls playback speed/pitch, so the captured segment length comes
+    // from SIZE (musical 80 ms..1 s window of reversed audio).
     let size = frame.size.clamp(0.0, 1.0);
-    let segment_ms = (time_ms * (0.35 + size * 0.55)).clamp(60.0, 1_600.0);
+    let segment_ms = (80.0 + size * 920.0).clamp(80.0, 1_000.0);
     let samples = (segment_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
-    let min_samples = (sample_rate.max(1.0) * 0.060).round() as usize;
-    let max_samples = (sample_rate.max(1.0) * 1.600).round() as usize;
-    samples.clamp(min_samples.max(8), max_samples.min((buf_len / 2).max(8)))
+    let min_samples = (sample_rate.max(1.0) * 0.080).round() as usize;
+    let max_samples = (sample_rate.max(1.0) * 1.000).round() as usize;
+    samples.clamp(min_samples.max(8), max_samples.min((buf_len / 3).max(8)))
 }
 
 #[inline]
@@ -1235,18 +1295,15 @@ fn reverse_window_samples(
     buf_len: usize,
     segment_len: usize,
 ) -> usize {
+    // Start the segment ~1.3× its length behind the write head so a slow (0.5×)
+    // playback can finish before the write head laps the captured region. A small
+    // stereo offset captures slightly different windows per channel.
     let offset = frame.stereo_offset.clamp(-0.5, 0.5) * frame.width.clamp(0.0, 1.0) * 0.35;
-    let multiplier = if channel == 0 {
-        1.0 - offset
-    } else {
-        1.0 + offset
-    };
-    let pre_delay_ms = frame.pre_delay_ms.clamp(0.0, 120.0) * 0.35;
-    let window_ms =
-        (frame.time_ms.clamp(60.0, 2_000.0) * multiplier + pre_delay_ms).clamp(60.0, 2_000.0);
-    let samples = (window_ms * 0.001 * sample_rate.max(1.0)).round() as usize;
+    let multiplier = (1.0 + if channel == 0 { -offset } else { offset }).clamp(0.6, 1.4);
+    let pre_delay = (frame.pre_delay_ms.clamp(0.0, 120.0) * 0.001 * sample_rate.max(1.0)) as usize;
+    let base = (segment_len as f32 * 1.3 * multiplier) as usize + pre_delay;
     let min_window = segment_len.saturating_add(2);
-    samples.clamp(min_window, buf_len.saturating_sub(2).max(min_window))
+    base.clamp(min_window, buf_len.saturating_sub(2).max(min_window))
 }
 
 #[inline]
@@ -1517,6 +1574,8 @@ mod tests {
             width: 1.0,
             active_mix: 1.0,
             tone_alpha: 1.0,
+            reverse_ratio: 1.0,
+            reverse_drift: 0.0,
             mode_fade: 1.0,
         }
     }
@@ -1728,6 +1787,8 @@ mod tests {
             width: 1.0,
             active_mix: 1.0,
             tone_alpha: 0.5,
+            reverse_ratio: 1.0,
+            reverse_drift: 0.0,
             mode_fade: 1.0,
         }
     }
@@ -1867,6 +1928,8 @@ mod tests {
             width: 1.0,
             active_mix: 1.0,
             tone_alpha: 0.7,
+            reverse_ratio: 1.0,
+            reverse_drift: 0.0,
             mode_fade: 1.0,
         };
 
@@ -1976,6 +2039,8 @@ mod tests {
             width,
             active_mix: 1.0,
             tone_alpha: 0.65,
+            reverse_ratio: 1.0,
+            reverse_drift: 0.0,
             mode_fade: 1.0,
         }
     }
@@ -2184,6 +2249,8 @@ mod tests {
             width,
             active_mix: 1.0,
             tone_alpha: 0.65,
+            reverse_ratio: 1.0,
+            reverse_drift: 0.0,
             mode_fade: 1.0,
         }
     }
@@ -2192,13 +2259,15 @@ mod tests {
     fn reverse_impulse_becomes_audible_and_stays_finite() {
         let mut diffusion = Diffusion::default();
         diffusion.prepare(48_000.0);
-        let frame = reverse_frame(32.0, 0.55, 0.65, 0.75, 0.0, 1.0);
+        // TIME now sets playback speed/pitch (1× here) and SIZE sets the segment
+        // length, so use a short segment (size 0) for a quick, slap-style reverse.
+        let frame = reverse_frame(0.5, 0.55, 0.0, 0.75, 0.0, 1.0);
 
         let mut peak = 0.0_f32;
         let mut tail_energy = 0.0_f32;
         let mut previous = 0.0;
         let mut max_tail_step = 0.0_f32;
-        for index in 0..12_000 {
+        for index in 0..16_000 {
             let input = if index == 0 { 0.9 } else { 0.0 };
             let output = diffusion.process_sample_for_channel(0, input, &frame);
             assert!(output.is_finite());
@@ -2220,6 +2289,75 @@ mod tests {
         assert!(
             max_tail_step < 0.55,
             "reverse impulse produced a click-sized step: {max_tail_step}"
+        );
+    }
+
+    fn reverse_ratio_frame(ratio: f32) -> DiffusionFrame {
+        DiffusionFrame {
+            mode: DiffusionMode::Reverse,
+            time_ms: 200.0,
+            feedback: 0.0,
+            size: 0.3,
+            decay: 0.5,
+            pre_delay_ms: 0.0,
+            damping: 0.4,
+            mix: 1.0,
+            stereo_offset: 0.0,
+            width: 1.0,
+            active_mix: 1.0,
+            tone_alpha: 0.6,
+            reverse_ratio: ratio,
+            reverse_drift: 0.0,
+            mode_fade: 1.0,
+        }
+    }
+
+    #[test]
+    fn reverse_time_controls_playback_pitch() {
+        // The playback ratio (TIME) sets pitch: count rising zero-crossings of the
+        // wet output for a steady 440 Hz input — they should scale with the ratio.
+        let count_zc = |ratio: f32| -> usize {
+            let mut diffusion = Diffusion::default();
+            diffusion.prepare(48_000.0);
+            let frame = reverse_ratio_frame(ratio);
+            let mut phase = 0.0_f32;
+            let mut previous = 0.0_f32;
+            let mut zero_crossings = 0usize;
+            for index in 0..48_000 {
+                phase += 440.0 / 48_000.0;
+                if phase >= 1.0 {
+                    phase -= 1.0;
+                }
+                let input = (phase * core::f32::consts::TAU).sin() * 0.4;
+                let out = diffusion.process_sample_for_channel(0, input, &frame);
+                assert!(
+                    out.is_finite() && out.abs() <= 8.0,
+                    "reverse ratio {ratio} unsafe"
+                );
+                if index >= 24_000 {
+                    if previous <= 0.0 && out > 0.0 {
+                        zero_crossings += 1;
+                    }
+                }
+                previous = out;
+            }
+            zero_crossings
+        };
+
+        let half = count_zc(0.5);
+        let unity = count_zc(1.0);
+        let double = count_zc(2.0);
+        assert!(
+            half > 0 && unity > 0 && double > 0,
+            "reverse should be audible at every ratio (half {half}, unity {unity}, double {double})"
+        );
+        assert!(
+            unity as f32 > half as f32 * 1.3,
+            "TIME left (0.5×) should be lower pitch than centre (half {half}, unity {unity})"
+        );
+        assert!(
+            double as f32 > unity as f32 * 1.3,
+            "TIME right (2×) should be higher pitch than centre (unity {unity}, double {double})"
         );
     }
 
@@ -2404,6 +2542,8 @@ mod tests {
             width,
             active_mix: 1.0,
             tone_alpha: 0.4,
+            reverse_ratio: 1.0,
+            reverse_drift: 0.0,
             mode_fade: 1.0,
         }
     }

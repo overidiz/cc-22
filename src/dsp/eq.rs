@@ -509,7 +509,7 @@ fn clamp_frequency(frequency: f32, min: f32, max: f32, sample_rate: f32) -> f32 
 
 #[cfg(test)]
 mod tests {
-    use crate::dsp::chain::EqRack;
+    use crate::dsp::chain::EqSection;
 
     use super::{
         clamp_frequency, coefficients_for_band, Biquad, BiquadCoefficients, Eq, EqBandFrame,
@@ -522,9 +522,9 @@ mod tests {
     }
 
     #[test]
-    fn updating_one_rack_eq_does_not_change_other_coefficient_states() {
-        let mut rack = EqRack::default();
-        rack.prepare(48_000.0);
+    fn updating_pre_eq_does_not_change_post_eq_coefficient_state() {
+        let mut section = EqSection::default();
+        section.prepare(48_000.0);
         let mut changed = EqFrame::neutral(48_000.0);
         changed.bands[2] = EqBandFrame {
             enabled: true,
@@ -534,25 +534,10 @@ mod tests {
             q: 1.5,
         };
 
-        rack.character_pre.update_coefficients(&changed);
+        section.pre.update_coefficients(&changed);
 
-        assert_eq!(
-            rack.character_pre.coefficient_state.unwrap().bands[2].gain,
-            12.0
-        );
-        for eq in [
-            &rack.global_pre,
-            &rack.global_post,
-            &rack.character_post,
-            &rack.movement_pre,
-            &rack.movement_post,
-            &rack.diffusion_pre,
-            &rack.diffusion_post,
-            &rack.texture_pre,
-            &rack.texture_post,
-        ] {
-            assert_eq!(eq.coefficient_state.unwrap().bands[2].gain, 0.0);
-        }
+        assert_eq!(section.pre.coefficient_state.unwrap().bands[2].gain, 12.0);
+        assert_eq!(section.post.coefficient_state.unwrap().bands[2].gain, 0.0);
     }
 
     #[test]

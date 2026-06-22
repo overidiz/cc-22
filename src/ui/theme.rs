@@ -6,10 +6,10 @@ pub(crate) const BASE_WIDTH: f32 = 1040.0;
 pub(crate) const BASE_HEIGHT: f32 = 744.0;
 
 pub(crate) const FONT_MODULE_TITLE: f32 = 16.0;
-pub(crate) const FONT_CONTROL_LABEL: f32 = 9.0;
-pub(crate) const FONT_VALUE_LABEL: f32 = 8.5;
-pub(crate) const FONT_SECONDARY: f32 = 9.0;
-pub(crate) const FONT_HINT: f32 = 8.5;
+pub(crate) const FONT_CONTROL_LABEL: f32 = 9.5;
+pub(crate) const FONT_VALUE_LABEL: f32 = 9.0;
+pub(crate) const FONT_SECONDARY: f32 = 9.5;
+pub(crate) const FONT_HINT: f32 = 9.0;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Theme {
@@ -30,7 +30,7 @@ pub(crate) struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            background: Color32::from_rgb(27, 25, 23),
+            background: Color32::from_rgb(31, 27, 22),
             paper: Color32::from_rgb(244, 239, 228),
             paper_alt: Color32::from_rgb(235, 229, 216),
             card: Color32::from_rgb(236, 231, 219),

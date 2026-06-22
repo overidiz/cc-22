@@ -1,3 +1,5 @@
+use nih_plug_egui::egui;
+
 use crate::meters::Meters;
 
 use super::spectrum::SpectrumState;
@@ -8,10 +10,8 @@ impl Default for UiState {
             spectrum: SpectrumState::default(),
             selected_preset: 0,
             random_seed: 0,
-            selected_eq_target: EqTargetSelection::Global,
             selected_eq_position: EqPositionSelection::Post,
             selected_eq_band: EqBandSelection::Band1,
-            eq_advanced_open: false,
             save_notice_until: 0.0,
             save_failed: false,
             drag_source: None,
@@ -23,6 +23,7 @@ impl Default for UiState {
             input_clip_until: 0.0,
             output_clip_until: 0.0,
             last_meter_time: None,
+            logo_texture: None,
         }
     }
 }
@@ -31,10 +32,10 @@ pub(crate) struct UiState {
     pub(crate) spectrum: SpectrumState,
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
-    pub(crate) selected_eq_target: EqTargetSelection,
+    /// The EQ workbench only edits one bank at a time — Pre or Post. Both run in
+    /// the DSP simultaneously; this just chooses which one the UI shows.
     pub(crate) selected_eq_position: EqPositionSelection,
     pub(crate) selected_eq_band: EqBandSelection,
-    pub(crate) eq_advanced_open: bool,
     pub(crate) save_notice_until: f64,
     pub(crate) save_failed: bool,
     pub(crate) drag_source: Option<usize>,
@@ -46,35 +47,8 @@ pub(crate) struct UiState {
     pub(crate) input_clip_until: f64,
     pub(crate) output_clip_until: f64,
     pub(crate) last_meter_time: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EqTargetSelection {
-    Global,
-    Character,
-    Movement,
-    Diffusion,
-    Texture,
-}
-
-impl EqTargetSelection {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Global,
-        Self::Character,
-        Self::Movement,
-        Self::Diffusion,
-        Self::Texture,
-    ];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Global => "GLOBAL",
-            Self::Character => "CHAR",
-            Self::Movement => "MOV",
-            Self::Diffusion => "DIF",
-            Self::Texture => "TEX",
-        }
-    }
+    /// Lazily-uploaded CC-22 logo texture (decoded RGBA embedded at build time).
+    pub(crate) logo_texture: Option<egui::TextureHandle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
