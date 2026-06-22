@@ -1,4 +1,4 @@
-use nih_plug::prelude::{Param, ParamSetter};
+use nih_plug::prelude::{BoolParam, EnumParam, Param, ParamSetter};
 
 use crate::{
     dsp::{
@@ -8,6 +8,7 @@ use crate::{
         movement::LfoShape,
         movement::MovementMode,
         texture::TextureMode,
+        transport::NoteDivision,
     },
     params::{Cc22Params, EqParamRefs},
 };
@@ -2460,6 +2461,69 @@ pub fn find_preset(id: PresetId) -> Option<&'static InternalPreset> {
 impl InternalPreset {
     pub fn apply_with_setter(&self, setter: &ParamSetter<'_>, params: &Cc22Params) {
         self.values.apply_with_setter(setter, params);
+
+        // Tempo sync is applied per preset, deterministically: every preset turns
+        // sync off unless it's one of the designated sync presets. This keeps old
+        // presets transparent and never leaves a stale sync state when switching.
+        let (movement, diffusion, texture) = preset_sync_settings(self.id);
+        apply_sync_param(
+            setter,
+            &params.movement.sync_enabled,
+            &params.movement.sync_division,
+            movement,
+        );
+        apply_sync_param(
+            setter,
+            &params.diffusion.sync_enabled,
+            &params.diffusion.sync_division,
+            diffusion,
+        );
+        apply_sync_param(
+            setter,
+            &params.texture.sync_enabled,
+            &params.texture.sync_division,
+            texture,
+        );
+    }
+}
+
+fn apply_sync_param(
+    setter: &ParamSetter<'_>,
+    enabled: &BoolParam,
+    division: &EnumParam<NoteDivision>,
+    setting: Option<NoteDivision>,
+) {
+    match setting {
+        Some(div) => {
+            set_param(setter, enabled, true);
+            set_param(setter, division, div);
+        }
+        None => set_param(setter, enabled, false),
+    }
+}
+
+/// Per-preset tempo-sync settings: `(movement, diffusion, texture)` divisions,
+/// `None` meaning that module's sync is off. Only the few designated presets opt
+/// in, on a module whose mode is actually tempo-based.
+fn preset_sync_settings(
+    id: PresetId,
+) -> (
+    Option<NoteDivision>,
+    Option<NoteDivision>,
+    Option<NoteDivision>,
+) {
+    match id {
+        // Movement Tremolo locked to 1/8.
+        PresetId::ShowcaseHowlTremolo => (Some(NoteDivision::Eighth), None, None),
+        // Diffusion Reels dub echo on 1/4.
+        PresetId::ReelsDubEcho => (None, Some(NoteDivision::Quarter), None),
+        // Diffusion Reverse, one-bar segments.
+        PresetId::ReversePsychedelic => (None, Some(NoteDivision::Bar1), None),
+        // Diffusion Cascade on dotted 1/8.
+        PresetId::ShowcaseFuzzCascade => (None, Some(NoteDivision::DottedEighth), None),
+        // Texture Broken gate on 1/16.
+        PresetId::FuzzCollage => (None, None, Some(NoteDivision::Sixteenth)),
+        _ => (None, None, None),
     }
 }
 
@@ -2678,11 +2742,57 @@ fn set_param<P: Param>(setter: &ParamSetter<'_>, param: &P, value: P::Plain) {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_preset, internal_presets, PresetId};
+    use super::{find_preset, internal_presets, preset_sync_settings, PresetId};
     use crate::dsp::{
         character::CharacterMode, diffusion::DiffusionMode, movement::MovementMode,
         texture::TextureMode,
     };
+
+    #[test]
+    fn sync_presets_target_tempo_based_modes() {
+        // Each designated sync preset enables sync on a module whose mode is
+        // actually tempo-based; ordinary presets stay sync-off.
+        let tremolo = find_preset(PresetId::ShowcaseHowlTremolo).unwrap();
+        assert_eq!(tremolo.values.movement.mode, MovementMode::Tremolo);
+        assert!(matches!(
+            preset_sync_settings(PresetId::ShowcaseHowlTremolo),
+            (Some(_), None, None)
+        ));
+
+        let reels = find_preset(PresetId::ReelsDubEcho).unwrap();
+        assert_eq!(reels.values.diffusion.mode, DiffusionMode::Reels);
+        assert!(matches!(
+            preset_sync_settings(PresetId::ReelsDubEcho),
+            (None, Some(_), None)
+        ));
+
+        assert_eq!(
+            find_preset(PresetId::ReversePsychedelic)
+                .unwrap()
+                .values
+                .diffusion
+                .mode,
+            DiffusionMode::Reverse
+        );
+        assert_eq!(
+            find_preset(PresetId::ShowcaseFuzzCascade)
+                .unwrap()
+                .values
+                .diffusion
+                .mode,
+            DiffusionMode::Cascade
+        );
+
+        let broken = find_preset(PresetId::FuzzCollage).unwrap();
+        assert_eq!(broken.values.texture.mode, TextureMode::Broken);
+        assert!(matches!(
+            preset_sync_settings(PresetId::FuzzCollage),
+            (None, None, Some(_))
+        ));
+
+        // An ordinary preset never turns sync on.
+        assert_eq!(preset_sync_settings(PresetId::LoFiRoom), (None, None, None));
+    }
 
     #[test]
     fn exposes_named_presets_without_reordering_existing_ones() {
