@@ -58,6 +58,7 @@ impl CharacterMode {
 pub struct Character {
     core: ModuleCore,
     sample_rate: f32,
+    age_state: [f32; MAX_CHANNELS],
     tone_state: [f32; MAX_CHANNELS],
     drive_dc_state: [f32; MAX_CHANNELS],
     drive_hp_state: [f32; MAX_CHANNELS],
@@ -93,6 +94,7 @@ pub struct Character {
 pub struct CharacterFrame {
     mode: CharacterMode,
     drive: f32,
+    age: f32,
     tone: f32,
     mix: f32,
     output_gain: f32,
@@ -106,6 +108,7 @@ impl Default for Character {
         Self {
             core: ModuleCore::default(),
             sample_rate: 44_100.0,
+            age_state: [0.0; MAX_CHANNELS],
             tone_state: [0.0; MAX_CHANNELS],
             drive_dc_state: [0.0; MAX_CHANNELS],
             drive_hp_state: [0.0; MAX_CHANNELS],
@@ -148,6 +151,7 @@ impl Character {
 
     pub fn reset(&mut self) {
         self.core.reset();
+        self.age_state = [0.0; MAX_CHANNELS];
         self.tone_state = [0.0; MAX_CHANNELS];
         self.drive_dc_state = [0.0; MAX_CHANNELS];
         self.drive_hp_state = [0.0; MAX_CHANNELS];
@@ -182,6 +186,7 @@ impl Character {
         let mode = params.mode.value();
         self.set_mode(mode);
         let drive = params.drive.smoothed.next().clamp(0.0, 1.0);
+        let age = params.age.smoothed.next().clamp(0.0, 1.0);
         let tone = params.tone.smoothed.next().clamp(0.0, 1.0);
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
         let output_gain = db_to_gain(params.output_trim.smoothed.next().clamp(-12.0, 12.0));
@@ -190,6 +195,7 @@ impl Character {
         CharacterFrame {
             mode,
             drive,
+            age,
             tone,
             mix,
             output_gain,
@@ -220,6 +226,11 @@ impl Character {
             CharacterMode::Swell => self.process_swell(index, dry, frame),
         };
 
+        // AGE: shared coloration after the mode — gentle grit plus a tape-style
+        // high-frequency roll-off. Transparent at 0, DC-safe (symmetric drive +
+        // one-pole low-pass), works for every mode.
+        let wet = self.apply_age(index, wet, frame.age);
+
         let wet = sanitize_sample(wet * frame.output_gain);
         let mixed = DryWet.mix(dry, wet, frame.mix);
         let mode_mixed = self.smooth_mode_transition(index, mixed, frame.mode_fade);
@@ -227,6 +238,27 @@ impl Character {
         self.last_output[index] = output;
         self.has_processed = true;
         output
+    }
+
+    /// Shared "AGE" coloration: symmetric soft grit blended in, then a tape-style
+    /// high-frequency roll-off that darkens as age rises. At `age == 0` it returns
+    /// the input untouched. No asymmetry, so it never introduces a DC offset.
+    fn apply_age(&mut self, channel: usize, sample: f32, age: f32) -> f32 {
+        let age = age.clamp(0.0, 1.0);
+        if age <= 0.000_001 {
+            return sample;
+        }
+        let drive = 1.0 + age * 1.2;
+        let grit = soft_saturate(sample, drive);
+        let blend = age * 0.45;
+        let blended = sample * (1.0 - blend) + grit * blend;
+
+        let cutoff = (16_000.0 - age * 11_000.0).max(2_000.0);
+        let alpha = one_pole_alpha(cutoff, self.sample_rate);
+        let index = channel.min(MAX_CHANNELS - 1);
+        self.age_state[index] += alpha * (blended - self.age_state[index]);
+        self.age_state[index] = sanitize_sample(self.age_state[index]);
+        self.age_state[index]
     }
 
     fn process_drive(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
@@ -830,6 +862,7 @@ mod tests {
         CharacterFrame {
             mode: CharacterMode::Drive,
             drive,
+            age: 0.0,
             tone,
             mix: 1.0,
             output_gain: 1.0,
@@ -843,6 +876,7 @@ mod tests {
         CharacterFrame {
             mode: CharacterMode::Sweet,
             drive,
+            age: 0.0,
             tone,
             mix: 1.0,
             output_gain: 1.0,
@@ -856,6 +890,7 @@ mod tests {
         CharacterFrame {
             mode: CharacterMode::Fuzz,
             drive,
+            age: 0.0,
             tone,
             mix: 1.0,
             output_gain: 1.0,
@@ -869,6 +904,7 @@ mod tests {
         CharacterFrame {
             mode: CharacterMode::Howl,
             drive,
+            age: 0.0,
             tone,
             mix: 1.0,
             output_gain: 1.0,
@@ -882,6 +918,7 @@ mod tests {
         CharacterFrame {
             mode: CharacterMode::Swell,
             drive,
+            age: 0.0,
             tone,
             mix: 1.0,
             output_gain: 1.0,
@@ -889,6 +926,49 @@ mod tests {
             tone_alpha: 0.0,
             mode_fade: 1.0,
         }
+    }
+
+    #[test]
+    fn age_colors_the_signal_and_stays_safe() {
+        let mut aged = Character::default();
+        aged.prepare(48_000.0);
+        let mut plain = Character::default();
+        plain.prepare(48_000.0);
+
+        let mut frame_aged = drive_frame(0.3, 0.5);
+        frame_aged.age = 1.0;
+        let frame_plain = drive_frame(0.3, 0.5);
+
+        let mut max_diff = 0.0_f32;
+        let mut sum = 0.0_f64;
+        let mut count = 0.0_f64;
+        let mut phase = 0.0_f32;
+        for index in 0..8_000 {
+            phase += 440.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= 1.0;
+            }
+            let x = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let a = aged.process_sample(0, x, &frame_aged);
+            let p = plain.process_sample(0, x, &frame_plain);
+            assert!(a.is_finite() && a.abs() <= 8.0, "aged output {a}");
+            max_diff = max_diff.max((a - p).abs());
+            if index > 4_000 {
+                sum += a as f64;
+                count += 1.0;
+            }
+        }
+        // AGE must actually change the sound (proves it's wired, not a fake knob).
+        assert!(
+            max_diff > 0.001,
+            "AGE did not change the output (diff {max_diff})"
+        );
+        // ...and must not introduce a DC offset.
+        assert!(
+            (sum / count).abs() < 0.02,
+            "AGE introduced DC: {}",
+            sum / count
+        );
     }
 
     #[test]
@@ -1400,6 +1480,7 @@ mod tests {
         let dry_frame = CharacterFrame {
             mode: CharacterMode::Sweet,
             drive: 0.7,
+            age: 0.0,
             tone: 0.7,
             mix: 0.0,
             output_gain: 1.0,
@@ -2010,6 +2091,7 @@ mod tests {
         let dry_frame = CharacterFrame {
             mode: CharacterMode::Howl,
             drive: 0.7,
+            age: 0.0,
             tone: 0.6,
             mix: 0.0,
             output_gain: 1.0,

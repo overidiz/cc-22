@@ -1025,6 +1025,13 @@ fn render_module_content(
                     tip: first_tip,
                 },
                 FloatControlSpec {
+                    label: "AGE",
+                    param: &params.character.age,
+                    tip: Some(
+                        "AGE adds gentle grit and a tape-style high-frequency roll-off (warmth).",
+                    ),
+                },
+                FloatControlSpec {
                     label: second_label,
                     param: second_param,
                     tip: second_tip,
