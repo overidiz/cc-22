@@ -11,6 +11,7 @@ use crate::{
         diffusion::DiffusionMode,
         movement::{LfoShape, MovementMode},
         texture::TextureMode,
+        transport::NoteDivision,
     },
     params::Cc22Params,
 };
@@ -1076,6 +1077,15 @@ fn render_module_content(
                     theme,
                 ),
             };
+            ui.add_space(2.0);
+            sync_controls(
+                ui,
+                setter,
+                &params.movement.sync_enabled,
+                &params.movement.sync_division,
+                spec.accent,
+                theme,
+            );
         }
         ChainModule::Diffusion => {
             let mode = params.diffusion.mode.value();
@@ -1093,6 +1103,15 @@ fn render_module_content(
                 spec.accent,
                 theme,
             );
+            ui.add_space(2.0);
+            sync_controls(
+                ui,
+                setter,
+                &params.diffusion.sync_enabled,
+                &params.diffusion.sync_division,
+                spec.accent,
+                theme,
+            );
         }
         ChainModule::Texture => {
             let mode = params.texture.mode.value();
@@ -1107,6 +1126,15 @@ fn render_module_content(
                 setter,
                 (&params.texture.mix, "MIX", None),
                 (&params.texture.stereo_spread, "SPREAD", None),
+                spec.accent,
+                theme,
+            );
+            ui.add_space(2.0);
+            sync_controls(
+                ui,
+                setter,
+                &params.texture.sync_enabled,
+                &params.texture.sync_division,
                 spec.accent,
                 theme,
             );
@@ -1155,6 +1183,81 @@ fn primary_control_row(
                 });
             });
         }
+    });
+}
+
+/// Compact SYNC toggle + tempo-division selector for the time-based modules.
+/// The division is a click-to-cycle chip (right-click goes back) to stay tiny.
+fn sync_controls(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter<'_>,
+    enabled: &BoolParam,
+    division: &EnumParam<NoteDivision>,
+    accent: Color32,
+    theme: Theme,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let on = enabled.value();
+
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(44.0, 16.0), Sense::click());
+        if resp.clicked() {
+            set_param(setter, enabled, !on);
+        }
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(4),
+            if on { accent } else { theme.card_dim },
+        );
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "SYNC",
+            FontId::monospace(8.0),
+            if on { Color32::WHITE } else { theme.muted_dark },
+        );
+        resp.on_hover_text("Lock the rate/time to the DAW tempo (BPM; falls back to 120).");
+
+        let names = NoteDivision::variants();
+        let count = names.len();
+        let current = division.value().to_index();
+        let (drect, dresp) = ui.allocate_exact_size(Vec2::new(52.0, 16.0), Sense::click());
+        ui.painter().rect_filled(
+            drect,
+            CornerRadius::same(4),
+            if on { theme.paper } else { theme.card_dim },
+        );
+        ui.painter().rect_stroke(
+            drect,
+            CornerRadius::same(4),
+            Stroke::new(1.0, theme.card_edge),
+            StrokeKind::Inside,
+        );
+        ui.painter().text(
+            drect.center(),
+            egui::Align2::CENTER_CENTER,
+            names[current],
+            FontId::monospace(8.0),
+            if on {
+                theme.text_dark
+            } else {
+                theme.muted_dark
+            },
+        );
+        if dresp.clicked() {
+            set_param(
+                setter,
+                division,
+                NoteDivision::from_index((current + 1) % count),
+            );
+        } else if dresp.secondary_clicked() {
+            set_param(
+                setter,
+                division,
+                NoteDivision::from_index((current + count - 1) % count),
+            );
+        }
+        dresp.on_hover_text("Click to cycle the sync division (right-click for previous).");
     });
 }
 
