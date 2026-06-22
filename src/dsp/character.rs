@@ -248,12 +248,16 @@ impl Character {
         if age <= 0.000_001 {
             return sample;
         }
-        let drive = 1.0 + age * 1.2;
+        // Ease the response so the lower half stays gentle and only the top adds
+        // obvious grit/darkening — a more musical sweep than a linear ramp.
+        let eased = smoothstep(age);
+        let drive = 1.0 + eased * 1.0;
         let grit = soft_saturate(sample, drive);
-        let blend = age * 0.45;
+        let blend = eased * 0.4;
         let blended = sample * (1.0 - blend) + grit * blend;
 
-        let cutoff = (16_000.0 - age * 11_000.0).max(2_000.0);
+        // Tape-style roll-off kept above ~6.5 kHz so it warms rather than dulls.
+        let cutoff = (16_000.0 - eased * 9_500.0).max(3_500.0);
         let alpha = one_pole_alpha(cutoff, self.sample_rate);
         let index = channel.min(MAX_CHANNELS - 1);
         self.age_state[index] += alpha * (blended - self.age_state[index]);
