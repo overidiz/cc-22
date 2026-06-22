@@ -6,7 +6,7 @@ use super::{
     chain::{sanitize_sample, soft_clip_sample, ModuleCore},
     dry_wet::DryWet,
     smoothing::LinearSmoother,
-    transport::{hz_for_division, ms_for_division, TransportFrame},
+    transport::{beats_for_division, hz_for_division, ms_for_division, TransportFrame},
     util::safe_feedback,
 };
 
@@ -70,6 +70,7 @@ pub struct Movement {
     delay: StereoDelay,
     sample_rate: f32,
     lfo_phase: f32,
+    last_ppq: Option<f64>,
     previous_shape: LfoShape,
     target_shape: LfoShape,
     shape_crossfade: LinearSmoother,
@@ -114,6 +115,7 @@ impl Default for Movement {
             delay: StereoDelay::default(),
             sample_rate: 44_100.0,
             lfo_phase: 0.0,
+            last_ppq: None,
             previous_shape: LfoShape::Sine,
             target_shape: LfoShape::Sine,
             shape_crossfade: LinearSmoother::new(20.0, 1.0),
@@ -152,6 +154,7 @@ impl Movement {
         self.core.reset();
         self.delay.reset();
         self.lfo_phase = 0.0;
+        self.last_ppq = None;
         self.previous_shape = self.target_shape;
         self.shape_crossfade.reset(1.0);
         self.mode_crossfade.reset(1.0);
@@ -209,6 +212,22 @@ impl Movement {
         let tone = params.tone.smoothed.next().clamp(0.0, 1.0);
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
         let module_frame = self.core.next_frame(params.bypass.value(), mix, 0.0);
+
+        // Phase lock: when the host is playing with a known position, snap the LFO
+        // to the musical grid once per block (when the reported beat changes), then
+        // free-run within the block. The correction is tiny, so it never clicks; if
+        // the host isn't playing or gives no position, we just free-run.
+        if synced && params.sync_phase_lock.value() && transport.playing {
+            if let Some(ppq) = transport.ppq_position {
+                if self.last_ppq != Some(ppq) {
+                    let division_beats = beats_for_division(division).max(0.001) as f64;
+                    self.lfo_phase = (ppq / division_beats).rem_euclid(1.0) as f32;
+                    self.last_ppq = Some(ppq);
+                }
+            }
+        } else {
+            self.last_ppq = None;
+        }
 
         let phase = self.lfo_phase;
         let frame_shape = match mode {
@@ -749,6 +768,46 @@ mod tests {
         params.reset_smoothers();
         let manual = movement.next_frame(&params, &transport);
         assert!((5.0..=30.0).contains(&manual.delay_ms) && manual.delay_ms.is_finite());
+    }
+
+    #[test]
+    fn movement_phase_lock_aligns_lfo_to_transport() {
+        let mut movement = Movement::default();
+        movement.prepare(48_000.0);
+        let mut params = MovementParams::default();
+        params.mode = EnumParam::new("m", MovementMode::Vibrato);
+        params.sync_enabled = BoolParam::new("s", true);
+        params.sync_phase_lock = BoolParam::new("l", true);
+        params.sync_division = EnumParam::new("d", NoteDivision::Quarter);
+        params.reset_smoothers();
+
+        // Playing at 2.25 beats, 1/4 = 1 beat -> phase 0.25 (plus one tiny step).
+        let playing = TransportFrame {
+            bpm: 120.0,
+            playing: true,
+            ppq_position: Some(2.25),
+            ..TransportFrame::default()
+        };
+        let _ = movement.next_frame(&params, &playing);
+        assert!(
+            (movement.lfo_phase - 0.25).abs() < 0.01,
+            "phase-locked LFO phase {}",
+            movement.lfo_phase
+        );
+
+        // When stopped, it must NOT snap (free-runs from where it was).
+        let before = movement.lfo_phase;
+        let stopped = TransportFrame {
+            bpm: 120.0,
+            playing: false,
+            ppq_position: Some(9.0),
+            ..TransportFrame::default()
+        };
+        let _ = movement.next_frame(&params, &stopped);
+        assert!(
+            (movement.lfo_phase - before).abs() < 0.02,
+            "phase should free-run when stopped"
+        );
     }
 
     #[test]

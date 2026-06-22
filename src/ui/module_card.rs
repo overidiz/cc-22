@@ -1090,6 +1090,11 @@ fn render_module_content(
                 setter,
                 &params.movement.sync_enabled,
                 &params.movement.sync_division,
+                Some((
+                    "LOCK",
+                    &params.movement.sync_phase_lock,
+                    "Phase-lock the LFO to the bar/beat while the host plays.",
+                )),
                 spec.accent,
                 theme,
             );
@@ -1116,6 +1121,11 @@ fn render_module_content(
                 setter,
                 &params.diffusion.sync_enabled,
                 &params.diffusion.sync_division,
+                Some((
+                    "PRE",
+                    &params.diffusion.sync_pre_delay,
+                    "Lock the Space pre-delay to tempo (decay stays free).",
+                )),
                 spec.accent,
                 theme,
             );
@@ -1142,6 +1152,7 @@ fn render_module_content(
                 setter,
                 &params.texture.sync_enabled,
                 &params.texture.sync_division,
+                None,
                 spec.accent,
                 theme,
             );
@@ -1200,6 +1211,7 @@ fn sync_controls(
     setter: &ParamSetter<'_>,
     enabled: &BoolParam,
     division: &EnumParam<NoteDivision>,
+    extra: Option<(&'static str, &BoolParam, &'static str)>,
     accent: Color32,
     theme: Theme,
 ) {
@@ -1265,6 +1277,32 @@ fn sync_controls(
             );
         }
         dresp.on_hover_text("Click to cycle the sync division (right-click for previous).");
+
+        // Optional extra toggle (e.g. Movement phase-lock, Diffusion pre-delay sync).
+        if let Some((label, param, tip)) = extra {
+            let active = param.value();
+            let (erect, eresp) = ui.allocate_exact_size(Vec2::new(40.0, 16.0), Sense::click());
+            if eresp.clicked() {
+                set_param(setter, param, !active);
+            }
+            ui.painter().rect_filled(
+                erect,
+                CornerRadius::same(4),
+                if active { accent } else { theme.card_dim },
+            );
+            ui.painter().text(
+                erect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                FontId::monospace(8.0),
+                if active {
+                    Color32::WHITE
+                } else {
+                    theme.muted_dark
+                },
+            );
+            eresp.on_hover_text(tip);
+        }
     });
 }
 

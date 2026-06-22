@@ -246,7 +246,16 @@ impl Diffusion {
         let feedback = safe_feedback(params.feedback.smoothed.next(), 0.949);
         let size = params.size.smoothed.next().clamp(0.0, 1.0);
         let decay = params.decay.smoothed.next().clamp(0.0, 1.0);
-        let pre_delay_ms = params.pre_delay.smoothed.next().clamp(0.0, 120.0);
+        // Space can optionally lock its pre-delay to tempo (decay/size stay free).
+        let manual_pre_delay = params.pre_delay.smoothed.next().clamp(0.0, 120.0);
+        let pre_delay_ms = if params.sync_enabled.value()
+            && params.sync_pre_delay.value()
+            && mode == DiffusionMode::Space
+        {
+            ms_for_division(transport.bpm, params.sync_division.value()).clamp(0.0, 120.0)
+        } else {
+            manual_pre_delay
+        };
         let damping = params.damping.smoothed.next().clamp(0.0, 1.0);
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
         let tone = params.tone.smoothed.next().clamp(0.0, 1.0);
@@ -1421,6 +1430,35 @@ mod tests {
     use crate::dsp::transport::{NoteDivision, TransportFrame};
     use crate::params::DiffusionParams;
     use nih_plug::prelude::{BoolParam, EnumParam};
+
+    #[test]
+    fn diffusion_space_pre_delay_syncs_to_tempo() {
+        let mut diffusion = Diffusion::default();
+        diffusion.prepare(48_000.0);
+        let mut params = DiffusionParams::default();
+        params.mode = EnumParam::new("m", DiffusionMode::Space);
+        params.sync_enabled = BoolParam::new("s", true);
+        params.sync_pre_delay = BoolParam::new("p", true);
+        params.sync_division = EnumParam::new("d", NoteDivision::ThirtySecond);
+        params.reset_smoothers();
+        let transport = TransportFrame {
+            bpm: 120.0,
+            ..TransportFrame::default()
+        };
+        // 1/32 @ 120 BPM = 62.5 ms, within the 0..120 ms pre-delay range.
+        let frame = diffusion.next_frame(&params, &transport);
+        assert!(
+            (frame.pre_delay_ms - 62.5).abs() < 0.5,
+            "synced Space pre-delay {}",
+            frame.pre_delay_ms
+        );
+
+        // With pre-delay sync off it returns to the manual value (finite).
+        params.sync_pre_delay = BoolParam::new("p", false);
+        params.reset_smoothers();
+        let frame = diffusion.next_frame(&params, &transport);
+        assert!(frame.pre_delay_ms.is_finite());
+    }
 
     #[test]
     fn diffusion_sync_locks_time_to_tempo() {

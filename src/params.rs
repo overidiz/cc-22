@@ -247,6 +247,9 @@ pub struct MovementParams {
 
     #[id = "movement_sync_division"]
     pub sync_division: EnumParam<NoteDivision>,
+
+    #[id = "movement_sync_phase_lock"]
+    pub sync_phase_lock: BoolParam,
 }
 
 impl Default for MovementParams {
@@ -300,6 +303,7 @@ impl Default for MovementParams {
             mix: percent_param("Mix", 0.45, 50.0),
             sync_enabled: BoolParam::new("Movement Sync", false),
             sync_division: EnumParam::new("Movement Sync Rate", NoteDivision::Eighth),
+            sync_phase_lock: BoolParam::new("Movement Phase Lock", false),
         }
     }
 }
@@ -360,6 +364,9 @@ pub struct DiffusionParams {
 
     #[id = "diffusion_sync_division"]
     pub sync_division: EnumParam<NoteDivision>,
+
+    #[id = "diffusion_sync_pre_delay"]
+    pub sync_pre_delay: BoolParam,
 }
 
 impl Default for DiffusionParams {
@@ -422,6 +429,7 @@ impl Default for DiffusionParams {
             width: percent_param("Width", 1.0, 50.0),
             sync_enabled: BoolParam::new("Diffusion Sync", false),
             sync_division: EnumParam::new("Diffusion Sync Rate", NoteDivision::Quarter),
+            sync_pre_delay: BoolParam::new("Diffusion Sync Pre-Delay", false),
         }
     }
 }
