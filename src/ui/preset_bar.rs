@@ -10,7 +10,7 @@ use crate::{params::Cc22Params, presets::internal_presets};
 use super::{
     meters::{MeterReading, UiState},
     theme::{ModuleColors, Theme},
-    widgets::{set_float_normalized, small_strip_knob},
+    widgets::{paint_grain, set_float_normalized, small_strip_knob},
 };
 
 pub(crate) const MASTER_ROW_HEIGHT: f32 = 82.0;
@@ -18,7 +18,7 @@ pub(crate) const MASTER_ROW_HEIGHT: f32 = 82.0;
 pub(crate) fn bottom_macro_row(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
-    _state: &mut UiState,
+    state: &mut UiState,
     params: &Cc22Params,
     meter_reading: MeterReading,
     colors: ModuleColors,
@@ -38,6 +38,24 @@ pub(crate) fn bottom_macro_row(
                 .corner_radius(CornerRadius::same(12))
                 .show(ui, |ui| {
                     ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    // Painted-metal vintage finish: discreet grain, a lit top edge
+                    // and a deepened bottom edge so the strip reads as a solid base
+                    // that the meters and knobs are seated into.
+                    paint_grain(ui, state, rect.shrink(2.0), 9);
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(rect.left() + 12.0, rect.top() + 1.6),
+                            Pos2::new(rect.right() - 12.0, rect.top() + 1.6),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 245, 228, 26)),
+                    );
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(rect.left() + 12.0, rect.bottom() - 1.6),
+                            Pos2::new(rect.right() - 12.0, rect.bottom() - 1.6),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgba_premultiplied(0, 0, 0, 70)),
+                    );
                     paint_master_row(ui, setter, params, meter_reading, colors, theme, rect);
                 });
         },

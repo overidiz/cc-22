@@ -12,7 +12,7 @@ use super::{
         save_user_snapshot,
     },
     theme::{ModuleColors, Theme},
-    widgets::{compact_button, global_bypass_button},
+    widgets::{compact_button, global_bypass_button, paint_grain},
 };
 
 pub(crate) const TOP_BAR_HEIGHT: f32 = 76.0;
@@ -70,6 +70,19 @@ pub(crate) fn top_bar(
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
                     ui.set_min_size(Vec2::new(rect.width() - 16.0, TOP_BAR_HEIGHT - 16.0));
+                    // Faint vintage tonal variation + a lit top edge so the bar
+                    // reads as a richer painted panel, not a flat fill.
+                    paint_grain(ui, state, rect.shrink(2.0), 8);
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(rect.left() + 14.0, rect.top() + 2.0),
+                            egui::pos2(rect.right() - 14.0, rect.top() + 2.0),
+                        ],
+                        Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 120),
+                        ),
+                    );
                     ui.horizontal_centered(|ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
