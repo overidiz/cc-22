@@ -15,6 +15,7 @@ impl Default for UiState {
             drag_visual_pos: None,
             drag_lift: 0.0,
             drag_indicator_x: None,
+            card_anim_x: None,
             input_meter: MeterBallistics::default(),
             output_meter: MeterBallistics::default(),
             input_clip_events: 0,
@@ -43,8 +44,12 @@ pub(crate) struct UiState {
     pub(crate) drag_visual_pos: Option<Pos2>,
     /// Animated "pick-up" lift, eased in on grab so the card rises gently.
     pub(crate) drag_lift: f32,
-    /// Smoothed x of the insertion indicator so it glides between slots.
+    /// Smoothed x of the insertion gap so it glides between slots.
     pub(crate) drag_indicator_x: Option<f32>,
+    /// Animated left-x of each of the 4 module slots. While dragging, the
+    /// non-dragged cards ease toward shifted slots to open a gap; on drop they
+    /// ease into their final positions (soft reflow + settle, no snap).
+    pub(crate) card_anim_x: Option<[f32; 4]>,
     pub(crate) input_meter: MeterBallistics,
     pub(crate) output_meter: MeterBallistics,
     pub(crate) input_clip_events: u32,

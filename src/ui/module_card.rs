@@ -19,8 +19,8 @@ use crate::{
 use super::{
     meters::UiState,
     signal_flow::{
-        card_shadow, compute_drop_slot, drag_handle, drop_indicator_x, final_index_from_drop_slot,
-        paint_drop_indicator, paint_floating_card, position_badge,
+        card_shadow, compute_drop_slot, drag_handle, final_index_from_drop_slot,
+        paint_floating_card, position_badge,
     },
     theme::{
         Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, FONT_MODULE_TITLE, FONT_SECONDARY,
@@ -32,8 +32,14 @@ use super::{
 };
 
 /// How far the floating card lifts off its row while dragging. Deliberately
-/// small so the card reads as "picked up" without leaping away from its line.
-const DRAG_LIFT: f32 = 7.0;
+/// tiny so the card reads as "slightly elevated", not floating high above.
+const DRAG_LIFT: f32 = 4.0;
+/// Per-frame easing (≈30 fps) for the floating card following the cursor.
+/// Higher = sticks closer to the pointer (premium, controlled feel).
+const FLOAT_FOLLOW: f32 = 0.5;
+/// Per-frame easing for neighbours opening space and for the post-drop settle.
+/// A touch softer than the floating card so the reflow glides.
+const REFLOW_FOLLOW: f32 = 0.3;
 
 struct ModuleCardSpec<'a> {
     title: &'static str,
@@ -83,9 +89,11 @@ pub(crate) fn center_modules(
             }
             state.drag_source = None;
             state.drag_drop_slot = None;
-            state.drag_visual_pos = None;
             state.drag_lift = 0.0;
             state.drag_indicator_x = None;
+            // Keep `drag_visual_pos` so the drop processing below can launch the
+            // settle glide from where the card was released; it is reset on the
+            // next grab.
         } else if let Some(px) = pointer_x {
             state.drag_drop_slot = Some(compute_drop_slot(px, &card_rects, row_start));
         }
@@ -100,103 +108,100 @@ pub(crate) fn center_modules(
             pointer.map_or(false, |p| card_rects[pos].contains(p)) && state.drag_source.is_none();
     }
 
-    // ── section header ─────────────────────────────────────────────────
-    // ── render cards ───────────────────────────────────────────────────
-    ui.horizontal_top(|ui| {
-        center_fixed_width_row(ui, module_row_width);
-        for pos in 0..4 {
-            let is_dragged = state.drag_source == Some(pos);
-            let spec = &card_specs[pos];
-            let hovered = card_hovered[pos];
+    // ── render cards with live reflow ──────────────────────────────────
+    // Reserve the whole row up front so nothing below (Master) ever moves,
+    // then draw each card at an animated x. This keeps drag/reorder a paint
+    // overlay that never deforms the layout.
+    let row_top = card_rects[0].top();
+    let _ = ui.allocate_exact_size(Vec2::new(ui.available_width(), CARD_HEIGHT), Sense::hover());
 
-            let rect = if is_dragged {
-                let (r, _) =
-                    ui.allocate_exact_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT), Sense::hover());
-                let ghost_color = Color32::from_rgba_premultiplied(
-                    spec.accent.r(),
-                    spec.accent.g(),
-                    spec.accent.b(),
-                    28,
-                );
-                ui.painter()
-                    .rect_filled(r, CornerRadius::same(14), ghost_color);
-                ui.painter().rect_stroke(
-                    r,
-                    CornerRadius::same(14),
-                    Stroke::new(1.0, spec.accent.gamma_multiply(0.25)),
-                    StrokeKind::Inside,
-                );
-                ui.painter().text(
-                    r.center(),
-                    egui::Align2::CENTER_CENTER,
-                    format!("{}", pos + 1),
-                    FontId::monospace(20.0),
-                    Color32::from_rgba_premultiplied(
-                        spec.accent.r(),
-                        spec.accent.g(),
-                        spec.accent.b(),
-                        60,
-                    ),
-                );
-                r
-            } else {
-                render_module_card(
-                    ui,
-                    setter,
-                    theme,
-                    spec,
-                    pos + 1,
-                    hovered,
-                    !just_finished,
-                    state,
-                    params,
-                )
-            };
-            card_rects[pos] = rect;
-        }
-    });
+    let base_x = |pos: usize| row_start + pos as f32 * (CARD_WIDTH + gaps);
 
-    // ── draw signal flow arrows ────────────────────────────────────────
-    // ── drop indicator + floating card ─────────────────────────────────
-    if let Some(source) = state.drag_source {
-        if let Some(drop_slot) = state.drag_drop_slot {
-            if card_rects[0].is_positive() {
-                let overlay = ui.ctx().layer_painter(LayerId::new(
-                    Order::Foreground,
-                    egui::Id::new("drop-indicator"),
-                ));
-                // Glide the insertion marker between slots so neighbours appear to
-                // open space fluidly instead of the bar teleporting.
-                let target_ix = drop_indicator_x(drop_slot, &card_rects, row_start, gaps);
-                let ix = match state.drag_indicator_x {
-                    Some(prev) => prev + (target_ix - prev) * 0.40,
-                    None => target_ix,
-                };
-                state.drag_indicator_x = Some(ix);
-                paint_drop_indicator(
-                    &overlay,
-                    ix,
-                    card_rects[0].top() - 2.0,
-                    CARD_HEIGHT + 4.0,
-                    module_color(chain_order[source], colors),
-                );
+    // Target x of every slot. While dragging, the non-dragged cards shift to the
+    // slot they will occupy once dropped, opening a gap at the insertion index.
+    let mut target_x = [0.0_f32; 4];
+    for (pos, slot) in target_x.iter_mut().enumerate() {
+        *slot = base_x(pos);
+    }
+    let mut gap_target = None;
+    if let (Some(source), Some(drop_slot)) = (state.drag_source, state.drag_drop_slot) {
+        let final_index = final_index_from_drop_slot(source, drop_slot);
+        gap_target = Some(base_x(final_index));
+        for (pos, slot) in target_x.iter_mut().enumerate() {
+            if pos == source {
+                continue;
             }
+            let rank = if pos < source { pos } else { pos - 1 };
+            let display = if rank >= final_index { rank + 1 } else { rank };
+            *slot = base_x(display);
         }
+    }
+
+    // Ease every slot toward its target (reflow while dragging, settle after).
+    let mut anim = state.card_anim_x.unwrap_or(target_x);
+    for pos in 0..4 {
+        anim[pos] += (target_x[pos] - anim[pos]) * REFLOW_FOLLOW;
+        if (anim[pos] - target_x[pos]).abs() < 0.1 {
+            anim[pos] = target_x[pos];
+        }
+    }
+    state.card_anim_x = Some(anim);
+
+    // Subtle recessed slot showing where the card will land.
+    if let Some(gt) = gap_target {
+        let source = state.drag_source.unwrap();
+        let gx = match state.drag_indicator_x {
+            Some(prev) => prev + (gt - prev) * REFLOW_FOLLOW,
+            None => gt,
+        };
+        state.drag_indicator_x = Some(gx);
+        paint_gap_slot(
+            ui.painter(),
+            Rect::from_min_size(Pos2::new(gx, row_top), Vec2::new(CARD_WIDTH, CARD_HEIGHT)),
+            module_color(chain_order[source], colors),
+        );
+    }
+
+    for pos in 0..4 {
+        if state.drag_source == Some(pos) {
+            continue; // drawn as the floating card below
+        }
+        let card_rect = Rect::from_min_size(
+            Pos2::new(anim[pos], row_top),
+            Vec2::new(CARD_WIDTH, CARD_HEIGHT),
+        );
+        render_module_card(
+            ui,
+            setter,
+            theme,
+            &card_specs[pos],
+            card_rect,
+            pos + 1,
+            card_hovered[pos],
+            !just_finished,
+            state,
+            params,
+        );
+        card_rects[pos] = card_rect;
+    }
+
+    // ── floating (held) card ───────────────────────────────────────────
+    if let Some(source) = state.drag_source {
         if let Some(ptr) = pointer {
             let fp = ui.ctx().layer_painter(LayerId::new(
                 Order::Foreground,
                 egui::Id::new("floating-card"),
             ));
-            // The card tracks the cursor at 1:1 scale and stays on its original
-            // line: target centre = pointer + grab offset, spring-followed for a
-            // soft, controlled feel, with a small eased "pick-up" lift.
+            // 1:1 scale, tracks the cursor at its original grab offset (stays on
+            // its line), spring-followed for a soft, controlled feel, with a tiny
+            // eased pick-up lift.
             let target = ptr + state.drag_grab_offset;
             let smoothed = match state.drag_visual_pos {
-                Some(prev) => prev + (target - prev) * 0.38,
+                Some(prev) => prev + (target - prev) * FLOAT_FOLLOW,
                 None => target,
             };
             state.drag_visual_pos = Some(smoothed);
-            state.drag_lift += (DRAG_LIFT - state.drag_lift) * 0.22;
+            state.drag_lift += (DRAG_LIFT - state.drag_lift) * 0.2;
             let center = smoothed - Vec2::new(0.0, state.drag_lift);
             let float_rect = Rect::from_center_size(center, Vec2::new(CARD_WIDTH, CARD_HEIGHT));
             let spec = &card_specs[source];
@@ -204,13 +209,44 @@ pub(crate) fn center_modules(
         }
     }
 
-    // ── process drag completion ────────────────────────────────────────
+    // ── process drag completion (with settle hand-off) ─────────────────
     if let Some((source, target)) = drag_finished {
+        // Launch the settle glide of the dropped card from where it was released
+        // so it eases into its final slot instead of snapping.
+        let mut settle = state.card_anim_x.unwrap_or(anim);
+        if let Some(vis) = state.drag_visual_pos {
+            settle[source] = vis.x - CARD_WIDTH * 0.5;
+        }
         if source != target {
+            // Carry the animated positions through the reorder by identity, so the
+            // neighbours (already near their destinations) don't jump and the
+            // dropped card glides home.
+            let moved = settle[source];
+            let mut v = settle.to_vec();
+            v.remove(source);
+            v.insert(target, moved);
+            settle = [v[0], v[1], v[2], v[3]];
             let new_order = crate::dsp::chain::reorder_module(chain_order, source, target);
             set_chain_params(setter, params, &new_order);
         }
+        state.card_anim_x = Some(settle);
+        state.drag_visual_pos = None;
     }
+}
+
+/// A quiet recessed placeholder marking where the dragged card will drop.
+fn paint_gap_slot(painter: &egui::Painter, rect: Rect, accent: Color32) {
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(14),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 16),
+    );
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(14),
+        Stroke::new(1.0, accent.gamma_multiply(0.3)),
+        StrokeKind::Inside,
+    );
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -273,35 +309,29 @@ fn module_spec<'a>(
     }
 }
 
-fn center_fixed_width_row(ui: &mut egui::Ui, target_width: f32) {
-    let extra = ui.available_width() - target_width;
-    if extra > 0.0 {
-        ui.add_space(extra * 0.5);
-    }
-}
-
 // ── card rendering ──────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn render_module_card(
     ui: &mut egui::Ui,
     setter: &ParamSetter<'_>,
     theme: Theme,
     spec: &ModuleCardSpec<'_>,
+    card_rect: Rect,
     position_num: usize,
     hovered: bool,
     detect_drag: bool,
     state: &mut UiState,
     params: &Cc22Params,
-) -> Rect {
+) {
     let fill = if spec.active {
         theme.card
     } else {
         theme.card_dim
     };
-    // Fixed reserved rect — identical in idle / hover / active / drag, so hover is
-    // purely visual and never reflows anything below (EQ / Master stay put). Every
-    // hover change beyond this point is paint-only.
-    let (card_rect, _) = ui.allocate_exact_size(Vec2::new(CARD_WIDTH, CARD_HEIGHT), Sense::hover());
+    // The card is painted into a caller-provided rect (animated during reorder).
+    // It reserves no sequential space here — the row was reserved up front — so
+    // hover and drag stay paint-only and never reflow anything below.
 
     // Drop shadow (painter-only). Accent-tinted on hover; constant offset so it
     // never reserves space.
@@ -399,8 +429,6 @@ fn render_module_card(
                 });
         },
     );
-
-    card_rect
 }
 
 fn module_header(

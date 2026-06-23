@@ -90,27 +90,6 @@ pub(crate) fn drag_handle(
     ui.interact(handle_rect, id, egui::Sense::click_and_drag())
 }
 
-// ── drop indicator bar ──────────────────────────────────────────────────
-
-pub(crate) fn paint_drop_indicator(
-    painter: &egui::Painter,
-    x: f32,
-    top: f32,
-    height: f32,
-    accent: Color32,
-) {
-    let glow_rect =
-        egui::Rect::from_min_size(Pos2::new(x - 6.0, top - 4.0), Vec2::new(12.0, height + 8.0));
-    let bar_rect =
-        egui::Rect::from_min_size(Pos2::new(x - 2.5, top - 2.0), Vec2::new(5.0, height + 4.0));
-
-    let glow = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 50);
-    let solid = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 220);
-
-    painter.rect_filled(glow_rect, CornerRadius::same(6), glow);
-    painter.rect_filled(bar_rect, CornerRadius::same(3), solid);
-}
-
 // ── floating card proxy ─────────────────────────────────────────────────
 
 pub(crate) fn paint_floating_card(
@@ -121,17 +100,17 @@ pub(crate) fn paint_floating_card(
     position_num: usize,
     theme: Theme,
 ) {
-    // A clean, solid replica of the real card — looks like the actual module has
-    // been lifted off the row. The elevation is conveyed by a soft, close shadow
-    // and a slim accent edge, not by a glaring glow.
+    // A clean, solid replica of the real card — the actual module gently lifted
+    // off the row. Elevation is conveyed by a soft, close shadow and a slim
+    // accent edge, never a glaring glow.
     let radius = CornerRadius::same(14);
 
-    // Soft, close drop shadow (small offset = low perceived elevation).
-    let shadow = rect.translate(Vec2::new(2.0, 4.0));
+    // Soft, close drop shadow (small offset + low alpha = low perceived height).
+    let shadow = rect.translate(Vec2::new(1.5, 3.0));
     painter.rect_filled(
         shadow,
         radius,
-        Color32::from_rgba_premultiplied(18, 14, 10, 60),
+        Color32::from_rgba_premultiplied(16, 12, 8, 44),
     );
 
     // Solid card body in the light "paper" surface, with a restrained accent edge.
@@ -139,7 +118,7 @@ pub(crate) fn paint_floating_card(
     painter.rect_stroke(
         rect,
         radius,
-        Stroke::new(1.2, accent.gamma_multiply(0.7)),
+        Stroke::new(1.0, accent.gamma_multiply(0.6)),
         StrokeKind::Inside,
     );
 
@@ -220,19 +199,5 @@ pub(crate) fn final_index_from_drop_slot(source: usize, drop_slot: usize) -> usi
         drop_slot
     } else {
         drop_slot.saturating_sub(1)
-    }
-}
-
-/// Compute the x position for the drop indicator bar.
-pub(crate) fn drop_indicator_x(
-    drop_slot: usize,
-    card_rects: &[egui::Rect; 4],
-    row_start: f32,
-    gaps: f32,
-) -> f32 {
-    match drop_slot {
-        0 => row_start - gaps * 0.5,
-        4 => card_rects[3].right() + gaps * 0.5,
-        s => (card_rects[s - 1].right() + card_rects[s].left()) * 0.5,
     }
 }
