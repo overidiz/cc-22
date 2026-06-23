@@ -26,8 +26,8 @@ use super::{
         Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, FONT_MODULE_TITLE, FONT_SECONDARY,
     },
     widgets::{
-        character_active, colored_knob, diffusion_active, mini_slider, movement_active,
-        paint_grain, set_param, texture_active,
+        character_active, colored_knob, diffusion_active, mini_slider, movement_active, set_param,
+        texture_active,
     },
 };
 
@@ -375,26 +375,6 @@ fn render_module_card(
                 .show(ui, |ui| {
                     ui.set_width(CARD_WIDTH - 16.0);
                     ui.set_min_height(CARD_HEIGHT - 16.0);
-
-                    // Subtle vintage matte over the card body (sits under the
-                    // content so text/knobs stay crisp).
-                    paint_grain(ui, state, card_rect.shrink(2.0), 10);
-                    // Soft relief: a lit inner top edge and a faint shaded bottom
-                    // edge make the card read as a moulded physical tile.
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(card_rect.left() + 10.0, card_rect.top() + 1.4),
-                            Pos2::new(card_rect.right() - 10.0, card_rect.top() + 1.4),
-                        ],
-                        Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 90)),
-                    );
-                    ui.painter().line_segment(
-                        [
-                            Pos2::new(card_rect.left() + 10.0, card_rect.bottom() - 1.6),
-                            Pos2::new(card_rect.right() - 10.0, card_rect.bottom() - 1.6),
-                        ],
-                        Stroke::new(1.0, Color32::from_rgba_premultiplied(50, 42, 32, 30)),
-                    );
 
                     // Slim top accent bar — the card's colour identity, kept as a
                     // tasteful tab rather than a neon outline.

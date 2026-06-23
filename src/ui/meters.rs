@@ -24,7 +24,6 @@ impl Default for UiState {
             output_clip_until: 0.0,
             last_meter_time: None,
             logo_texture: None,
-            grain_texture: None,
         }
     }
 }
@@ -60,9 +59,6 @@ pub(crate) struct UiState {
     pub(crate) last_meter_time: Option<f64>,
     /// Lazily-uploaded CC-22 logo texture (decoded RGBA embedded at build time).
     pub(crate) logo_texture: Option<egui::TextureHandle>,
-    /// Lazily-generated tileable monochrome grain used for the subtle vintage
-    /// matte/painted-metal finish across surfaces.
-    pub(crate) grain_texture: Option<egui::TextureHandle>,
 }
 
 #[derive(Debug, Clone, Copy)]
