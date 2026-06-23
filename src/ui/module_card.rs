@@ -31,6 +31,10 @@ use super::{
     },
 };
 
+/// How far the floating card lifts off its row while dragging. Deliberately
+/// small so the card reads as "picked up" without leaping away from its line.
+const DRAG_LIFT: f32 = 7.0;
+
 struct ModuleCardSpec<'a> {
     title: &'static str,
     accent: Color32,
@@ -79,6 +83,9 @@ pub(crate) fn center_modules(
             }
             state.drag_source = None;
             state.drag_drop_slot = None;
+            state.drag_visual_pos = None;
+            state.drag_lift = 0.0;
+            state.drag_indicator_x = None;
         } else if let Some(px) = pointer_x {
             state.drag_drop_slot = Some(compute_drop_slot(px, &card_rects, row_start));
         }
@@ -158,7 +165,14 @@ pub(crate) fn center_modules(
                     Order::Foreground,
                     egui::Id::new("drop-indicator"),
                 ));
-                let ix = drop_indicator_x(drop_slot, &card_rects, row_start, gaps);
+                // Glide the insertion marker between slots so neighbours appear to
+                // open space fluidly instead of the bar teleporting.
+                let target_ix = drop_indicator_x(drop_slot, &card_rects, row_start, gaps);
+                let ix = match state.drag_indicator_x {
+                    Some(prev) => prev + (target_ix - prev) * 0.40,
+                    None => target_ix,
+                };
+                state.drag_indicator_x = Some(ix);
                 paint_drop_indicator(
                     &overlay,
                     ix,
@@ -173,12 +187,20 @@ pub(crate) fn center_modules(
                 Order::Foreground,
                 egui::Id::new("floating-card"),
             ));
-            let fw = CARD_WIDTH * 1.02;
-            let fh = CARD_HEIGHT * 1.02;
-            let float_rect =
-                Rect::from_center_size(ptr - Vec2::new(0.0, CARD_HEIGHT * 0.25), Vec2::new(fw, fh));
+            // The card tracks the cursor at 1:1 scale and stays on its original
+            // line: target centre = pointer + grab offset, spring-followed for a
+            // soft, controlled feel, with a small eased "pick-up" lift.
+            let target = ptr + state.drag_grab_offset;
+            let smoothed = match state.drag_visual_pos {
+                Some(prev) => prev + (target - prev) * 0.38,
+                None => target,
+            };
+            state.drag_visual_pos = Some(smoothed);
+            state.drag_lift += (DRAG_LIFT - state.drag_lift) * 0.22;
+            let center = smoothed - Vec2::new(0.0, state.drag_lift);
+            let float_rect = Rect::from_center_size(center, Vec2::new(CARD_WIDTH, CARD_HEIGHT));
             let spec = &card_specs[source];
-            paint_floating_card(&fp, float_rect, spec.accent, spec.title, source + 1);
+            paint_floating_card(&fp, float_rect, spec.accent, spec.title, source + 1, theme);
         }
     }
 
@@ -355,6 +377,17 @@ fn render_module_card(
                     if detect_drag && handle_resp.drag_started() {
                         state.drag_source = Some(position_num - 1);
                         state.drag_drop_slot = None;
+                        // Remember where on the card the user grabbed, so the
+                        // floating proxy stays under the cursor at its original
+                        // relative position instead of snapping its centre to it.
+                        let ptr = ui
+                            .ctx()
+                            .input(|i| i.pointer.latest_pos())
+                            .unwrap_or(card_rect.center());
+                        state.drag_grab_offset = card_rect.center() - ptr;
+                        state.drag_visual_pos = None;
+                        state.drag_lift = 0.0;
+                        state.drag_indicator_x = None;
                     }
 
                     module_header(ui, setter, spec, theme, hovered);
@@ -543,13 +576,6 @@ fn render_premium_mode_selector(
             theme,
         ),
     }
-
-    ui.add_space(3.0);
-    ui.label(
-        RichText::new(current_mode_description(spec.module, params))
-            .font(FontId::monospace(super::theme::FONT_HINT))
-            .color(theme.muted_dark),
-    );
 }
 
 /// Renders the module's five product modes as a fixed list of selectable rows.
@@ -641,39 +667,6 @@ fn render_mode_list<T>(
             set_param(setter, param, *value);
         }
         response.on_hover_text("Click to select this mode");
-    }
-}
-
-fn current_mode_description(module: ChainModule, params: &Cc22Params) -> &'static str {
-    match module {
-        ChainModule::Character => match params.character.mode.value() {
-            CharacterMode::Drive => "Focused Analog Push",
-            CharacterMode::Sweet => "Soft Presence & Shine",
-            CharacterMode::Fuzz => "Dense Broken Grain",
-            CharacterMode::Howl => "Vocal Resonant Color",
-            CharacterMode::Swell => "Blooming Attack Shape",
-        },
-        ChainModule::Movement => match params.movement.mode.value() {
-            MovementMode::Doubler => "Short Stereo Double",
-            MovementMode::Vibrato => "Pure Pitch Wobble",
-            MovementMode::Phaser => "Resonant Phase Sweep",
-            MovementMode::Tremolo => "Rhythmic Level Pulse",
-            MovementMode::Pitch => "Drifting Micro-Pitch",
-        },
-        ChainModule::Diffusion => match params.diffusion.mode.value() {
-            DiffusionMode::Cascade => "Multi-Tap Echo Cloud",
-            DiffusionMode::Reels => "Unstable Tape Repeats",
-            DiffusionMode::Space => "Wide Modulated Space",
-            DiffusionMode::Collage => "Fragmented Delay Field",
-            DiffusionMode::Reverse => "Reversed Capture Bloom",
-        },
-        ChainModule::Texture => match params.texture.mode.value() {
-            TextureMode::Filter => "Tilted Tonal Color",
-            TextureMode::Squash => "Dense Dynamic Grain",
-            TextureMode::Cassette => "Compact Tape Damage",
-            TextureMode::Broken => "Dropouts & Digital Wear",
-            TextureMode::Interference => "Electric Parasite Tone",
-        },
     }
 }
 
@@ -927,7 +920,7 @@ fn render_module_content(
     theme: Theme,
 ) {
     render_premium_mode_selector(ui, setter, spec, params, theme);
-    ui.add_space(6.0);
+    ui.add_space(12.0);
 
     match spec.module {
         ChainModule::Character => {

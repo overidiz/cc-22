@@ -1,9 +1,12 @@
 use nih_plug_egui::egui::Color32;
 
-pub(crate) const CARD_HEIGHT: f32 = 280.0;
+pub(crate) const CARD_HEIGHT: f32 = 374.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
-pub(crate) const BASE_WIDTH: f32 = 1040.0;
-pub(crate) const BASE_HEIGHT: f32 = 744.0;
+// Width chosen so the usable content column equals the 4-card row exactly
+// (4·CARD_WIDTH + 3·gap + frame margins), letting the top bar, module row and
+// master strip share one aligned column with no side gutters.
+pub(crate) const BASE_WIDTH: f32 = 946.0;
+pub(crate) const BASE_HEIGHT: f32 = 580.0;
 
 pub(crate) const FONT_MODULE_TITLE: f32 = 16.0;
 pub(crate) const FONT_CONTROL_LABEL: f32 = 9.5;
@@ -52,7 +55,8 @@ pub(crate) struct ModuleColors {
     pub(crate) movement: Color32,
     pub(crate) diffusion: Color32,
     pub(crate) texture: Color32,
-    pub(crate) eq: Color32,
+    /// Warm amber accent used by the Master strip (DRY/WET, "FINAL OUT").
+    pub(crate) accent: Color32,
     pub(crate) master: Color32,
 }
 
@@ -69,7 +73,7 @@ impl Default for ModuleColors {
             movement: Color32::from_rgb(235, 166, 32),
             diffusion: Color32::from_rgb(48, 198, 112),
             texture: Color32::from_rgb(42, 176, 214),
-            eq: Color32::from_rgb(245, 132, 34),
+            accent: Color32::from_rgb(245, 132, 34),
             master: Color32::from_rgb(246, 239, 222),
         }
     }

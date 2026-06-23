@@ -8,17 +8,14 @@ use nih_plug_egui::{
 
 use crate::{meters::Meters, params::Cc22Params, Cc22};
 
-mod eq_view;
 mod meters;
 pub(crate) mod module_card;
 mod preset_bar;
 mod signal_flow;
-mod spectrum;
 mod theme;
 mod top_bar;
 mod widgets;
 
-use eq_view::eq_workbench;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
@@ -66,27 +63,9 @@ pub fn create_editor(
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 8.0;
+                                ui.spacing_mut().item_spacing.y = 10.0;
                                 top_bar(ui, setter, state, &params, colors, theme, now);
                                 center_modules(ui, setter, state, &params, look);
-                                let eq_width = ui.available_width();
-                                state.spectrum.update(
-                                    &meters,
-                                    eq_view::EQ_DISPLAY_MIN_HZ,
-                                    eq_view::EQ_DISPLAY_MAX_HZ,
-                                );
-                                let spectrum_columns = *state.spectrum.columns();
-                                eq_workbench(
-                                    ui,
-                                    setter,
-                                    &params,
-                                    &mut state.selected_eq_position,
-                                    &mut state.selected_eq_band,
-                                    &spectrum_columns,
-                                    colors,
-                                    theme,
-                                    eq_width,
-                                );
                                 bottom_macro_row(
                                     ui,
                                     setter,

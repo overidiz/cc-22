@@ -63,7 +63,7 @@ fn paint_master_row(
     let h = content.height();
 
     fixed_child_ui(ui, clip, content.left(), y, 82.0, h, |ui| {
-        master_label(ui, colors.eq);
+        master_label(ui, colors.accent);
     });
 
     let mut x = content.left() + 94.0;
@@ -134,7 +134,7 @@ fn paint_master_row(
                 setter,
                 &params.dry_wet,
                 "DRY/WET",
-                colors.eq,
+                colors.accent,
                 theme,
                 38.0,
             );

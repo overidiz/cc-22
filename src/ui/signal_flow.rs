@@ -2,6 +2,8 @@ use nih_plug_egui::egui::{
     self, Align2, Color32, CornerRadius, FontId, Pos2, Stroke, StrokeKind, Vec2,
 };
 
+use super::theme::Theme;
+
 pub(crate) fn card_shadow(
     painter: &egui::Painter,
     card_rect: egui::Rect,
@@ -117,80 +119,73 @@ pub(crate) fn paint_floating_card(
     accent: Color32,
     title: &str,
     position_num: usize,
+    theme: Theme,
 ) {
-    // shadow
-    let shadow = rect.translate(Vec2::new(6.0, 8.0));
+    // A clean, solid replica of the real card — looks like the actual module has
+    // been lifted off the row. The elevation is conveyed by a soft, close shadow
+    // and a slim accent edge, not by a glaring glow.
+    let radius = CornerRadius::same(14);
+
+    // Soft, close drop shadow (small offset = low perceived elevation).
+    let shadow = rect.translate(Vec2::new(2.0, 4.0));
     painter.rect_filled(
         shadow,
-        CornerRadius::same(14),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 35),
+        radius,
+        Color32::from_rgba_premultiplied(18, 14, 10, 60),
     );
 
-    // body
-    painter.rect_filled(
-        rect,
-        CornerRadius::same(14),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 28),
-    );
+    // Solid card body in the light "paper" surface, with a restrained accent edge.
+    painter.rect_filled(rect, radius, theme.card);
     painter.rect_stroke(
         rect,
-        CornerRadius::same(14),
-        Stroke::new(1.6, accent.gamma_multiply(0.55)),
+        radius,
+        Stroke::new(1.2, accent.gamma_multiply(0.7)),
         StrokeKind::Inside,
     );
 
-    // header strip
-    let header = egui::Rect::from_min_size(
-        Pos2::new(rect.min.x + 8.0, rect.min.y + 8.0),
-        Vec2::new(rect.width() - 16.0, 26.0),
+    // Slim top accent bar — the card's colour identity, matching the resting card.
+    let accent_bar = egui::Rect::from_min_size(
+        Pos2::new(rect.left() + 16.0, rect.top() + 8.0),
+        Vec2::new(rect.width() - 32.0, 3.0),
     );
-    painter.rect_filled(
-        header,
-        CornerRadius::same(7),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 140),
-    );
+    painter.rect_filled(accent_bar, CornerRadius::same(2), accent);
 
-    // title text
-    let text_pos = Pos2::new(rect.min.x + 26.0, rect.min.y + 11.0);
+    // Title.
     painter.text(
-        text_pos,
-        Align2::LEFT_TOP,
+        Pos2::new(rect.left() + 16.0, rect.top() + 26.0),
+        Align2::LEFT_CENTER,
         title,
-        FontId::monospace(12.0),
-        Color32::WHITE,
+        FontId::monospace(super::theme::FONT_MODULE_TITLE),
+        theme.text_dark,
     );
 
-    // position badge
-    let badge = egui::Rect::from_center_size(
-        Pos2::new(rect.min.x + 16.0, rect.min.y + 12.0),
-        Vec2::new(18.0, 18.0),
+    // Discreet chain-order badge (bottom-right), like the resting card.
+    let badge = Pos2::new(rect.right() - 18.0, rect.bottom() - 16.0);
+    let tick = egui::Rect::from_min_size(
+        Pos2::new(badge.x - 12.0, badge.y - 4.0),
+        Vec2::new(3.0, 8.0),
     );
     painter.rect_filled(
-        badge,
-        CornerRadius::same(5),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 100),
-    );
-    painter.rect_stroke(
-        badge,
-        CornerRadius::same(5),
-        Stroke::new(1.0, Color32::WHITE),
-        StrokeKind::Inside,
+        tick,
+        CornerRadius::same(1),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 160),
     );
     painter.text(
-        badge.center(),
-        Align2::CENTER_CENTER,
-        format!("{}", position_num),
-        FontId::monospace(10.0),
-        Color32::WHITE,
+        Pos2::new(badge.x - 5.0, badge.y),
+        Align2::LEFT_CENTER,
+        format!("{position_num:02}"),
+        FontId::monospace(9.5),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 185),
     );
 
-    // drag dots on top
-    let dots_x = rect.max.x - 18.0;
-    let dots_y = rect.min.y + 10.0;
-    painter.circle_filled(Pos2::new(dots_x, dots_y), 1.8, Color32::WHITE);
-    painter.circle_filled(Pos2::new(dots_x + 7.0, dots_y), 1.8, Color32::WHITE);
-    painter.circle_filled(Pos2::new(dots_x, dots_y + 6.0), 1.8, Color32::WHITE);
-    painter.circle_filled(Pos2::new(dots_x + 7.0, dots_y + 6.0), 1.8, Color32::WHITE);
+    // Quiet grip dots at top-right echo the drag handle.
+    let dots_x = rect.right() - 28.0;
+    let dots_y = rect.top() + 14.0;
+    let dot = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 150);
+    painter.circle_filled(Pos2::new(dots_x, dots_y), 1.5, dot);
+    painter.circle_filled(Pos2::new(dots_x + 6.0, dots_y), 1.5, dot);
+    painter.circle_filled(Pos2::new(dots_x, dots_y + 5.0), 1.5, dot);
+    painter.circle_filled(Pos2::new(dots_x + 6.0, dots_y + 5.0), 1.5, dot);
 }
 
 // ── drag reorder helpers ─────────────────────────────────────────────────

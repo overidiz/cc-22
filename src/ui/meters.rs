@@ -1,21 +1,20 @@
-use nih_plug_egui::egui;
+use nih_plug_egui::egui::{self, Pos2, Vec2};
 
 use crate::meters::Meters;
-
-use super::spectrum::SpectrumState;
 
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            spectrum: SpectrumState::default(),
             selected_preset: 0,
             random_seed: 0,
-            selected_eq_position: EqPositionSelection::Post,
-            selected_eq_band: EqBandSelection::Band1,
             save_notice_until: 0.0,
             save_failed: false,
             drag_source: None,
             drag_drop_slot: None,
+            drag_grab_offset: Vec2::ZERO,
+            drag_visual_pos: None,
+            drag_lift: 0.0,
+            drag_indicator_x: None,
             input_meter: MeterBallistics::default(),
             output_meter: MeterBallistics::default(),
             input_clip_events: 0,
@@ -29,17 +28,23 @@ impl Default for UiState {
 }
 
 pub(crate) struct UiState {
-    pub(crate) spectrum: SpectrumState,
     pub(crate) selected_preset: usize,
     pub(crate) random_seed: u32,
-    /// The EQ workbench only edits one bank at a time — Pre or Post. Both run in
-    /// the DSP simultaneously; this just chooses which one the UI shows.
-    pub(crate) selected_eq_position: EqPositionSelection,
-    pub(crate) selected_eq_band: EqBandSelection,
     pub(crate) save_notice_until: f64,
     pub(crate) save_failed: bool,
     pub(crate) drag_source: Option<usize>,
     pub(crate) drag_drop_slot: Option<usize>,
+    /// Offset between the dragged card's centre and the pointer at grab time, so
+    /// the floating proxy tracks the cursor at its original relative position
+    /// instead of jumping its centre under the pointer.
+    pub(crate) drag_grab_offset: Vec2,
+    /// Smoothed centre of the floating card (spring-followed toward its target)
+    /// for a soft, controlled drag rather than a rigid snap.
+    pub(crate) drag_visual_pos: Option<Pos2>,
+    /// Animated "pick-up" lift, eased in on grab so the card rises gently.
+    pub(crate) drag_lift: f32,
+    /// Smoothed x of the insertion indicator so it glides between slots.
+    pub(crate) drag_indicator_x: Option<f32>,
     pub(crate) input_meter: MeterBallistics,
     pub(crate) output_meter: MeterBallistics,
     pub(crate) input_clip_events: u32,
@@ -49,69 +54,6 @@ pub(crate) struct UiState {
     pub(crate) last_meter_time: Option<f64>,
     /// Lazily-uploaded CC-22 logo texture (decoded RGBA embedded at build time).
     pub(crate) logo_texture: Option<egui::TextureHandle>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EqPositionSelection {
-    Pre,
-    Post,
-}
-
-impl EqPositionSelection {
-    pub(crate) const ALL: [Self; 2] = [Self::Pre, Self::Post];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Pre => "PRE",
-            Self::Post => "POST",
-        }
-    }
-
-    pub(crate) fn toggle(self) -> Self {
-        match self {
-            Self::Pre => Self::Post,
-            Self::Post => Self::Pre,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EqBandSelection {
-    Band1,
-    Band2,
-    Band3,
-    Band4,
-    Band5,
-}
-
-impl EqBandSelection {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Band1,
-        Self::Band2,
-        Self::Band3,
-        Self::Band4,
-        Self::Band5,
-    ];
-
-    pub(crate) fn index(self) -> usize {
-        match self {
-            Self::Band1 => 0,
-            Self::Band2 => 1,
-            Self::Band3 => 2,
-            Self::Band4 => 3,
-            Self::Band5 => 4,
-        }
-    }
-
-    pub(crate) fn from_index(index: usize) -> Self {
-        match index {
-            0 => Self::Band1,
-            1 => Self::Band2,
-            2 => Self::Band3,
-            3 => Self::Band4,
-            _ => Self::Band5,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
