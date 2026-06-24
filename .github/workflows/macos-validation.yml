@@ -3,6 +3,8 @@ name: macOS validation
 on:
   workflow_dispatch:
   push:
+    branches:
+      - codex/ui-layout-polish
     tags:
       - "v*"
 
