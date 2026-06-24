@@ -23,7 +23,8 @@ use super::{
         paint_floating_card, position_badge,
     },
     theme::{
-        Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, FONT_MODULE_TITLE, FONT_SECONDARY,
+        tooltip_text, Look, ModuleColors, Theme, CARD_HEIGHT, CARD_WIDTH, FONT_MODULE_TITLE,
+        FONT_SECONDARY,
     },
     widgets::{
         character_active, colored_knob, diffusion_active, mini_slider, movement_active, set_param,
@@ -335,8 +336,7 @@ fn render_module_card(
 
     // Drop shadow (painter-only). Accent-tinted on hover; constant offset so it
     // never reserves space.
-    let shadow_accent = if hovered { Some(spec.accent) } else { None };
-    card_shadow(ui.painter(), card_rect, 0.0, shadow_accent);
+    card_shadow(ui.painter(), card_rect, 0.0, None);
 
     // Hover glow as a painter overlay — may visually exceed the card but reserves
     // no layout space (replaces the old position "lift").
@@ -344,7 +344,7 @@ fn render_module_card(
         ui.painter().rect_stroke(
             card_rect.expand(2.0),
             CornerRadius::same(16),
-            Stroke::new(1.5, spec.accent.gamma_multiply(0.45)),
+            Stroke::new(1.0, spec.accent.gamma_multiply(0.34)),
             StrokeKind::Outside,
         );
     }
@@ -375,6 +375,19 @@ fn render_module_card(
                 .show(ui, |ui| {
                     ui.set_width(CARD_WIDTH - 16.0);
                     ui.set_min_height(CARD_HEIGHT - 16.0);
+                    ui.painter().line_segment(
+                        [
+                            card_rect.left_top() + Vec2::new(14.0, 1.5),
+                            card_rect.right_top() + Vec2::new(-14.0, 1.5),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 150)),
+                    );
+                    ui.painter().rect_stroke(
+                        card_rect.shrink(3.0),
+                        CornerRadius::same(12),
+                        Stroke::new(0.7, Color32::from_rgba_unmultiplied(70, 64, 55, 34)),
+                        StrokeKind::Inside,
+                    );
 
                     // Slim top accent bar — the card's colour identity, kept as a
                     // tasteful tab rather than a neon outline.
@@ -424,7 +437,7 @@ fn render_module_card(
                     render_module_content(ui, setter, spec, params, theme);
 
                     if hovered {
-                        handle_resp.on_hover_text("\u{2194} Drag handle to reorder");
+                        handle_resp.on_hover_text(tooltip_text("\u{2194} Drag handle to reorder"));
                     }
                 });
         },
@@ -484,11 +497,11 @@ fn module_header(
         6.0,
         Stroke::new(1.0, theme.card_edge.gamma_multiply(0.6)),
     );
-    power.on_hover_text(if on {
+    power.on_hover_text(tooltip_text(if on {
         "Module on \u{2014} click to bypass"
     } else {
         "Bypassed \u{2014} click to enable"
-    });
+    }));
 
     // Module title with clear hierarchy (largest text on the card).
     ui.painter().text(
@@ -655,7 +668,7 @@ fn render_mode_list<T>(
         // while the others stay legible but quieter.
         let dot_center = Pos2::new(rect.left() + 9.0, rect.center().y);
         let base = mode_option_color(index);
-        let dot_radius = if selected { 4.3 } else { 3.4 };
+        let dot_radius = if selected { 4.0 } else { 3.4 };
         if selected {
             ui.painter().circle_filled(
                 dot_center,
@@ -663,11 +676,21 @@ fn render_mode_list<T>(
                 Color32::from_rgba_premultiplied(base.r(), base.g(), base.b(), 60),
             );
             ui.painter().circle_filled(dot_center, dot_radius, base);
+            ui.painter().circle_filled(
+                dot_center + Vec2::new(-1.0, -1.1),
+                1.0,
+                Color32::from_rgba_unmultiplied(255, 255, 255, 105),
+            );
         } else {
             ui.painter().circle_filled(
                 dot_center,
                 dot_radius,
                 Color32::from_rgba_premultiplied(base.r(), base.g(), base.b(), 135),
+            );
+            ui.painter().circle_filled(
+                dot_center + Vec2::new(-0.8, -0.9),
+                0.8,
+                Color32::from_rgba_unmultiplied(255, 255, 255, 70),
             );
         }
 
@@ -694,7 +717,7 @@ fn render_mode_list<T>(
             set_param(setter, bypass, false);
             set_param(setter, param, *value);
         }
-        response.on_hover_text("Click to select this mode");
+        response.on_hover_text(tooltip_text("Click to select this mode"));
     }
 }
 
@@ -864,10 +887,10 @@ fn render_module_mode_list(
 
 fn mode_option_color(index: usize) -> Color32 {
     match index {
-        0 => Color32::from_rgb(232, 48, 36),
-        1 => Color32::from_rgb(240, 205, 28),
-        2 => Color32::from_rgb(24, 184, 70),
-        3 => Color32::from_rgb(45, 180, 220),
+        0 => Color32::from_rgb(237, 27, 47),
+        1 => Color32::from_rgb(239, 192, 0),
+        2 => Color32::from_rgb(8, 185, 87),
+        3 => Color32::from_rgb(67, 188, 227),
         _ => Color32::from_rgb(130, 82, 200),
     }
 }
@@ -1181,7 +1204,7 @@ fn primary_control_row(
                         42.0,
                     );
                     if let Some(tip) = control.tip {
-                        response.on_hover_text(tip);
+                        response.on_hover_text(tooltip_text(tip));
                     }
                 });
             });
@@ -1221,7 +1244,7 @@ fn sync_controls(
                 FontId::monospace(8.5),
                 theme.muted,
             );
-            resp.on_hover_text("This mode doesn't use tempo sync.");
+            resp.on_hover_text(tooltip_text("This mode doesn't use tempo sync."));
             return;
         }
 
@@ -1295,7 +1318,7 @@ fn sync_controls(
         if sync_resp.clicked() {
             set_param(setter, enabled, !on);
         }
-        sync_resp.on_hover_text("Sync uses DAW BPM (falls back to 120).");
+        sync_resp.on_hover_text(tooltip_text("Sync uses DAW BPM (falls back to 120)."));
 
         let div_resp = ui.interact(
             right_rect,
@@ -1315,7 +1338,9 @@ fn sync_controls(
                 NoteDivision::from_index((current + count - 1) % count),
             );
         }
-        div_resp.on_hover_text("Click to cycle the sync division (right-click for previous).");
+        div_resp.on_hover_text(tooltip_text(
+            "Click to cycle the sync division (right-click for previous).",
+        ));
 
         // Optional LOCK/PRE option as a discreet dot indicator, not a button.
         if let Some((label, param, tip)) = extra {
@@ -1338,7 +1363,7 @@ fn sync_controls(
                 FontId::monospace(8.0),
                 if active { theme.text_dark } else { theme.muted },
             );
-            eresp.on_hover_text(tip);
+            eresp.on_hover_text(tooltip_text(tip));
         }
     });
 }
@@ -1354,7 +1379,7 @@ fn slider_with_tip(
 ) {
     let response = mini_slider(ui, setter, param, label, accent, theme);
     if let Some(tip) = tip {
-        response.on_hover_text(tip);
+        response.on_hover_text(tooltip_text(tip));
     }
 }
 
@@ -1693,7 +1718,7 @@ fn shape_selector(
             StrokeKind::Inside,
         );
 
-        response.on_hover_text("SHAPE - tremolo LFO waveform.")
+        response.on_hover_text(tooltip_text("SHAPE - tremolo LFO waveform."))
     })
     .inner
 }

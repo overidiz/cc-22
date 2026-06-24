@@ -44,7 +44,7 @@ pub fn create_editor(
             style.visuals.widgets.inactive.bg_fill = theme.paper;
             style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(250, 246, 235);
             style.visuals.widgets.active.bg_fill = Color32::from_rgb(226, 220, 207);
-            style.visuals.selection.bg_fill = Color32::from_rgb(39, 40, 43);
+            style.visuals.selection.bg_fill = Color32::from_rgb(237, 27, 47);
             style.visuals.override_text_color = Some(theme.text_dark);
             ctx.set_style(style);
         },
@@ -62,6 +62,12 @@ pub fn create_editor(
                         .fill(theme.background)
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
+                            let outer = ui.max_rect();
+                            ui.painter().rect_filled(
+                                outer,
+                                egui::CornerRadius::ZERO,
+                                theme.background,
+                            );
                             ui.vertical(|ui| {
                                 ui.spacing_mut().item_spacing.y = 10.0;
                                 top_bar(ui, setter, state, &params, colors, theme, now);

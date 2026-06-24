@@ -10,8 +10,8 @@ pub(crate) fn card_shadow(
     lift: f32,
     accent: Option<Color32>,
 ) {
-    let shadow_offset = 4.0 + lift * 1.5;
-    let shadow_alpha = (40.0 + lift * 30.0) as u8;
+    let shadow_offset = 2.5 + lift * 1.2;
+    let shadow_alpha = (34.0 + lift * 26.0) as u8;
 
     let shadow_rect = card_rect.translate(Vec2::new(shadow_offset, shadow_offset));
 
@@ -60,7 +60,7 @@ pub(crate) fn drag_handle(
         Vec2::new(26.0, handle_h),
     );
 
-    let alpha: u8 = if hovered { 210 } else { 80 };
+    let alpha: u8 = if hovered { 150 } else { 62 };
 
     if hovered {
         let bg_rect = handle_rect.expand(3.0);

@@ -2,6 +2,7 @@ use nih_plug::prelude::{BoolParam, EnumParam, Param, ParamSetter};
 
 use crate::{
     dsp::{
+        chain::ChainModule,
         character::CharacterMode,
         diffusion::DiffusionMode,
         eq::{EqBandType, EqMode},
@@ -3113,6 +3114,7 @@ pub fn find_preset(id: PresetId) -> Option<&'static InternalPreset> {
 
 impl InternalPreset {
     pub fn apply_with_setter(&self, setter: &ParamSetter<'_>, params: &Cc22Params) {
+        apply_chain_order(setter, params, &self.chain_order());
         self.values.apply_with_setter(setter, params);
 
         // Tempo sync is applied per preset, deterministically: every preset turns
@@ -3137,6 +3139,30 @@ impl InternalPreset {
             &params.texture.sync_division,
             texture,
         );
+    }
+
+    /// Factory presets were authored with this signal-flow order. Keeping the
+    /// order as part of preset recall prevents a previously dragged chain from
+    /// silently changing the sound of the next preset.
+    pub fn chain_order(&self) -> [ChainModule; 4] {
+        [
+            ChainModule::Character,
+            ChainModule::Movement,
+            ChainModule::Diffusion,
+            ChainModule::Texture,
+        ]
+    }
+}
+
+fn apply_chain_order(setter: &ParamSetter<'_>, params: &Cc22Params, order: &[ChainModule; 4]) {
+    let slots = [
+        &params.chain_slot_0,
+        &params.chain_slot_1,
+        &params.chain_slot_2,
+        &params.chain_slot_3,
+    ];
+    for (slot, module) in slots.into_iter().zip(order) {
+        set_param(setter, slot, *module as i32);
     }
 }
 
@@ -3357,9 +3383,36 @@ fn set_param<P: Param>(setter: &ParamSetter<'_>, param: &P, value: P::Plain) {
 mod tests {
     use super::{find_preset, internal_presets, preset_sync_settings, PresetId};
     use crate::dsp::{
-        character::CharacterMode, diffusion::DiffusionMode, movement::MovementMode,
+        chain::{validate_chain_order, ChainModule},
+        character::CharacterMode,
+        diffusion::DiffusionMode,
+        movement::MovementMode,
         texture::TextureMode,
     };
+
+    #[test]
+    fn every_factory_preset_recalls_its_chain_order() {
+        for preset in internal_presets() {
+            let order = preset.chain_order();
+            assert_eq!(
+                validate_chain_order(&order.map(|module| module as usize)),
+                order,
+                "preset {} has an invalid chain order",
+                preset.name
+            );
+            assert_eq!(
+                order,
+                [
+                    ChainModule::Character,
+                    ChainModule::Movement,
+                    ChainModule::Diffusion,
+                    ChainModule::Texture,
+                ],
+                "preset {} should recall its authored chain order",
+                preset.name
+            );
+        }
+    }
 
     #[test]
     fn sync_presets_target_tempo_based_modes() {

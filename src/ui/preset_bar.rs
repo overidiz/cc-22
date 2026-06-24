@@ -38,6 +38,13 @@ pub(crate) fn bottom_macro_row(
                 .corner_radius(CornerRadius::same(12))
                 .show(ui, |ui| {
                     ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    ui.painter().line_segment(
+                        [
+                            rect.left_top() + Vec2::new(14.0, 1.5),
+                            rect.right_top() + Vec2::new(-14.0, 1.5),
+                        ],
+                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(244, 239, 228, 56)),
+                    );
                     paint_master_row(ui, setter, params, meter_reading, colors, theme, rect);
                 });
         },
@@ -55,79 +62,113 @@ fn paint_master_row(
 ) {
     let clip = rect.intersect(ui.clip_rect());
     let content = rect.shrink2(Vec2::new(12.0, 8.0));
-    let knob_w = 58.0;
-    let knob_gap = 8.0;
-    let knob_total = (knob_w * 3.0) + (knob_gap * 2.0);
-    let knob_x = content.right() - knob_total;
     let y = content.top();
     let h = content.height();
+    let identity_w = 150.0;
+    let controls_left = content.left() + identity_w;
+    let section_w = (content.right() - controls_left) / 3.0;
+    let clipped = meter_reading.input.clipped || meter_reading.output.clipped;
 
-    fixed_child_ui(ui, clip, content.left(), y, 82.0, h, |ui| {
-        master_label(ui, colors.accent);
-    });
-
-    let mut x = content.left() + 94.0;
-    fixed_child_ui(ui, clip, x, y + 12.0, 48.0, h - 24.0, |ui| {
-        clip_indicator(
-            ui,
-            meter_reading.input.clipped || meter_reading.output.clipped,
-            theme,
-        );
-    });
-    x += 58.0;
-    fixed_child_ui(ui, clip, x, y + 4.0, 34.0, h - 8.0, |ui| {
-        bottom_meter(
-            ui,
-            "IN",
-            meter_reading.input.level(),
-            meter_reading.input.clipped,
-        );
-    });
-    x += 40.0;
-    fixed_child_ui(ui, clip, x, y + 4.0, 34.0, h - 8.0, |ui| {
-        bottom_meter(
-            ui,
-            "OUT",
-            meter_reading.output.level(),
-            meter_reading.output.clipped,
-        );
+    fixed_child_ui(ui, clip, content.left(), y, identity_w - 16.0, h, |ui| {
+        master_label(ui, colors.accent, clipped, theme);
     });
 
-    if x + 46.0 < knob_x {
-        fixed_child_ui(ui, clip, knob_x - 18.0, y + 7.0, 1.0, h - 14.0, |ui| {
+    for boundary in [
+        controls_left,
+        controls_left + section_w,
+        controls_left + section_w * 2.0,
+    ] {
+        fixed_child_ui(ui, clip, boundary, y + 7.0, 1.0, h - 14.0, |ui| {
             bottom_strip_divider(ui);
         });
     }
 
-    fixed_child_ui(ui, clip, knob_x, y, knob_w, h, |ui| {
-        small_strip_knob(
-            ui,
-            setter,
-            &params.input_gain,
-            "INPUT",
-            colors.master,
-            theme,
-            30.0,
-        );
-    });
-    fixed_child_ui(ui, clip, knob_x + knob_w + knob_gap, y, knob_w, h, |ui| {
-        small_strip_knob(
-            ui,
-            setter,
-            &params.output_gain,
-            "OUTPUT",
-            colors.master,
-            theme,
-            30.0,
-        );
+    let input_center = controls_left + section_w * 0.5;
+    fixed_child_ui(ui, clip, controls_left, y, section_w, 13.0, |ui| {
+        section_title(ui, "INPUT STAGE", colors.master);
     });
     fixed_child_ui(
         ui,
         clip,
-        knob_x + (knob_w + knob_gap) * 2.0,
-        y,
-        knob_w,
-        h,
+        input_center - 51.0,
+        y + 13.0,
+        30.0,
+        h - 13.0,
+        |ui| {
+            bottom_meter(ui, meter_reading.input.level(), meter_reading.input.clipped);
+        },
+    );
+    fixed_child_ui(
+        ui,
+        clip,
+        input_center - 5.0,
+        y + 13.0,
+        70.0,
+        h - 13.0,
+        |ui| {
+            small_strip_knob(
+                ui,
+                setter,
+                &params.input_gain,
+                "GAIN",
+                colors.master,
+                theme,
+                30.0,
+            );
+        },
+    );
+
+    let output_left = controls_left + section_w;
+    let output_center = output_left + section_w * 0.5;
+    fixed_child_ui(ui, clip, output_left, y, section_w, 13.0, |ui| {
+        section_title(ui, "OUTPUT STAGE", colors.master);
+    });
+    fixed_child_ui(
+        ui,
+        clip,
+        output_center - 51.0,
+        y + 13.0,
+        30.0,
+        h - 13.0,
+        |ui| {
+            bottom_meter(
+                ui,
+                meter_reading.output.level(),
+                meter_reading.output.clipped,
+            );
+        },
+    );
+    fixed_child_ui(
+        ui,
+        clip,
+        output_center - 5.0,
+        y + 13.0,
+        70.0,
+        h - 13.0,
+        |ui| {
+            small_strip_knob(
+                ui,
+                setter,
+                &params.output_gain,
+                "GAIN",
+                colors.master,
+                theme,
+                30.0,
+            );
+        },
+    );
+
+    let blend_left = controls_left + section_w * 2.0;
+    fixed_child_ui(ui, clip, blend_left, y, section_w, 13.0, |ui| {
+        section_title(ui, "MASTER BLEND", colors.accent)
+    });
+    fixed_child_ui(
+        ui,
+        clip,
+        blend_left + (section_w - 82.0) * 0.5,
+        y + 10.0,
+        82.0,
+        h - 10.0,
         |ui| {
             small_strip_knob(
                 ui,
@@ -142,17 +183,36 @@ fn paint_master_row(
     );
 }
 
-fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: bool) {
+fn section_title(ui: &mut egui::Ui, label: &'static str, color: Color32) {
     ui.vertical_centered(|ui| {
         ui.label(
             RichText::new(label)
                 .font(FontId::monospace(8.0))
                 .strong()
-                .color(Color32::from_rgb(245, 237, 218)),
+                .color(color.gamma_multiply(0.72)),
         );
+    });
+}
+
+fn bottom_meter(ui: &mut egui::Ui, level: f32, clipped: bool) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(2.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::new(18.0, 34.0), Sense::hover());
         ui.painter()
             .rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(18, 15, 12));
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(4),
+            Stroke::new(1.0, Color32::from_rgb(83, 74, 61)),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().line_segment(
+            [
+                rect.left_top() + Vec2::new(3.0, 2.0),
+                rect.right_top() + Vec2::new(-3.0, 2.0),
+            ],
+            Stroke::new(0.8, Color32::from_rgba_unmultiplied(244, 239, 228, 36)),
+        );
         let fill_bounds = rect.shrink2(Vec2::new(2.5, 2.5));
         let fill_h = fill_bounds.height() * level.clamp(0.0, 1.0);
         let fill = egui::Rect::from_min_max(
@@ -166,19 +226,19 @@ fn bottom_meter(ui: &mut egui::Ui, label: &'static str, level: f32, clipped: boo
                 if clipped {
                     Color32::from_rgb(225, 64, 52)
                 } else {
-                    Color32::from_rgb(245, 132, 34)
+                    Color32::from_rgb(239, 192, 0)
                 },
             );
         }
     });
 }
 
-fn master_label(ui: &mut egui::Ui, accent: Color32) {
+fn master_label(ui: &mut egui::Ui, accent: Color32, clipped: bool, theme: Theme) {
     ui.vertical_centered(|ui| {
-        ui.add_space(13.0);
+        ui.add_space(8.0);
         ui.label(
             RichText::new("MASTER")
-                .font(FontId::monospace(13.0))
+                .font(FontId::monospace(14.0))
                 .strong()
                 .color(Color32::from_rgb(245, 237, 218)),
         );
@@ -188,28 +248,26 @@ fn master_label(ui: &mut egui::Ui, accent: Color32) {
                 .strong()
                 .color(accent),
         );
-    });
-}
-
-fn clip_indicator(ui: &mut egui::Ui, clipped: bool, theme: Theme) {
-    ui.horizontal_centered(|ui| {
+        ui.add_space(2.0);
         let color = if clipped {
             theme.warning
         } else {
             Color32::from_rgb(111, 101, 86)
         };
-        let (dot, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
-        ui.painter().circle_filled(dot.center(), 4.0, color);
-        ui.label(
-            RichText::new("CLIP")
-                .font(FontId::monospace(8.0))
-                .strong()
-                .color(if clipped {
-                    theme.warning
-                } else {
-                    Color32::from_rgb(170, 158, 137)
-                }),
-        );
+        ui.horizontal_centered(|ui| {
+            let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+            ui.painter().circle_filled(dot.center(), 3.0, color);
+            ui.label(
+                RichText::new("CLIP")
+                    .font(FontId::monospace(7.5))
+                    .strong()
+                    .color(if clipped {
+                        theme.warning
+                    } else {
+                        Color32::from_rgb(170, 158, 137)
+                    }),
+            );
+        });
     });
 }
 
@@ -304,6 +362,11 @@ pub(crate) fn save_user_snapshot(params: &Cc22Params) -> io::Result<PathBuf> {
     let directory = base.join("CC-22").join("Presets");
     fs::create_dir_all(&directory)?;
     let path = directory.join("CC-22 User Snapshot.cc22preset");
+    fs::write(&path, user_snapshot_contents(params))?;
+    Ok(path)
+}
+
+fn user_snapshot_contents(params: &Cc22Params) -> String {
     let mut values = params
         .param_map()
         .into_iter()
@@ -319,8 +382,26 @@ pub(crate) fn save_user_snapshot(params: &Cc22Params) -> io::Result<PathBuf> {
     for (id, normalized) in values {
         snapshot.push_str(&format!("{id}={normalized:.9}\n"));
     }
-    fs::write(&path, snapshot)?;
-    Ok(path)
+    snapshot
+}
+
+#[cfg(test)]
+mod tests {
+    use super::user_snapshot_contents;
+    use crate::params::Cc22Params;
+
+    #[test]
+    fn user_snapshot_serializes_all_chain_slots() {
+        let snapshot = user_snapshot_contents(&Cc22Params::default());
+        for id in ["chain_s0", "chain_s1", "chain_s2", "chain_s3"] {
+            assert!(
+                snapshot
+                    .lines()
+                    .any(|line| line.starts_with(&format!("{id}="))),
+                "snapshot did not serialize {id}"
+            );
+        }
+    }
 }
 
 pub(crate) fn previous_preset(setter: &ParamSetter<'_>, state: &mut UiState, params: &Cc22Params) {

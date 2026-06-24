@@ -1,4 +1,4 @@
-use nih_plug_egui::egui::Color32;
+use nih_plug_egui::egui::{Color32, RichText};
 
 pub(crate) const CARD_HEIGHT: f32 = 374.0;
 pub(crate) const CARD_WIDTH: f32 = 226.0;
@@ -43,7 +43,7 @@ impl Default for Theme {
             text_light: Color32::from_rgb(30, 27, 23),
             muted: Color32::from_rgb(126, 118, 104),
             muted_dark: Color32::from_rgb(70, 64, 55),
-            warning: Color32::from_rgb(225, 64, 52),
+            warning: Color32::from_rgb(237, 27, 47),
             shadow: Color32::from_rgba_premultiplied(0, 0, 0, 92),
         }
     }
@@ -69,12 +69,18 @@ pub(crate) struct Look {
 impl Default for ModuleColors {
     fn default() -> Self {
         Self {
-            character: Color32::from_rgb(235, 74, 64),
-            movement: Color32::from_rgb(235, 166, 32),
-            diffusion: Color32::from_rgb(48, 198, 112),
-            texture: Color32::from_rgb(42, 176, 214),
-            accent: Color32::from_rgb(245, 132, 34),
-            master: Color32::from_rgb(246, 239, 222),
+            character: Color32::from_rgb(237, 27, 47),
+            movement: Color32::from_rgb(239, 192, 0),
+            diffusion: Color32::from_rgb(8, 185, 87),
+            texture: Color32::from_rgb(67, 188, 227),
+            accent: Color32::from_rgb(239, 192, 0),
+            master: Color32::from_rgb(244, 239, 228),
         }
     }
+}
+
+/// Tooltips use egui's dark popup surface, so their text must not inherit the
+/// dark ink used by the plugin's light cards.
+pub(crate) fn tooltip_text(text: impl Into<String>) -> RichText {
+    RichText::new(text).color(Color32::from_rgb(248, 243, 232))
 }
