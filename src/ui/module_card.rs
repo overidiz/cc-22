@@ -113,8 +113,17 @@ pub(crate) fn center_modules(
     // Reserve the whole row up front so nothing below (Master) ever moves,
     // then draw each card at an animated x. This keeps drag/reorder a paint
     // overlay that never deforms the layout.
-    let row_top = card_rects[0].top();
-    let _ = ui.allocate_exact_size(Vec2::new(ui.available_width(), CARD_HEIGHT), Sense::hover());
+    let (row_rect, _) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), CARD_HEIGHT), Sense::hover());
+    let row_top = row_rect.top();
+    // All animated card UIs live inside an already-reserved child region. A
+    // released card may temporarily settle from outside the row, but that must
+    // never expand the parent's layout bounds or move the Master strip below.
+    let mut row_ui = ui.new_child(
+        UiBuilder::new()
+            .max_rect(row_rect)
+            .layout(egui::Layout::top_down(Align::Min)),
+    );
 
     let base_x = |pos: usize| row_start + pos as f32 * (CARD_WIDTH + gaps);
 
@@ -157,7 +166,7 @@ pub(crate) fn center_modules(
         };
         state.drag_indicator_x = Some(gx);
         paint_gap_slot(
-            ui.painter(),
+            row_ui.painter(),
             Rect::from_min_size(Pos2::new(gx, row_top), Vec2::new(CARD_WIDTH, CARD_HEIGHT)),
             module_color(chain_order[source], colors),
         );
@@ -172,7 +181,7 @@ pub(crate) fn center_modules(
             Vec2::new(CARD_WIDTH, CARD_HEIGHT),
         );
         render_module_card(
-            ui,
+            &mut row_ui,
             setter,
             theme,
             &card_specs[pos],
@@ -240,7 +249,7 @@ fn paint_gap_slot(painter: &egui::Painter, rect: Rect, accent: Color32) {
     painter.rect_filled(
         rect,
         CornerRadius::same(14),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 16),
+        Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 16),
     );
     painter.rect_stroke(
         rect,

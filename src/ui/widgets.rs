@@ -21,9 +21,14 @@ pub(crate) fn small_strip_knob(
 ) {
     ui.vertical_centered(|ui| {
         ui.set_min_width(size + 16.0);
-        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
+        // The arc and shadow intentionally extend beyond the nominal dial
+        // diameter. Reserve that overscan instead of letting the child UI clip
+        // the top edge (especially visible on the larger Dry/Wet knob).
+        let overscan = 4.0;
+        let (paint_rect, response) =
+            ui.allocate_exact_size(Vec2::splat(size + overscan), Sense::click_and_drag());
         handle_float_drag(ui, setter, param, &response);
-        let center = rect.center();
+        let center = paint_rect.center();
         let normalized = param.unmodulated_normalized_value().clamp(0.0, 1.0);
         // Inner radii scale with the dial size so a larger knob (Dry/Wet) stays
         // proportional to the small Input/Output dials.

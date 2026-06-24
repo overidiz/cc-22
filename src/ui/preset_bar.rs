@@ -13,7 +13,7 @@ use super::{
     widgets::{set_float_normalized, small_strip_knob},
 };
 
-pub(crate) const MASTER_ROW_HEIGHT: f32 = 82.0;
+pub(crate) const MASTER_ROW_HEIGHT: f32 = 88.0;
 
 pub(crate) fn bottom_macro_row(
     ui: &mut egui::Ui,
