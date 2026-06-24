@@ -2,14 +2,16 @@ use nih_plug_egui::egui::{
     self, Align2, Color32, CornerRadius, FontId, Pos2, Stroke, StrokeKind, Vec2,
 };
 
+use super::theme::Theme;
+
 pub(crate) fn card_shadow(
     painter: &egui::Painter,
     card_rect: egui::Rect,
     lift: f32,
     accent: Option<Color32>,
 ) {
-    let shadow_offset = 4.0 + lift * 1.5;
-    let shadow_alpha = (40.0 + lift * 30.0) as u8;
+    let shadow_offset = 2.5 + lift * 1.2;
+    let shadow_alpha = (34.0 + lift * 26.0) as u8;
 
     let shadow_rect = card_rect.translate(Vec2::new(shadow_offset, shadow_offset));
 
@@ -25,24 +27,21 @@ pub(crate) fn card_shadow(
 // ── signal flow arrows ──────────────────────────────────────────────────
 
 pub(crate) fn position_badge(ui: &mut egui::Ui, pos: Pos2, number: usize, accent: Color32) {
-    let badge_rect = egui::Rect::from_center_size(pos, Vec2::new(18.0, 18.0));
+    // A discreet chain-order marker ("01".."04"): a tiny accent tick plus a
+    // muted two-digit number, deliberately understated so it reads as "order"
+    // rather than an unread-notification badge.
+    let tick = egui::Rect::from_min_size(Pos2::new(pos.x - 12.0, pos.y - 4.0), Vec2::new(3.0, 8.0));
     ui.painter().rect_filled(
-        badge_rect,
-        CornerRadius::same(5),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 70),
-    );
-    ui.painter().rect_stroke(
-        badge_rect,
-        CornerRadius::same(5),
-        Stroke::new(1.0, accent),
-        StrokeKind::Inside,
+        tick,
+        CornerRadius::same(1),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 150),
     );
     ui.painter().text(
-        badge_rect.center(),
-        Align2::CENTER_CENTER,
-        format!("{}", number),
-        FontId::monospace(10.0),
-        accent,
+        Pos2::new(pos.x - 5.0, pos.y),
+        Align2::LEFT_CENTER,
+        format!("{number:02}"),
+        FontId::monospace(9.5),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 175),
     );
 }
 
@@ -61,7 +60,7 @@ pub(crate) fn drag_handle(
         Vec2::new(26.0, handle_h),
     );
 
-    let alpha: u8 = if hovered { 210 } else { 80 };
+    let alpha: u8 = if hovered { 150 } else { 62 };
 
     if hovered {
         let bg_rect = handle_rect.expand(3.0);
@@ -91,27 +90,6 @@ pub(crate) fn drag_handle(
     ui.interact(handle_rect, id, egui::Sense::click_and_drag())
 }
 
-// ── drop indicator bar ──────────────────────────────────────────────────
-
-pub(crate) fn paint_drop_indicator(
-    painter: &egui::Painter,
-    x: f32,
-    top: f32,
-    height: f32,
-    accent: Color32,
-) {
-    let glow_rect =
-        egui::Rect::from_min_size(Pos2::new(x - 6.0, top - 4.0), Vec2::new(12.0, height + 8.0));
-    let bar_rect =
-        egui::Rect::from_min_size(Pos2::new(x - 2.5, top - 2.0), Vec2::new(5.0, height + 4.0));
-
-    let glow = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 50);
-    let solid = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 220);
-
-    painter.rect_filled(glow_rect, CornerRadius::same(6), glow);
-    painter.rect_filled(bar_rect, CornerRadius::same(3), solid);
-}
-
 // ── floating card proxy ─────────────────────────────────────────────────
 
 pub(crate) fn paint_floating_card(
@@ -120,80 +98,73 @@ pub(crate) fn paint_floating_card(
     accent: Color32,
     title: &str,
     position_num: usize,
+    theme: Theme,
 ) {
-    // shadow
-    let shadow = rect.translate(Vec2::new(6.0, 8.0));
+    // A clean, solid replica of the real card — the actual module gently lifted
+    // off the row. Elevation is conveyed by a soft, close shadow and a slim
+    // accent edge, never a glaring glow.
+    let radius = CornerRadius::same(14);
+
+    // Soft, close drop shadow (small offset + low alpha = low perceived height).
+    let shadow = rect.translate(Vec2::new(1.5, 3.0));
     painter.rect_filled(
         shadow,
-        CornerRadius::same(14),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 35),
+        radius,
+        Color32::from_rgba_premultiplied(16, 12, 8, 44),
     );
 
-    // body
-    painter.rect_filled(
-        rect,
-        CornerRadius::same(14),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 28),
-    );
+    // Solid card body in the light "paper" surface, with a restrained accent edge.
+    painter.rect_filled(rect, radius, theme.card);
     painter.rect_stroke(
         rect,
-        CornerRadius::same(14),
-        Stroke::new(1.6, accent.gamma_multiply(0.55)),
+        radius,
+        Stroke::new(1.0, accent.gamma_multiply(0.6)),
         StrokeKind::Inside,
     );
 
-    // header strip
-    let header = egui::Rect::from_min_size(
-        Pos2::new(rect.min.x + 8.0, rect.min.y + 8.0),
-        Vec2::new(rect.width() - 16.0, 26.0),
+    // Slim top accent bar — the card's colour identity, matching the resting card.
+    let accent_bar = egui::Rect::from_min_size(
+        Pos2::new(rect.left() + 16.0, rect.top() + 8.0),
+        Vec2::new(rect.width() - 32.0, 3.0),
     );
-    painter.rect_filled(
-        header,
-        CornerRadius::same(7),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 140),
-    );
+    painter.rect_filled(accent_bar, CornerRadius::same(2), accent);
 
-    // title text
-    let text_pos = Pos2::new(rect.min.x + 26.0, rect.min.y + 11.0);
+    // Title.
     painter.text(
-        text_pos,
-        Align2::LEFT_TOP,
+        Pos2::new(rect.left() + 16.0, rect.top() + 26.0),
+        Align2::LEFT_CENTER,
         title,
-        FontId::monospace(12.0),
-        Color32::WHITE,
+        FontId::monospace(super::theme::FONT_MODULE_TITLE),
+        theme.text_dark,
     );
 
-    // position badge
-    let badge = egui::Rect::from_center_size(
-        Pos2::new(rect.min.x + 16.0, rect.min.y + 12.0),
-        Vec2::new(18.0, 18.0),
+    // Discreet chain-order badge (bottom-right), like the resting card.
+    let badge = Pos2::new(rect.right() - 18.0, rect.bottom() - 16.0);
+    let tick = egui::Rect::from_min_size(
+        Pos2::new(badge.x - 12.0, badge.y - 4.0),
+        Vec2::new(3.0, 8.0),
     );
     painter.rect_filled(
-        badge,
-        CornerRadius::same(5),
-        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 100),
-    );
-    painter.rect_stroke(
-        badge,
-        CornerRadius::same(5),
-        Stroke::new(1.0, Color32::WHITE),
-        StrokeKind::Inside,
+        tick,
+        CornerRadius::same(1),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 160),
     );
     painter.text(
-        badge.center(),
-        Align2::CENTER_CENTER,
-        format!("{}", position_num),
-        FontId::monospace(10.0),
-        Color32::WHITE,
+        Pos2::new(badge.x - 5.0, badge.y),
+        Align2::LEFT_CENTER,
+        format!("{position_num:02}"),
+        FontId::monospace(9.5),
+        Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 185),
     );
 
-    // drag dots on top
-    let dots_x = rect.max.x - 18.0;
-    let dots_y = rect.min.y + 10.0;
-    painter.circle_filled(Pos2::new(dots_x, dots_y), 1.8, Color32::WHITE);
-    painter.circle_filled(Pos2::new(dots_x + 7.0, dots_y), 1.8, Color32::WHITE);
-    painter.circle_filled(Pos2::new(dots_x, dots_y + 6.0), 1.8, Color32::WHITE);
-    painter.circle_filled(Pos2::new(dots_x + 7.0, dots_y + 6.0), 1.8, Color32::WHITE);
+    // Quiet grip dots at top-right echo the drag handle.
+    let dots_x = rect.right() - 28.0;
+    let dots_y = rect.top() + 14.0;
+    let dot = Color32::from_rgba_premultiplied(accent.r(), accent.g(), accent.b(), 150);
+    painter.circle_filled(Pos2::new(dots_x, dots_y), 1.5, dot);
+    painter.circle_filled(Pos2::new(dots_x + 6.0, dots_y), 1.5, dot);
+    painter.circle_filled(Pos2::new(dots_x, dots_y + 5.0), 1.5, dot);
+    painter.circle_filled(Pos2::new(dots_x + 6.0, dots_y + 5.0), 1.5, dot);
 }
 
 // ── drag reorder helpers ─────────────────────────────────────────────────
@@ -228,19 +199,5 @@ pub(crate) fn final_index_from_drop_slot(source: usize, drop_slot: usize) -> usi
         drop_slot
     } else {
         drop_slot.saturating_sub(1)
-    }
-}
-
-/// Compute the x position for the drop indicator bar.
-pub(crate) fn drop_indicator_x(
-    drop_slot: usize,
-    card_rects: &[egui::Rect; 4],
-    row_start: f32,
-    gaps: f32,
-) -> f32 {
-    match drop_slot {
-        0 => row_start - gaps * 0.5,
-        4 => card_rects[3].right() + gaps * 0.5,
-        s => (card_rects[s - 1].right() + card_rects[s].left()) * 0.5,
     }
 }

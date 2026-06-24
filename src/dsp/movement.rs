@@ -84,7 +84,6 @@ pub struct Movement {
     pitch_buffer: [Vec<f32>; MAX_CHANNELS],
     pitch_write_pos: [usize; MAX_CHANNELS],
     pitch_read_a: [f32; MAX_CHANNELS],
-    pitch_read_b: [f32; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -129,7 +128,6 @@ impl Default for Movement {
             pitch_buffer: [Vec::new(), Vec::new()],
             pitch_write_pos: [0; MAX_CHANNELS],
             pitch_read_a: [0.0; MAX_CHANNELS],
-            pitch_read_b: [0.0; MAX_CHANNELS],
         };
         movement.prepare(44_100.0);
         movement
@@ -169,7 +167,6 @@ impl Movement {
         self.pitch_write_pos = [0; MAX_CHANNELS];
         let half = self.pitch_buffer[0].len().max(4) as f32 / 2.0;
         self.pitch_read_a = [half; MAX_CHANNELS];
-        self.pitch_read_b = [0.0; MAX_CHANNELS];
     }
 
     pub fn next_frame(
@@ -213,15 +210,22 @@ impl Movement {
         let mix = params.mix.smoothed.next().clamp(0.0, 1.0);
         let module_frame = self.core.next_frame(params.bypass.value(), mix, 0.0);
 
-        // Phase lock: when the host is playing with a known position, snap the LFO
-        // to the musical grid once per block (when the reported beat changes), then
-        // free-run within the block. The correction is tiny, so it never clicks; if
-        // the host isn't playing or gives no position, we just free-run.
+        // Phase lock: when the host is playing with a known position, pull the LFO
+        // toward the musical grid — but with a *smooth, clamped* correction rather
+        // than a hard snap, so re-locking never produces an audible jump/click. The
+        // shortest wrapped error is nudged by a small fraction, bounded per update,
+        // so it converges over a few buffers. If the host isn't playing or gives no
+        // position, we just free-run.
         if synced && params.sync_phase_lock.value() && transport.playing {
             if let Some(ppq) = transport.ppq_position {
                 if self.last_ppq != Some(ppq) {
                     let division_beats = beats_for_division(division).max(0.001) as f64;
-                    self.lfo_phase = (ppq / division_beats).rem_euclid(1.0) as f32;
+                    let target = (ppq / division_beats).rem_euclid(1.0) as f32;
+                    // Shortest signed distance on the phase circle, in [-0.5, 0.5].
+                    let mut error = target - self.lfo_phase;
+                    error -= error.round();
+                    let step = (error * 0.25).clamp(-0.03, 0.03);
+                    self.lfo_phase = (self.lfo_phase + step).rem_euclid(1.0);
                     self.last_ppq = Some(ppq);
                 }
             }
@@ -781,17 +785,35 @@ mod tests {
         params.sync_division = EnumParam::new("d", NoteDivision::Quarter);
         params.reset_smoothers();
 
-        // Playing at 2.25 beats, 1/4 = 1 beat -> phase 0.25 (plus one tiny step).
-        let playing = TransportFrame {
+        // Smooth lock: a single buffer must NOT hard-snap to the grid phase — the
+        // correction is clamped, so after one update it's still far from target.
+        let first = TransportFrame {
             bpm: 120.0,
             playing: true,
             ppq_position: Some(2.25),
             ..TransportFrame::default()
         };
-        let _ = movement.next_frame(&params, &playing);
+        let _ = movement.next_frame(&params, &first);
         assert!(
-            (movement.lfo_phase - 0.25).abs() < 0.01,
-            "phase-locked LFO phase {}",
+            (movement.lfo_phase - 0.25).abs() > 0.05,
+            "phase lock must not hard-snap in one step (phase {})",
+            movement.lfo_phase
+        );
+
+        // Over several buffers (1/4 @ 120 → integer beats keep target phase 0.25)
+        // it converges smoothly toward the grid.
+        for k in 1..60 {
+            let playing = TransportFrame {
+                bpm: 120.0,
+                playing: true,
+                ppq_position: Some(2.25 + k as f64),
+                ..TransportFrame::default()
+            };
+            let _ = movement.next_frame(&params, &playing);
+        }
+        assert!(
+            (movement.lfo_phase - 0.25).abs() < 0.05,
+            "phase-locked LFO should converge to the grid, phase {}",
             movement.lfo_phase
         );
 

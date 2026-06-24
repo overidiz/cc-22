@@ -163,6 +163,14 @@ struct InterferenceState {
     noise_band_lo: [f32; MAX_CHANNELS],
     damp_state: [f32; MAX_CHANNELS],
     sync_counter: [usize; MAX_CHANNELS],
+    // Telecom "packet-loss" dropout gate (glitch flavor) and digital sample&hold
+    // + bitcrush (network/digital flavor).
+    glitch_gate: [f32; MAX_CHANNELS],
+    glitch_counter: [usize; MAX_CHANNELS],
+    glitch_open: [bool; MAX_CHANNELS],
+    glitch_rng: [u32; MAX_CHANNELS],
+    sh_hold: [f32; MAX_CHANNELS],
+    sh_counter: [usize; MAX_CHANNELS],
 }
 
 #[derive(Debug, Clone)]
@@ -395,10 +403,12 @@ impl Texture {
         } else {
             0.21 * frame.stereo_spread
         };
-        let wow = sine_lfo((frame.wow_phase + stereo_phase).fract()) * frame.wow_depth * 9.5;
+        // Tamed wow/flutter ceilings so even full depth reads as a controlled
+        // tape character instead of a seasick, cliché warble.
+        let wow = sine_lfo((frame.wow_phase + stereo_phase).fract()) * frame.wow_depth * 7.0;
         let flutter = sine_lfo((frame.flutter_phase + stereo_phase * 2.7).fract())
             * frame.flutter_depth
-            * 2.8;
+            * 2.2;
         let drift = self.drift[index].next_value(frame.random_drift) * 7.0;
         let instability = self
             .cassette
@@ -541,25 +551,49 @@ impl Texture {
             Some(period) => 0.25 + 0.75 * self.interference.next_sync_pulse(index, period),
             None => 1.0,
         };
-        let am_depth = interference_am_depth(amount, frame.degrade) * amplitude_wobble * intensity;
-        let ring_depth = interference_ring_depth(amount, frame.degrade);
-        let modulated = sample * (1.0 + carrier * am_depth);
-        let ringed = sample * carrier;
-        let tonal = (carrier * 0.72 + parasite * 0.28)
-            * interference_tone_gain(amount, frame.degrade)
-            * amplitude_wobble;
-        let noisy = band_noise * interference_noise_gain(amount, frame.degrade);
-        let wet = linear_crossfade(modulated, (ringed + tonal + noisy) * intensity, ring_depth);
-        let damped = self.interference.damp(
-            index,
-            wet,
-            frame.noise_color,
-            frame.degrade,
-            self.sample_rate,
-        );
-        let clipped = interference_soft_clip(damped, frame.degrade, amount);
+        // Amount morphs through three musical flavors: radio static → telecom
+        // glitch/dropouts → digital/network artifacts. They crossfade smoothly.
+        let (w_static, w_glitch, w_digital) = interference_flavor_weights(amount);
+        let degrade = frame.degrade;
 
-        sanitize_sample(clipped * interference_level_compensation(amount, frame.degrade))
+        // ── Radio static: AM crackle on the dry + a faint carrier tone + a band-
+        // limited noise bed (a radio idling between stations). ──────────────────
+        let am_depth = interference_am_depth(amount, degrade) * amplitude_wobble * intensity;
+        let static_tone = (carrier * 0.72 + parasite * 0.28)
+            * interference_tone_gain(amount, degrade)
+            * amplitude_wobble
+            * intensity;
+        let static_bed = band_noise * interference_noise_gain(amount, degrade);
+        let static_out = sample * (1.0 + carrier * am_depth) + static_tone + static_bed;
+
+        // ── Telecom glitch: ring-mod voice gated by random dropouts, with a noise
+        // burst leaking through while the "line" is dropped. ────────────────────
+        let gate = self.interference.next_gate(index, amount, self.sample_rate);
+        let ringed = linear_crossfade(
+            sample,
+            sample * carrier,
+            interference_ring_depth(amount, degrade),
+        );
+        let dropout_noise = band_noise * (1.0 - gate) * (0.05 + degrade * 0.05);
+        let glitch_out = ringed * gate + dropout_noise;
+
+        // ── Digital/network: sample-rate reduction + bitcrush, with a touch of
+        // digital noise. ────────────────────────────────────────────────────────
+        let crushed = self
+            .interference
+            .next_digital(index, sample, amount, degrade);
+        let digital_out = crushed + band_noise * (0.03 + degrade * 0.04);
+
+        let weight_sum = w_static + w_glitch + w_digital + 1e-6;
+        let wet =
+            (static_out * w_static + glitch_out * w_glitch + digital_out * w_digital) / weight_sum;
+
+        let damped =
+            self.interference
+                .damp(index, wet, frame.noise_color, degrade, self.sample_rate);
+        let clipped = interference_soft_clip(damped, degrade, amount);
+
+        sanitize_sample(clipped * interference_level_compensation(amount, degrade))
     }
 
     fn advance_lfos(&mut self, wow_rate_hz: f32, flutter_rate_hz: f32) {
@@ -934,6 +968,57 @@ impl InterferenceState {
         self.noise_band_lo = [0.0; MAX_CHANNELS];
         self.damp_state = [0.0; MAX_CHANNELS];
         self.sync_counter = [0; MAX_CHANNELS];
+        self.glitch_gate = [1.0; MAX_CHANNELS];
+        self.glitch_counter = [0; MAX_CHANNELS];
+        self.glitch_open = [true; MAX_CHANNELS];
+        self.glitch_rng = [0x9e37_79b9, 0x85eb_ca6b];
+        self.sh_hold = [0.0; MAX_CHANNELS];
+        self.sh_counter = [0; MAX_CHANNELS];
+    }
+
+    /// Telecom-style dropout gate: random open/closed bursts (packet loss). More
+    /// `amount` → more frequent/deeper drops. The gate is one-pole smoothed so it
+    /// never clicks; it never fully closes, so the signal "stutters" musically.
+    fn next_gate(&mut self, channel: usize, amount: f32, sample_rate: f32) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        if self.glitch_counter[index] == 0 {
+            let mut state = self.glitch_rng[index];
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            self.glitch_rng[index] = state;
+            let r = (state >> 8) as f32 / 16_777_216.0;
+            let drop_prob = 0.12 + amount.clamp(0.0, 1.0) * 0.33;
+            self.glitch_open[index] = r > drop_prob;
+            let dur_ms = 18.0 + r * 130.0;
+            self.glitch_counter[index] = ((dur_ms * 0.001 * sample_rate.max(1.0)) as usize).max(1);
+        } else {
+            self.glitch_counter[index] -= 1;
+        }
+        let target = if self.glitch_open[index] { 1.0 } else { 0.15 };
+        let alpha = one_pole_alpha(380.0, sample_rate);
+        self.glitch_gate[index] += alpha * (target - self.glitch_gate[index]);
+        self.glitch_gate[index] = sanitize_sample(self.glitch_gate[index]).clamp(0.0, 1.0);
+        self.glitch_gate[index]
+    }
+
+    /// Digital/network artifact: sample-rate reduction (sample & hold) followed by
+    /// bitcrush quantisation. `amount` lengthens the hold; `degrade` lowers the
+    /// bit depth. The trailing damp LP smooths the stair-steps so it stays musical.
+    fn next_digital(&mut self, channel: usize, sample: f32, amount: f32, degrade: f32) -> f32 {
+        let index = channel.min(MAX_CHANNELS - 1);
+        let amount = amount.clamp(0.0, 1.0);
+        let degrade = degrade.clamp(0.0, 1.0);
+        let hold = (1.0 + amount * 9.0 + degrade * 5.0) as usize;
+        if self.sh_counter[index] == 0 {
+            self.sh_hold[index] = sanitize_sample(sample);
+            self.sh_counter[index] = hold.max(1);
+        } else {
+            self.sh_counter[index] -= 1;
+        }
+        let held = self.sh_hold[index];
+        let levels = (2.0 + (1.0 - degrade) * 62.0).max(2.0);
+        sanitize_sample((held * levels).round() / levels)
     }
 
     /// Tempo-locked pulse envelope (0..1) that swells once per division — a
@@ -1301,6 +1386,17 @@ fn interference_parasite_frequency_hz(
     }
 
     frequency.clamp(45.0, fold_limit)
+}
+
+/// Crossfade weights for the three interference flavors as `amount` sweeps:
+/// static (0..0.5) → glitch (peak 0.5) → digital (0.5..1).
+#[inline]
+fn interference_flavor_weights(amount: f32) -> (f32, f32, f32) {
+    let a = amount.clamp(0.0, 1.0);
+    let static_w = (1.0 - a * 2.0).clamp(0.0, 1.0);
+    let digital_w = ((a - 0.5) * 2.0).clamp(0.0, 1.0);
+    let glitch_w = (1.0 - (2.0 * a - 1.0).abs()).clamp(0.0, 1.0);
+    (static_w, glitch_w, digital_w)
 }
 
 #[inline]
@@ -2431,6 +2527,76 @@ mod tests {
         assert!(
             mono_rms > 0.02,
             "interference must stay mono-compatible (mono rms={mono_rms})"
+        );
+    }
+
+    #[test]
+    fn interference_amount_sweep_has_no_spike() {
+        // Sweeping AMOUNT morphs static → glitch → digital; the crossover and the
+        // bitcrush/SR steps must stay smooth (no spikes) thanks to the damp LP.
+        let mut texture = Texture::default();
+        texture.prepare(48_000.0);
+        let mut frame = interference_frame(0.4, 0.0, 0.5, 0.5, 0.6);
+        let mut phase = 0.0_f32;
+        let mut prev = 0.0_f32;
+        let mut max_step = 0.0_f32;
+        for index in 0..96_000 {
+            phase += 220.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            frame.noise_amount = (index as f32 / 96_000.0).clamp(0.0, 1.0);
+            let out = texture.process_sample_for_channel(
+                0,
+                (phase * core::f32::consts::TAU).sin() * 0.3,
+                &frame,
+            );
+            assert!(
+                out.is_finite() && out.abs() <= 8.0,
+                "interference sweep unsafe"
+            );
+            if index > 2_000 {
+                max_step = max_step.max((out - prev).abs());
+            }
+            prev = out;
+        }
+        assert!(
+            max_step < 0.4,
+            "interference amount sweep produced a spike: {max_step}"
+        );
+    }
+
+    #[test]
+    fn interference_flavors_change_with_amount() {
+        // Low amount (radio static, near-dry) and high amount (digital bitcrush)
+        // must produce audibly different processing of the same input.
+        let mut static_t = Texture::default();
+        let mut digital_t = Texture::default();
+        static_t.prepare(48_000.0);
+        digital_t.prepare(48_000.0);
+        let static_f = interference_frame(0.2, 0.12, 0.5, 0.6, 0.4);
+        let digital_f = interference_frame(0.2, 0.92, 0.5, 0.6, 0.4);
+        let mut phase = 0.0_f32;
+        let mut diff = 0.0_f64;
+        let mut count = 0.0_f64;
+        for index in 0..24_000 {
+            phase += 330.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let input = (phase * core::f32::consts::TAU).sin() * 0.3;
+            let s = static_t.process_sample_for_channel(0, input, &static_f);
+            let d = digital_t.process_sample_for_channel(0, input, &digital_f);
+            assert!(s.is_finite() && d.is_finite());
+            if index > 8_000 {
+                diff += ((s - d) as f64).powi(2);
+                count += 1.0;
+            }
+        }
+        let diff_rms = (diff / count).sqrt() as f32;
+        assert!(
+            diff_rms > 0.01,
+            "interference flavors should morph with amount (diff rms={diff_rms})"
         );
     }
 

@@ -8,17 +8,14 @@ use nih_plug_egui::{
 
 use crate::{meters::Meters, params::Cc22Params, Cc22};
 
-mod eq_view;
 mod meters;
 pub(crate) mod module_card;
 mod preset_bar;
 mod signal_flow;
-mod spectrum;
 mod theme;
 mod top_bar;
 mod widgets;
 
-use eq_view::eq_workbench;
 use meters::UiState;
 use module_card::center_modules;
 use preset_bar::bottom_macro_row;
@@ -47,7 +44,7 @@ pub fn create_editor(
             style.visuals.widgets.inactive.bg_fill = theme.paper;
             style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(250, 246, 235);
             style.visuals.widgets.active.bg_fill = Color32::from_rgb(226, 220, 207);
-            style.visuals.selection.bg_fill = Color32::from_rgb(39, 40, 43);
+            style.visuals.selection.bg_fill = Color32::from_rgb(237, 27, 47);
             style.visuals.override_text_color = Some(theme.text_dark);
             ctx.set_style(style);
         },
@@ -65,30 +62,16 @@ pub fn create_editor(
                         .fill(theme.background)
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
+                            let outer = ui.max_rect();
+                            ui.painter().rect_filled(
+                                outer,
+                                egui::CornerRadius::ZERO,
+                                theme.background,
+                            );
                             ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 8.0;
+                                ui.spacing_mut().item_spacing.y = 10.0;
                                 top_bar(ui, setter, state, &params, colors, theme, now);
                                 center_modules(ui, setter, state, &params, look);
-                                let eq_width = ui.available_width();
-                                state.spectrum.update(
-                                    &meters,
-                                    eq_view::EQ_DISPLAY_MIN_HZ,
-                                    eq_view::EQ_DISPLAY_MAX_HZ,
-                                );
-                                let spectrum_columns = *state.spectrum.columns();
-                                eq_workbench(
-                                    ui,
-                                    setter,
-                                    &params,
-                                    &mut state.selected_eq_target,
-                                    &mut state.selected_eq_position,
-                                    &mut state.selected_eq_band,
-                                    &mut state.eq_advanced_open,
-                                    &spectrum_columns,
-                                    colors,
-                                    theme,
-                                    eq_width,
-                                );
                                 bottom_macro_row(
                                     ui,
                                     setter,

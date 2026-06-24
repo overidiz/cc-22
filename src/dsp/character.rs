@@ -63,6 +63,8 @@ pub struct Character {
     drive_dc_state: [f32; MAX_CHANNELS],
     drive_hp_state: [f32; MAX_CHANNELS],
     drive_hf_state: [f32; MAX_CHANNELS],
+    // Previous waveshaper input, for the light 2× oversampled saturators.
+    drive_os_state: [f32; MAX_CHANNELS],
     sweet_dc_state: [f32; MAX_CHANNELS],
     sweet_exciter_state: [f32; MAX_CHANNELS],
     sweet_air_state: [f32; MAX_CHANNELS],
@@ -70,6 +72,7 @@ pub struct Character {
     fuzz_tone_state: [f32; MAX_CHANNELS],
     fuzz_hp_state: [f32; MAX_CHANNELS],
     fuzz_body_state: [f32; MAX_CHANNELS],
+    fuzz_os_state: [f32; MAX_CHANNELS],
     howl_input_hp_state: [f32; MAX_CHANNELS],
     howl_body_lp_state: [f32; MAX_CHANNELS],
     howl_formant1_lp_state: [f32; MAX_CHANNELS],
@@ -77,12 +80,19 @@ pub struct Character {
     howl_formant2_lp_state: [f32; MAX_CHANNELS],
     howl_formant2_bp_state: [f32; MAX_CHANNELS],
     howl_damping_state: [f32; MAX_CHANNELS],
+    howl_dc_state: [f32; MAX_CHANNELS],
+    howl_fast_env_state: [f32; MAX_CHANNELS],
+    howl_slow_env_state: [f32; MAX_CHANNELS],
+    howl_res_energy_state: [f32; MAX_CHANNELS],
     swell_fast_env_state: [f32; MAX_CHANNELS],
     swell_slow_env_state: [f32; MAX_CHANNELS],
-    swell_phase_state: [f32; MAX_CHANNELS],
-    swell_gain_state: [f32; MAX_CHANNELS],
-    swell_cooldown_samples: [usize; MAX_CHANNELS],
-    swell_open_state: [bool; MAX_CHANNELS],
+    // Swell gain is stereo-linked: one shared envelope drives both channels so
+    // the stereo image never wobbles. Detection envelopes stay per-channel and
+    // are combined with max() before driving this shared state.
+    swell_phase: f32,
+    swell_gain: f32,
+    swell_cooldown: usize,
+    swell_open: bool,
     swell_tone_state: [f32; MAX_CHANNELS],
     current_mode: CharacterMode,
     mode_crossfade: LinearSmoother,
@@ -113,6 +123,7 @@ impl Default for Character {
             drive_dc_state: [0.0; MAX_CHANNELS],
             drive_hp_state: [0.0; MAX_CHANNELS],
             drive_hf_state: [0.0; MAX_CHANNELS],
+            drive_os_state: [0.0; MAX_CHANNELS],
             sweet_dc_state: [0.0; MAX_CHANNELS],
             sweet_exciter_state: [0.0; MAX_CHANNELS],
             sweet_air_state: [0.0; MAX_CHANNELS],
@@ -120,6 +131,7 @@ impl Default for Character {
             fuzz_tone_state: [0.0; MAX_CHANNELS],
             fuzz_hp_state: [0.0; MAX_CHANNELS],
             fuzz_body_state: [0.0; MAX_CHANNELS],
+            fuzz_os_state: [0.0; MAX_CHANNELS],
             howl_input_hp_state: [0.0; MAX_CHANNELS],
             howl_body_lp_state: [0.0; MAX_CHANNELS],
             howl_formant1_lp_state: [0.0; MAX_CHANNELS],
@@ -127,12 +139,16 @@ impl Default for Character {
             howl_formant2_lp_state: [0.0; MAX_CHANNELS],
             howl_formant2_bp_state: [0.0; MAX_CHANNELS],
             howl_damping_state: [0.0; MAX_CHANNELS],
+            howl_dc_state: [0.0; MAX_CHANNELS],
+            howl_fast_env_state: [0.0; MAX_CHANNELS],
+            howl_slow_env_state: [0.0; MAX_CHANNELS],
+            howl_res_energy_state: [0.0; MAX_CHANNELS],
             swell_fast_env_state: [0.0; MAX_CHANNELS],
             swell_slow_env_state: [0.0; MAX_CHANNELS],
-            swell_phase_state: [0.0; MAX_CHANNELS],
-            swell_gain_state: [0.0; MAX_CHANNELS],
-            swell_cooldown_samples: [0; MAX_CHANNELS],
-            swell_open_state: [false; MAX_CHANNELS],
+            swell_phase: 0.0,
+            swell_gain: 0.0,
+            swell_cooldown: 0,
+            swell_open: false,
             swell_tone_state: [0.0; MAX_CHANNELS],
             current_mode: CharacterMode::Drive,
             mode_crossfade: LinearSmoother::new(25.0, 1.0),
@@ -156,6 +172,7 @@ impl Character {
         self.drive_dc_state = [0.0; MAX_CHANNELS];
         self.drive_hp_state = [0.0; MAX_CHANNELS];
         self.drive_hf_state = [0.0; MAX_CHANNELS];
+        self.drive_os_state = [0.0; MAX_CHANNELS];
         self.sweet_dc_state = [0.0; MAX_CHANNELS];
         self.sweet_exciter_state = [0.0; MAX_CHANNELS];
         self.sweet_air_state = [0.0; MAX_CHANNELS];
@@ -163,6 +180,7 @@ impl Character {
         self.fuzz_tone_state = [0.0; MAX_CHANNELS];
         self.fuzz_hp_state = [0.0; MAX_CHANNELS];
         self.fuzz_body_state = [0.0; MAX_CHANNELS];
+        self.fuzz_os_state = [0.0; MAX_CHANNELS];
         self.howl_input_hp_state = [0.0; MAX_CHANNELS];
         self.howl_body_lp_state = [0.0; MAX_CHANNELS];
         self.howl_formant1_lp_state = [0.0; MAX_CHANNELS];
@@ -170,12 +188,16 @@ impl Character {
         self.howl_formant2_lp_state = [0.0; MAX_CHANNELS];
         self.howl_formant2_bp_state = [0.0; MAX_CHANNELS];
         self.howl_damping_state = [0.0; MAX_CHANNELS];
+        self.howl_dc_state = [0.0; MAX_CHANNELS];
+        self.howl_fast_env_state = [0.0; MAX_CHANNELS];
+        self.howl_slow_env_state = [0.0; MAX_CHANNELS];
+        self.howl_res_energy_state = [0.0; MAX_CHANNELS];
         self.swell_fast_env_state = [0.0; MAX_CHANNELS];
         self.swell_slow_env_state = [0.0; MAX_CHANNELS];
-        self.swell_phase_state = [0.0; MAX_CHANNELS];
-        self.swell_gain_state = [0.0; MAX_CHANNELS];
-        self.swell_cooldown_samples = [0; MAX_CHANNELS];
-        self.swell_open_state = [false; MAX_CHANNELS];
+        self.swell_phase = 0.0;
+        self.swell_gain = 0.0;
+        self.swell_cooldown = 0;
+        self.swell_open = false;
         self.swell_tone_state = [0.0; MAX_CHANNELS];
         self.mode_crossfade.reset(1.0);
         self.last_output = [0.0; MAX_CHANNELS];
@@ -293,15 +315,17 @@ impl Character {
         let drive_gain = drive_to_gain(drive);
         let bias = drive * drive * 0.011;
         let driven = sanitize_sample((conditioned + bias) * drive_gain);
-        let pre = fast_tanh(driven * 0.7);
 
-        // Stage 3: Controlled asymmetry (even harmonics = warmth/body) feeding
-        // the main soft-clip waveshaper.
+        // Stage 3: Controlled asymmetry (even harmonics = warmth/body) feeding the
+        // main soft-clip waveshaper. The whole pre-shape → asymmetry → soft-clip
+        // chain runs through a light 2× oversampler so a hot, bright Drive stays
+        // smooth instead of fizzing with foldback aliasing.
         let asymmetry = drive * 0.19;
-        let pos = pre.max(0.0);
-        let neg = pre.min(0.0);
-        let shaped = pos * (1.0 + asymmetry) + neg;
-        let saturated = fast_tanh(shaped);
+        let saturated = shape_2x(&mut self.drive_os_state[index], driven, |x| {
+            let pre = fast_tanh(x * 0.7);
+            let shaped = pre.max(0.0) * (1.0 + asymmetry) + pre.min(0.0);
+            fast_tanh(shaped)
+        });
 
         // Stage 4: Anti-fizz post damping. A drive-dependent one-pole low-pass
         // pulls the corner down as drive rises, so harder settings stay warm and
@@ -361,8 +385,10 @@ impl Character {
                 + exciter_alpha * (saturated - self.sweet_exciter_state[index]),
         );
         let highs = saturated - self.sweet_exciter_state[index];
-        let exciter_amount = (tone * tone * 0.42).min(0.42);
-        let harmonics = soft_saturate(highs, 1.0 + drive * 1.2);
+        // Gentler than before: a lower ceiling and softer harmonic drive keep the
+        // sheen silky on piano/vocal/drums instead of a brittle "cheap exciter".
+        let exciter_amount = (tone * tone * 0.32).min(0.32);
+        let harmonics = soft_saturate(highs, 1.0 + drive * 0.8);
         let excited = sanitize_sample(saturated + harmonics * exciter_amount);
 
         // Stage 4: Body preservation. The exciter only adds the high band, so the
@@ -417,18 +443,16 @@ impl Character {
         // Stage 3: Pre-gain safety clamp before the waveshaper.
         let limited = (bodied * drive_gain).clamp(-8.0, 8.0);
 
-        // Stage 4: Musical asymmetry — thick, dense, even-harmonic saturation.
+        // Stages 4–5: Musical asymmetry + combined hard/soft multi-stage
+        // waveshaping (the tanh blend keeps the clip off a brickwall, softening
+        // ugly digital foldover). The whole nonlinear core runs through a light 2×
+        // oversampler so the huge fuzz gain doesn't splatter obvious aliasing.
         let asymmetry = drive * 0.35;
-        let pos = limited.max(0.0);
-        let neg = limited.min(0.0);
-        let biased = pos * (1.0 + asymmetry) + neg;
-
-        // Stage 5: Combined hard/soft, multi-stage waveshaping. The tanh blend
-        // keeps the clip from being a brickwall, which softens ugly digital
-        // foldover; each stage is bounded.
-        let stage1 = fuzz_hard_clip(biased, drive);
-        let stage2 = fast_tanh(stage1 * (1.0 + drive * 0.6));
-        let saturated = sanitize_sample(stage2);
+        let saturated = sanitize_sample(shape_2x(&mut self.fuzz_os_state[index], limited, |x| {
+            let biased = x.max(0.0) * (1.0 + asymmetry) + x.min(0.0);
+            let stage1 = fuzz_hard_clip(biased, drive);
+            fast_tanh(stage1 * (1.0 + drive * 0.6))
+        }));
 
         // Stage 6: DC blocker — mandatory right after the asymmetry stage.
         let dc_free = sanitize_sample(dc_blocker_step(
@@ -454,135 +478,202 @@ impl Character {
         soft_clip_sample(compensated)
     }
 
+    /// Howl — a resonant filter-fuzz. Two parallel paths (a body path that keeps
+    /// the instrument's weight and a resonant fuzz path built on two formant
+    /// resonators) are blended, with a signal-driven dynamic resonance limiter
+    /// that stops the formants from tipping into a whistle. Transients gently
+    /// open the formants for synth-like stabs, while sustain keeps them stable.
     fn process_howl(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
         let tone = frame.tone;
         let drive = frame.drive;
         let sample_rate = self.sample_rate.max(1.0);
 
-        let hp_cutoff = 40.0 + drive * 30.0;
+        // ── 1. Input conditioning: DC blocker + subsonic high-pass ──────────
+        let dc_free = sanitize_sample(dc_blocker_step(
+            &mut self.howl_dc_state[index],
+            sample,
+            0.9992,
+        ));
+        let hp_cutoff = 28.0 + drive * 10.0;
         let hp_alpha = one_pole_alpha(hp_cutoff, sample_rate);
-        let input_hp =
-            self.howl_input_hp_state[index] + hp_alpha * (sample - self.howl_input_hp_state[index]);
-        self.howl_input_hp_state[index] = sanitize_sample(input_hp);
-        let conditioned = sanitize_sample(sample - input_hp);
+        self.howl_input_hp_state[index] = sanitize_sample(
+            self.howl_input_hp_state[index]
+                + hp_alpha * (dc_free - self.howl_input_hp_state[index]),
+        );
+        let conditioned = sanitize_sample(dc_free - self.howl_input_hp_state[index]);
 
-        let drive_gain = 1.0 + drive * 1.5;
-        let saturated = fast_tanh(conditioned * drive_gain);
+        // ── 2. Envelope follower: transients briefly open the formants ──────
+        let abs_in = conditioned.abs();
+        let fast_alpha = envelope_alpha(0.003, sample_rate);
+        let slow_alpha = envelope_alpha(0.060, sample_rate);
+        self.howl_fast_env_state[index] = sanitize_sample(
+            self.howl_fast_env_state[index]
+                + fast_alpha * (abs_in - self.howl_fast_env_state[index]),
+        );
+        self.howl_slow_env_state[index] = sanitize_sample(
+            self.howl_slow_env_state[index]
+                + slow_alpha * (abs_in - self.howl_slow_env_state[index]),
+        );
+        let transient =
+            (self.howl_fast_env_state[index] - self.howl_slow_env_state[index]).max(0.0);
+        let transient_open = (transient * 6.0).clamp(0.0, 1.0);
 
-        let body_cutoff = (250.0 + tone * 50.0 + drive * 30.0).clamp(250.0, 360.0);
+        // ── 3. Resonant filter-fuzz drive: staged asymmetric soft saturation.
+        // Subtle growl when low, dense synth-stab fuzz when high; no dry hard
+        // clip — every stage is tanh-bounded. ──────────────────────────────
+        let drive_gain = 1.0 + drive * drive * 6.0;
+        let asymmetry = drive * 0.18;
+        let pushed = conditioned * drive_gain;
+        let shaped = pushed.max(0.0) * (1.0 + asymmetry) + pushed.min(0.0);
+        let stage1 = fast_tanh(shaped);
+        let fuzz = sanitize_sample(fast_tanh(stage1 * (1.0 + drive * 0.9)));
+
+        // ── 4a. Body path: a lightly saturated low/low-mid band of the clean
+        // input, so the wet always keeps real instrument weight. ────────────
+        let body_cutoff = (700.0 + tone * 500.0).clamp(400.0, 1_400.0);
         let body_alpha = one_pole_alpha(body_cutoff, sample_rate);
-        let body_lp = self.howl_body_lp_state[index]
-            + body_alpha * (saturated - self.howl_body_lp_state[index]);
-        self.howl_body_lp_state[index] = sanitize_sample(body_lp);
+        self.howl_body_lp_state[index] = sanitize_sample(
+            self.howl_body_lp_state[index]
+                + body_alpha * (conditioned - self.howl_body_lp_state[index]),
+        );
+        let body = sanitize_sample(soft_saturate(
+            self.howl_body_lp_state[index],
+            1.0 + drive * 0.5,
+        ));
 
-        let f1 = howl_formant1_frequency(tone);
-        let f2 = howl_formant2_frequency(f1, tone, drive);
-        let q = howl_q(drive, tone);
+        // ── 4b. Resonant path: dual formants, transient-opened, capped so the
+        // upper formant never reaches a piercing whistle band. ──────────────
+        let open = 1.0 + transient_open * 0.25;
+        let f1 = (howl_formant1_frequency(tone) * open).clamp(120.0, 1_900.0);
+        let f2 = (howl_formant2_frequency(f1, tone) * open).clamp(300.0, 3_600.0);
+        let q = howl_q(drive, tone) * (1.0 - transient_open * 0.30);
 
-        // Dual formant resonators. The lowpass output of each is used (never a
-        // bare bandpass), so the formants read as vowels with body rather than
-        // as thin peaks.
-        let (f1_out, _) = howl_resonator_step(
-            saturated,
+        let r1 = howl_resonator_step(
+            fuzz,
             f1,
             q,
             sample_rate,
             &mut self.howl_formant1_lp_state[index],
             &mut self.howl_formant1_bp_state[index],
         );
-        let (f2_out, _) = howl_resonator_step(
-            saturated,
+        let r2 = howl_resonator_step(
+            fuzz,
             f2,
-            q * 0.75,
+            q * 0.70,
             sample_rate,
             &mut self.howl_formant2_lp_state[index],
             &mut self.howl_formant2_bp_state[index],
         );
+        let balance = 0.30 + tone * 0.10;
+        let resonant = sanitize_sample(r1 * (1.0 - balance) + r2 * balance);
+        // Filter-fuzz colour: saturate the resonance itself for vocal growl.
+        let resonant = sanitize_sample(fast_tanh(resonant * (1.0 + drive * 1.1)));
 
-        let formant_balance = 0.35 + tone * 0.08;
-        let formant_mix =
-            sanitize_sample(f1_out * (1.0 - formant_balance) + f2_out * formant_balance);
+        // ── 5. Dynamic resonance limiter (the real anti-whistle). Fast attack /
+        // slow release energy follower pulls resonance gain down when it builds
+        // toward a whistle, then recovers smoothly — reacts to chords too. ──
+        let target = resonant.abs();
+        let er = self.howl_res_energy_state[index];
+        let er_alpha = if target > er { 0.35 } else { 0.005 };
+        self.howl_res_energy_state[index] = sanitize_sample(er + (target - er) * er_alpha);
+        let over = (self.howl_res_energy_state[index] - 0.42).max(0.0);
+        let resonance_gain = (1.0 / (1.0 + over * 5.0)).clamp(0.25, 1.0);
+        let limited = soft_clip_sample(resonant * resonance_gain);
 
-        // Limited resonance: the formant contribution is scaled back a touch as
-        // tone rises so a bright vowel never tips into a whistle, then soft
-        // clipped so the peak can't run away.
-        let formant_limited = soft_clip_sample(formant_mix * (0.72 - tone * 0.08));
-
+        // ── 6. Tone damping: opens with tone, ceiling ~6 kHz. ───────────────
         let damping_hz = howl_output_damping(tone);
         let damping_alpha = one_pole_alpha(damping_hz, sample_rate);
-        let damped = self.howl_damping_state[index]
-            + damping_alpha * (formant_limited - self.howl_damping_state[index]);
-        self.howl_damping_state[index] = sanitize_sample(damped);
+        self.howl_damping_state[index] = sanitize_sample(
+            self.howl_damping_state[index]
+                + damping_alpha * (limited - self.howl_damping_state[index]),
+        );
+        let damped = self.howl_damping_state[index];
 
+        // ── 7. Body blend: 25–40 % body always present (never goes thin). ───
         let body_mix = howl_body_mix(drive);
-        let voiced = sanitize_sample(body_lp * body_mix + damped * (1.0 - body_mix));
+        let voiced = sanitize_sample(body * body_mix + damped * (1.0 - body_mix));
 
-        let compensation = howl_gain_compensation(drive, q);
-        let compensated = sanitize_sample(voiced * compensation);
-
+        // ── 8. Gain compensation + safety soft clip. ────────────────────────
+        let compensated = sanitize_sample(voiced * howl_gain_compensation(drive, q));
         soft_clip_sample(compensated)
     }
 
+    /// Swell — an envelope-triggered volume swell. Amount (Drive) sets the
+    /// attack/decay length; Sensitivity (Tone) sets the onset threshold. The
+    /// detection envelopes are per-channel but combined with max(), and the
+    /// resulting gain is shared across channels so the stereo image stays put.
     fn process_swell(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
-        let drive = frame.drive;
-        let tone = frame.tone;
         let sample_rate = self.sample_rate.max(1.0);
+        let amount = frame.drive.clamp(0.0, 1.0);
+        let sensitivity = frame.tone.clamp(0.0, 1.0);
         let abs_in = sample.abs();
 
-        let fast_alpha = envelope_alpha(0.0025, sample_rate);
-        let slow_alpha = envelope_alpha(0.085 + drive * 0.080, sample_rate);
-        let fast_env = self.swell_fast_env_state[index]
-            + fast_alpha * (abs_in - self.swell_fast_env_state[index]);
-        let slow_env = self.swell_slow_env_state[index]
-            + slow_alpha * (abs_in - self.swell_slow_env_state[index]);
-        self.swell_fast_env_state[index] = sanitize_sample(fast_env);
-        self.swell_slow_env_state[index] = sanitize_sample(slow_env);
-
-        let cooldown = self.swell_cooldown_samples[index];
-        let signal_floor = 0.0018 + drive * 0.0012;
-        if fast_env < signal_floor * 0.75 {
-            self.swell_open_state[index] = false;
-            self.swell_phase_state[index] = 0.0;
-        }
-
-        let can_retrigger =
-            self.swell_open_state[index] || self.swell_phase_state[index] <= 0.000_1;
-        if can_retrigger
-            && swell_onset_detect(fast_env, slow_env, drive)
-            && cooldown == 0
-            && slow_env > signal_floor
-        {
-            self.swell_phase_state[index] = 0.0;
-            self.swell_open_state[index] = false;
-            self.swell_cooldown_samples[index] =
-                ((0.045 + drive * 0.065) * sample_rate).round() as usize;
-        } else if cooldown > 0 {
-            self.swell_cooldown_samples[index] = cooldown - 1;
-        }
-
-        let gain = swell_envelope_step(
-            drive,
-            slow_env,
-            signal_floor,
-            sample_rate,
-            swell_attack_time(drive),
-            &mut self.swell_phase_state[index],
-            &mut self.swell_gain_state[index],
-            &mut self.swell_open_state[index],
+        // Per-channel detection envelopes (fast ~2 ms, slow ~50 ms).
+        let fast_alpha = envelope_alpha(0.002, sample_rate);
+        let slow_alpha = envelope_alpha(0.050, sample_rate);
+        self.swell_fast_env_state[index] = sanitize_sample(
+            self.swell_fast_env_state[index]
+                + fast_alpha * (abs_in - self.swell_fast_env_state[index]),
+        );
+        self.swell_slow_env_state[index] = sanitize_sample(
+            self.swell_slow_env_state[index]
+                + slow_alpha * (abs_in - self.swell_slow_env_state[index]),
         );
 
-        let phase_open = smoothstep(self.swell_phase_state[index]);
-        let depth = ((0.45 + drive.powf(1.4) * 0.50) * (1.0 - phase_open * 0.28)).clamp(0.32, 0.95);
-        let shaped_gain = (1.0 - depth) + gain * depth;
-        let wet = sanitize_sample(swell_bloom_level(sample, slow_env, drive) * shaped_gain);
+        // Advance the SHARED swell envelope once per frame (on the first
+        // channel), driven by the louder of the two channels. This keeps one
+        // gain for both sides so the image never wobbles.
+        if index == 0 {
+            let fast_env = self.swell_fast_env_state[0].max(self.swell_fast_env_state[1]);
+            let slow_env = self.swell_slow_env_state[0].max(self.swell_slow_env_state[1]);
+            let signal_floor = swell_signal_floor(sensitivity);
 
-        let lpf_alpha = swell_tone_alpha(tone, sample_rate);
-        let toned = self.swell_tone_state[index] + lpf_alpha * (wet - self.swell_tone_state[index]);
-        self.swell_tone_state[index] = sanitize_sample(toned);
+            // Gate floor with hysteresis: drop below and the swell re-arms.
+            if fast_env < signal_floor * 0.6 {
+                self.swell_open = false;
+                self.swell_phase = 0.0;
+            }
 
-        soft_clip_sample(toned)
+            let can_retrigger = self.swell_open || self.swell_phase <= 0.000_1;
+            if can_retrigger
+                && swell_onset_detect(fast_env, slow_env, sensitivity)
+                && self.swell_cooldown == 0
+                && slow_env > signal_floor
+            {
+                self.swell_phase = 0.0;
+                self.swell_open = false;
+                self.swell_cooldown = (swell_cooldown_time(amount) * sample_rate).round() as usize;
+            } else if self.swell_cooldown > 0 {
+                self.swell_cooldown -= 1;
+            }
+
+            swell_envelope_step(
+                amount,
+                slow_env,
+                signal_floor,
+                sample_rate,
+                swell_attack_time(amount),
+                &mut self.swell_phase,
+                &mut self.swell_gain,
+                &mut self.swell_open,
+            );
+        }
+
+        // Deep swell: the floor is low so the attack is genuinely removed, and a
+        // fully-open envelope passes the sustain at unity. Amount deepens it.
+        let depth = (0.80 + amount * 0.16).clamp(0.80, 0.96);
+        let shaped_gain = (1.0 - depth) + self.swell_gain * depth;
+        let wet = sanitize_sample(sample * shaped_gain);
+
+        // Gentle softening (longer swells a touch darker). Per-channel filter,
+        // one shared gain → stable image, no phase inversion.
+        let lpf_alpha = swell_tone_alpha(amount, sample_rate);
+        self.swell_tone_state[index] = sanitize_sample(
+            self.swell_tone_state[index] + lpf_alpha * (wet - self.swell_tone_state[index]),
+        );
+        soft_clip_sample(self.swell_tone_state[index])
     }
     fn apply_tone(&mut self, channel: usize, sample: f32, frame: &CharacterFrame) -> f32 {
         let index = channel.min(MAX_CHANNELS - 1);
@@ -676,49 +767,49 @@ fn fuzz_compensation(drive: f32) -> f32 {
 
 #[inline]
 fn howl_formant1_frequency(tone: f32) -> f32 {
-    // Vowel-like first formant, kept in a musical 180–1800 Hz range.
+    // Vowel-like first formant, kept in a musical 180–1500 Hz range.
     let tone = tone.clamp(0.0, 1.0);
-    180.0 + tone * 1_620.0
+    180.0 + tone * 1_320.0
 }
 
 #[inline]
-fn howl_formant2_frequency(f1: f32, tone: f32, drive: f32) -> f32 {
-    // Second formant a musical 1.45–2.2× above the first, capped at ~4.2 kHz so
+fn howl_formant2_frequency(f1: f32, tone: f32) -> f32 {
+    // Second formant a musical 1.45–1.85× above the first, capped at ~3.6 kHz so
     // it opens the vowel without ever reaching a piercing whistle band.
     let tone = tone.clamp(0.0, 1.0);
-    let drive = drive.clamp(0.0, 1.0);
-    let ratio = (1.45 + tone * 0.45 + drive * 0.15).clamp(1.45, 2.2);
-    (f1 * ratio).clamp(300.0, 4_200.0)
+    let ratio = (1.45 + tone * 0.40).clamp(1.45, 1.85);
+    (f1 * ratio).clamp(300.0, 3_600.0)
 }
 
 #[inline]
 fn howl_q(drive: f32, tone: f32) -> f32 {
     // Resonance grows with drive but is *pulled back* as tone (brightness)
-    // rises — high formants at high Q are exactly what turns into a whistle, so
-    // bright settings trade some Q for musicality. Capped well below self-osc.
+    // rises — high formants at high Q are what turn into a whistle, so bright
+    // settings trade some Q for musicality. Hard-capped at 4.0 (self-osc safe).
     let drive = drive.clamp(0.0, 1.0);
     let tone = tone.clamp(0.0, 1.0);
-    safe_q(
-        (0.65 + drive.powf(1.2) * 2.45) * (1.0 - tone * 0.20),
-        0.6,
-        3.2,
-    )
+    safe_q((0.8 + drive.powi(2) * 3.0) * (1.0 - tone * 0.18), 0.8, 4.0)
 }
 
 #[inline]
 fn howl_body_mix(drive: f32) -> f32 {
-    // 20–40 % clean low body preserved in the wet so it never sounds like a
-    // bare resonator.
-    (0.40 - drive.clamp(0.0, 1.0) * 0.18).clamp(0.20, 0.40)
+    // 25–40 % clean body preserved in the wet so it never sounds like a bare
+    // resonator. Drops a little at high drive but never disappears.
+    (0.40 - drive.clamp(0.0, 1.0) * 0.15).clamp(0.25, 0.40)
 }
 
 #[inline]
 fn howl_gain_compensation(drive: f32, q: f32) -> f32 {
     let drive = drive.clamp(0.0, 1.0);
-    let base = 1.0 / (1.0 + drive * 2.0 + q * 0.10);
-    (base * (1.0 + drive * 0.25)).clamp(0.20, 0.92)
+    let base = 1.0 / (1.0 + drive * 1.5 + q * 0.08);
+    (base * (1.0 + drive * 0.20)).clamp(0.20, 1.0)
 }
 
+/// One step of a Chamberlin state-variable resonator, returning the bandpass
+/// (resonant) output. Damping comes straight from Q, and only the bandpass
+/// state is soft-clipped — the integrators stay linear so the formant stays in
+/// tune, while the soft clip + finite Q + the caller's energy limiter keep it
+/// from running away or self-oscillating on silence.
 #[inline]
 fn howl_resonator_step(
     input: f32,
@@ -727,50 +818,68 @@ fn howl_resonator_step(
     sample_rate: f32,
     lp_state: &mut f32,
     bp_state: &mut f32,
-) -> (f32, f32) {
-    let freq = safe_frequency(frequency_hz, 40.0, sample_rate.max(1.0) * 0.40);
-    let f = (2.0 * (core::f32::consts::PI * freq / sample_rate.max(1.0)).sin()).clamp(0.0005, 0.82);
-    let q_safe = safe_q(q, 0.5, 3.80);
-    let damping = (1.0 / q_safe + 0.015).clamp(0.24, 1.0);
+) -> f32 {
+    let freq = safe_frequency(frequency_hz, 40.0, sample_rate.max(1.0) * 0.45);
+    let f = (2.0 * (core::f32::consts::PI * freq / sample_rate.max(1.0)).sin()).clamp(0.0005, 0.95);
+    let q_safe = safe_q(q, 0.5, 4.0);
+    let damping = (1.0 / q_safe).clamp(0.20, 2.0);
 
     let high = sanitize_sample(input - *lp_state - damping * *bp_state);
-    let band = sanitize_sample(fast_tanh((*bp_state + f * high) * 0.70));
-    let low = sanitize_sample(fast_tanh((*lp_state + f * band) * 0.70));
+    let band = sanitize_sample(soft_clip_sample(*bp_state + f * high));
+    let low = sanitize_sample(*lp_state + f * band);
     *bp_state = band;
     *lp_state = low;
-
-    let lp_out = soft_clip_sample(low * (0.47 + q * 0.035));
-    let bp_out = soft_clip_sample(band);
-    (lp_out, bp_out)
+    band
 }
 
 #[inline]
 fn howl_output_damping(tone: f32) -> f32 {
-    // Output damping opens with tone for brightness, but its ceiling is held at
-    // ~6.1 kHz (was 9.4 kHz) so the resonant top never becomes a thin whistle.
+    // Output damping opens with tone for brightness, with a ~6 kHz ceiling so
+    // the resonant top never becomes a thin whistle.
     let tone = tone.clamp(0.0, 1.0);
-    (1_800.0 + tone * 4_300.0).clamp(1_800.0, 6_100.0)
+    (2_000.0 + tone * 4_000.0).clamp(2_000.0, 6_000.0)
 }
 
 #[inline]
-fn swell_attack_time(drive: f32) -> f32 {
-    let drive = drive.clamp(0.0, 1.0);
-    (0.014 + drive.powf(1.55) * 0.42).clamp(0.014, 0.44)
+fn swell_attack_time(amount: f32) -> f32 {
+    // Amount sets the swell length. Quadratic so the low half stays short/snappy
+    // (guitar) and only the top reaches long, cinematic swells (~0.85 s).
+    let amount = amount.clamp(0.0, 1.0);
+    (0.012 + amount * amount * 0.84).clamp(0.012, 0.86)
 }
 
 #[inline]
-fn swell_onset_detect(fast_env: f32, slow_env: f32, drive: f32) -> bool {
-    let drive = drive.clamp(0.0, 1.0);
+fn swell_cooldown_time(amount: f32) -> f32 {
+    // Adaptive retrigger lockout: 30 ms for fast phrases, up to 150 ms for the
+    // longer/cinematic settings so a long swell isn't chopped by its own tail.
+    let amount = amount.clamp(0.0, 1.0);
+    0.030 + amount * 0.120
+}
+
+#[inline]
+fn swell_signal_floor(sensitivity: f32) -> f32 {
+    // Gate floor: higher Sensitivity lowers it (responds to softer playing) but
+    // never to zero, so the noise floor / silence can't open the swell.
+    let sensitivity = sensitivity.clamp(0.0, 1.0);
+    0.004 + (1.0 - sensitivity) * 0.012
+}
+
+#[inline]
+fn swell_onset_detect(fast_env: f32, slow_env: f32, sensitivity: f32) -> bool {
+    // A new note = the fast envelope jumping clearly above the slow one. Higher
+    // Sensitivity relaxes both the absolute and ratio thresholds (lighter touch
+    // retriggers), with hysteresis from the ratio test so legato doesn't chatter.
+    let sensitivity = sensitivity.clamp(0.0, 1.0);
     let differential = fast_env - slow_env;
     let ratio = fast_env / (slow_env + 0.000_8);
-    let threshold = 0.012 - drive * 0.006;
-    let ratio_threshold = 1.12 + drive * 0.18;
+    let threshold = 0.012 - sensitivity * 0.008;
+    let ratio_threshold = 1.20 - sensitivity * 0.10;
     differential > threshold && ratio > ratio_threshold
 }
 
 #[inline]
 fn swell_envelope_step(
-    drive: f32,
+    amount: f32,
     slow_env: f32,
     signal_floor: f32,
     sample_rate: f32,
@@ -785,7 +894,7 @@ fn swell_envelope_step(
         *phase = 0.0;
         // Smooth exponential release toward silence (volume-pedal feel) instead
         // of a linear ramp, with a small floor so the tail actually reaches zero.
-        let release_time = 0.16 + drive.clamp(0.0, 1.0) * 0.20;
+        let release_time = 0.16 + amount.clamp(0.0, 1.0) * 0.20;
         let release_alpha = (3.0 / (release_time * sample_rate)).clamp(0.0, 1.0);
         *gain -= *gain * release_alpha;
         if *gain < 0.000_5 {
@@ -797,7 +906,7 @@ fn swell_envelope_step(
     if !*open {
         let step = 1.0 / (attack_time.max(0.001) * sample_rate);
         *phase = (*phase + step).min(1.0);
-        let curve = 1.15 + drive.clamp(0.0, 1.0) * 0.85;
+        let curve = 1.15 + amount.clamp(0.0, 1.0) * 0.85;
         let target = smoothstep(*phase).powf(curve);
         *gain += (target - *gain) * 0.42;
         if *phase >= 0.999 {
@@ -813,24 +922,27 @@ fn swell_envelope_step(
 }
 
 #[inline]
-fn swell_tone_alpha(tone: f32, sample_rate: f32) -> f32 {
-    let tone = tone.clamp(0.0, 1.0);
-    let cutoff = 850.0 + tone.powf(1.7) * 14_500.0;
+fn swell_tone_alpha(amount: f32, sample_rate: f32) -> f32 {
+    // Gentle softening that tracks Amount: longer/cinematic swells get a touch
+    // darker, fast swells stay open. Cutoff stays high so level is preserved.
+    let amount = amount.clamp(0.0, 1.0);
+    let cutoff = 14_000.0 - amount * 8_000.0;
     one_pole_alpha(cutoff, sample_rate)
 }
 
+/// Light 2× oversampled memoryless waveshaper. Linearly upsamples to a midpoint
+/// between the previous and current input, applies the (nonlinear) `shaper` at
+/// both 2× points, then decimates with a 2-tap average — a half-band-ish filter
+/// with a null at the original Nyquist, which is exactly where the freshly
+/// generated harmonics would otherwise fold back as aliasing. Cheap (one extra
+/// shaper eval per sample) and stateless apart from the previous input.
 #[inline]
-fn swell_bloom_level(sample: f32, slow_env: f32, drive: f32) -> f32 {
-    let drive = drive.clamp(0.0, 1.0);
-    let threshold = 0.18 + drive * 0.22;
-    let amount = 0.10 + drive * 0.16;
-    let level = slow_env.max(0.000_1);
-    let compression = if level > threshold {
-        1.0 / (1.0 + (level - threshold) * amount * 2.0)
-    } else {
-        1.0 + drive * 0.04
-    };
-    sanitize_sample(sample * compression.clamp(0.72, 1.04))
+fn shape_2x<F: Fn(f32) -> f32>(prev_in: &mut f32, x: f32, shaper: F) -> f32 {
+    let mid = 0.5 * (*prev_in + x);
+    let a = shaper(mid);
+    let b = shaper(x);
+    *prev_in = x;
+    sanitize_sample(0.5 * (a + b))
 }
 
 #[inline]
@@ -2178,6 +2290,59 @@ mod tests {
     }
 
     #[test]
+    fn howl_keeps_body_at_high_drive() {
+        // A 150 Hz note sits well below the formant band, so without the parallel
+        // body path the output would be near-silent/thin. Proves body survives.
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(1.0, 1.0);
+
+        let mut sum_sq = 0.0_f64;
+        let mut count = 0.0_f64;
+        let mut phase = 0.0_f32;
+        for index in 0..6_000 {
+            phase += 150.0 / 48_000.0;
+            let sine = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let out = character.process_sample(0, sine, &frame);
+            assert!(out.is_finite());
+            if index > 2_000 {
+                sum_sq += (out as f64) * (out as f64);
+                count += 1.0;
+            }
+        }
+        let rms = (sum_sq / count).sqrt() as f32;
+        assert!(
+            rms > 0.012,
+            "howl must keep instrument body on a low note (rms {rms})"
+        );
+    }
+
+    #[test]
+    fn howl_has_no_dc_offset() {
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = howl_frame(0.85, 0.7);
+
+        let mut sum = 0.0_f64;
+        let mut count = 0.0_f64;
+        let mut phase = 0.0_f32;
+        for index in 0..8_000 {
+            phase += 220.0 / 48_000.0;
+            let sine = (phase * core::f32::consts::TAU).sin() * 0.4;
+            let out = character.process_sample(0, sine, &frame);
+            if index > 2_000 {
+                sum += out as f64;
+                count += 1.0;
+            }
+        }
+        assert!(
+            (sum / count).abs() < 0.02,
+            "howl should not introduce DC ({})",
+            sum / count
+        );
+    }
+
+    #[test]
     fn swell_impulse_attack_is_reduced() {
         let mut character = Character::default();
         character.prepare(48_000.0);
@@ -2426,6 +2591,147 @@ mod tests {
         assert!(
             peak > 0.20,
             "max-drive swell should open to sustain, peak={peak}"
+        );
+    }
+
+    #[test]
+    fn swell_stereo_linked_matches_mono_open_rate() {
+        // The swell gain is stereo-linked, so feeding both channels must open at
+        // the same rate as a single channel (not twice as fast). This guards the
+        // shared-envelope design against regressing to per-channel advancement.
+        let frame = swell_frame(0.5, 0.5);
+
+        let mut mono = Character::default();
+        mono.prepare(48_000.0);
+        let mut n_mono = 0usize;
+        for index in 0..48_000 {
+            if mono.process_sample(0, 0.35, &frame) > 0.30 {
+                n_mono = index;
+                break;
+            }
+        }
+
+        let mut stereo = Character::default();
+        stereo.prepare(48_000.0);
+        let mut n_stereo = 0usize;
+        for index in 0..48_000 {
+            let left = stereo.process_sample(0, 0.35, &frame);
+            let _right = stereo.process_sample(1, 0.35, &frame);
+            if left > 0.30 {
+                n_stereo = index;
+                break;
+            }
+        }
+
+        assert!(
+            n_mono > 0 && n_stereo > 0,
+            "swell should open in both cases"
+        );
+        let diff = (n_mono as i32 - n_stereo as i32).abs();
+        assert!(
+            diff < 200,
+            "stereo swell must open at the mono rate (mono {n_mono}, stereo {n_stereo})"
+        );
+    }
+
+    #[test]
+    fn swell_noise_floor_does_not_open() {
+        // Even at maximum Sensitivity, a quiet noise floor must not open the
+        // swell — the gate floor has a hard minimum.
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = swell_frame(0.5, 1.0); // amount 0.5, sensitivity max
+
+        let mut rng: u32 = 0x0b0b_cafe;
+        let mut peak = 0.0_f32;
+        for _ in 0..48_000 {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            let noise = ((rng as f32 / u32::MAX as f32) * 2.0 - 1.0) * 0.0025;
+            let out = character.process_sample(0, noise, &frame);
+            assert!(out.is_finite());
+            peak = peak.max(out.abs());
+        }
+        assert!(
+            peak < 0.01,
+            "noise floor must not open the swell at max sensitivity, peak={peak}"
+        );
+    }
+
+    // ── Premium pass guards: Drive / Sweeten / Fuzz ─────────────────────────
+
+    fn hf_smoke(make: fn(f32, f32) -> CharacterFrame, peak_limit: f32) {
+        // Bright sines at max drive/tone must stay finite, peak-safe and DC-free
+        // (the light 2× oversampler + post low-pass keep the saturator clean).
+        for freq in [1_000.0_f32, 4_000.0, 8_000.0] {
+            let mut character = Character::default();
+            character.prepare(48_000.0);
+            let frame = make(1.0, 1.0);
+            let mut phase = 0.0_f32;
+            let mut peak = 0.0_f32;
+            let mut sum = 0.0_f64;
+            let mut count = 0.0_f64;
+            for index in 0..16_000 {
+                phase += freq / 48_000.0;
+                if phase >= 1.0 {
+                    phase -= phase.floor();
+                }
+                let out = character.process_sample(
+                    0,
+                    (phase * core::f32::consts::TAU).sin() * 0.5,
+                    &frame,
+                );
+                assert!(out.is_finite(), "{freq} Hz produced NaN/inf");
+                peak = peak.max(out.abs());
+                if index > 4_000 {
+                    sum += out as f64;
+                    count += 1.0;
+                }
+            }
+            assert!(
+                peak < peak_limit,
+                "{freq} Hz peak {peak} exceeded {peak_limit}"
+            );
+            assert!(
+                (sum / count).abs() < 0.02,
+                "{freq} Hz introduced DC {}",
+                sum / count
+            );
+        }
+    }
+
+    #[test]
+    fn drive_high_frequency_smoke_is_safe() {
+        hf_smoke(drive_frame, 3.0);
+    }
+
+    #[test]
+    fn fuzz_high_frequency_smoke_is_safe() {
+        hf_smoke(fuzz_frame, 3.0);
+    }
+
+    #[test]
+    fn sweet_quiet_input_stays_clean() {
+        // A very quiet input must not be blown up by the exciter/air stages.
+        let mut character = Character::default();
+        character.prepare(48_000.0);
+        let frame = sweet_frame(0.5, 1.0);
+        let mut phase = 0.0_f32;
+        let mut peak = 0.0_f32;
+        for _ in 0..8_000 {
+            phase += 440.0 / 48_000.0;
+            if phase >= 1.0 {
+                phase -= phase.floor();
+            }
+            let out =
+                character.process_sample(0, (phase * core::f32::consts::TAU).sin() * 0.02, &frame);
+            assert!(out.is_finite());
+            peak = peak.max(out.abs());
+        }
+        assert!(
+            peak < 0.12,
+            "quiet input should stay quiet through Sweeten, peak={peak}"
         );
     }
 }
