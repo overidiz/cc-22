@@ -17,7 +17,7 @@ jobs:
       CARGO_TERM_COLOR: always
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust targets
         run: |
@@ -41,7 +41,10 @@ jobs:
 
       - name: Validate CLAP
         run: |
-          cargo install clap-validator --version 0.3.2 --locked
+          cargo install \
+            --git https://github.com/free-audio/clap-validator.git \
+            --rev db38eb85f3a9ec08a1d45ad1dbe5d4f6b4737b30 \
+            --locked clap-validator
           clap-validator validate target/bundled/CC-22.clap
 
       - name: Validate VST3 at strictness 8
