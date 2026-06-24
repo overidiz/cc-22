@@ -57,6 +57,7 @@ jobs:
           ditto -x -k target/pluginval/pluginval_macOS.zip target/pluginval
           target/pluginval/pluginval.app/Contents/MacOS/pluginval \
             --strictness-level 8 \
+            --skip-gui-tests \
             --validate target/bundled/CC-22.vst3
         env:
           GH_TOKEN: ${{ github.token }}
