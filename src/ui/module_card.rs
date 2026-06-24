@@ -62,18 +62,25 @@ pub(crate) fn center_modules(
     let colors = look.colors;
     let theme = look.theme;
     let chain_order = params.chain_order();
-    let module_row_width = (CARD_WIDTH * 4.0) + (ui.spacing().item_spacing.x * 3.0);
+    let gaps = ui.spacing().item_spacing.x;
+    // Some hosts expose a framebuffer a few pixels narrower than the requested
+    // editor size (notably at fractional Windows display scaling). Fit the cards
+    // to the actual row width so the last card never clips at the right edge.
+    let card_width = ((ui.available_width() - gaps * 3.0) / 4.0)
+        .floor()
+        .min(CARD_WIDTH)
+        .max(1.0);
+    let module_row_width = (card_width * 4.0) + (gaps * 3.0);
     let card_specs: [ModuleCardSpec<'_>; 4] = chain_order.map(|m| module_spec(m, params, colors));
 
     // ── compute card layout ──────────────────────────────────────────
     let mut card_rects: [Rect; 4] = [Rect::NOTHING; 4];
     let row_start = ui.cursor().min.x + ((ui.available_width() - module_row_width).max(0.0) * 0.5);
-    let gaps = ui.spacing().item_spacing.x;
     for pos in 0..4 {
-        let x = row_start + pos as f32 * (CARD_WIDTH + gaps);
+        let x = row_start + pos as f32 * (card_width + gaps);
         card_rects[pos] = Rect::from_min_size(
             Pos2::new(x, ui.cursor().min.y),
-            Vec2::new(CARD_WIDTH, CARD_HEIGHT),
+            Vec2::new(card_width, CARD_HEIGHT),
         );
     }
 
@@ -125,7 +132,7 @@ pub(crate) fn center_modules(
             .layout(egui::Layout::top_down(Align::Min)),
     );
 
-    let base_x = |pos: usize| row_start + pos as f32 * (CARD_WIDTH + gaps);
+    let base_x = |pos: usize| row_start + pos as f32 * (card_width + gaps);
 
     // Target x of every slot. While dragging, the non-dragged cards shift to the
     // slot they will occupy once dropped, opening a gap at the insertion index.
@@ -167,7 +174,7 @@ pub(crate) fn center_modules(
         state.drag_indicator_x = Some(gx);
         paint_gap_slot(
             row_ui.painter(),
-            Rect::from_min_size(Pos2::new(gx, row_top), Vec2::new(CARD_WIDTH, CARD_HEIGHT)),
+            Rect::from_min_size(Pos2::new(gx, row_top), Vec2::new(card_width, CARD_HEIGHT)),
             module_color(chain_order[source], colors),
         );
     }
@@ -178,7 +185,7 @@ pub(crate) fn center_modules(
         }
         let card_rect = Rect::from_min_size(
             Pos2::new(anim[pos], row_top),
-            Vec2::new(CARD_WIDTH, CARD_HEIGHT),
+            Vec2::new(card_width, CARD_HEIGHT),
         );
         render_module_card(
             &mut row_ui,
@@ -191,6 +198,7 @@ pub(crate) fn center_modules(
             !just_finished,
             state,
             params,
+            card_width,
         );
         card_rects[pos] = card_rect;
     }
@@ -213,7 +221,7 @@ pub(crate) fn center_modules(
             state.drag_visual_pos = Some(smoothed);
             state.drag_lift += (DRAG_LIFT - state.drag_lift) * 0.2;
             let center = smoothed - Vec2::new(0.0, state.drag_lift);
-            let float_rect = Rect::from_center_size(center, Vec2::new(CARD_WIDTH, CARD_HEIGHT));
+            let float_rect = Rect::from_center_size(center, Vec2::new(card_width, CARD_HEIGHT));
             let spec = &card_specs[source];
             paint_floating_card(&fp, float_rect, spec.accent, spec.title, source + 1, theme);
         }
@@ -225,7 +233,7 @@ pub(crate) fn center_modules(
         // so it eases into its final slot instead of snapping.
         let mut settle = state.card_anim_x.unwrap_or(anim);
         if let Some(vis) = state.drag_visual_pos {
-            settle[source] = vis.x - CARD_WIDTH * 0.5;
+            settle[source] = vis.x - card_width * 0.5;
         }
         if source != target {
             // Carry the animated positions through the reorder by identity, so the
@@ -333,6 +341,7 @@ fn render_module_card(
     detect_drag: bool,
     state: &mut UiState,
     params: &Cc22Params,
+    card_width: f32,
 ) {
     let fill = if spec.active {
         theme.card
@@ -382,7 +391,7 @@ fn render_module_card(
                 .corner_radius(CornerRadius::same(14))
                 .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
-                    ui.set_width(CARD_WIDTH - 16.0);
+                    ui.set_width(card_width - 16.0);
                     ui.set_min_height(CARD_HEIGHT - 16.0);
                     ui.painter().line_segment(
                         [
@@ -402,7 +411,7 @@ fn render_module_card(
                     // tasteful tab rather than a neon outline.
                     let accent_bar = Rect::from_min_size(
                         Pos2::new(card_rect.left() + 16.0, card_rect.top() + 4.0),
-                        Vec2::new(CARD_WIDTH - 32.0, 3.0),
+                        Vec2::new(card_width - 32.0, 3.0),
                     );
                     let bar_color = if spec.active {
                         spec.accent.gamma_multiply(if hovered { 1.0 } else { 0.9 })
@@ -1400,11 +1409,14 @@ fn secondary_slider_pair(
     accent: Color32,
     theme: Theme,
 ) {
+    let gap = ui.spacing().item_spacing.x;
+    let cell_width = ((ui.available_width() - gap) * 0.5).max(1.0);
     ui.horizontal(|ui| {
-        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        ui.allocate_ui(Vec2::new(cell_width, 38.0), |ui| {
             slider_with_tip(ui, setter, first.0, first.1, accent, theme, first.2);
         });
-        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+        ui.allocate_ui(Vec2::new(cell_width, 38.0), |ui| {
             slider_with_tip(ui, setter, second.0, second.1, accent, theme, second.2);
         });
     });
@@ -1418,11 +1430,14 @@ fn secondary_shape_and_slider(
     accent: Color32,
     theme: Theme,
 ) {
+    let gap = ui.spacing().item_spacing.x;
+    let cell_width = ((ui.available_width() - gap) * 0.5).max(1.0);
     ui.horizontal(|ui| {
-        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        ui.allocate_ui(Vec2::new(cell_width, 38.0), |ui| {
             let _ = shape_selector(ui, setter, shape, accent, theme);
         });
-        ui.allocate_ui(Vec2::new(96.0, 38.0), |ui| {
+        ui.allocate_ui(Vec2::new(cell_width, 38.0), |ui| {
             slider_with_tip(ui, setter, slider.0, slider.1, accent, theme, slider.2);
         });
     });

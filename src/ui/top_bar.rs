@@ -17,7 +17,7 @@ use super::{
 
 pub(crate) const TOP_BAR_HEIGHT: f32 = 76.0;
 
-/// CC-22 logo, pre-decoded to raw RGBA at build time (96×96) so no image-decoder
+/// CC-22 logo, pre-decoded to raw RGBA at build time (80×80) so no image-decoder
 /// dependency is needed at runtime.
 const LOGO_RGBA: &[u8] = include_bytes!("logo_rgba.bin");
 const LOGO_SIZE: usize = 80;
@@ -76,6 +76,7 @@ pub(crate) fn top_bar(
                     ui.set_min_size(Vec2::new(rect.width() - 16.0, TOP_BAR_HEIGHT - 16.0));
                     ui.horizontal_centered(|ui| {
                         ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
                             ui.horizontal(|ui| {
                                 draw_logo(ui, state, 40.0);
                                 ui.label(

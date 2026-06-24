@@ -69,7 +69,7 @@ fn paint_master_row(
     let section_w = (content.right() - controls_left) / 3.0;
     let clipped = meter_reading.input.clipped || meter_reading.output.clipped;
 
-    fixed_child_ui(ui, clip, content.left(), y, identity_w - 16.0, h, |ui| {
+    fixed_child_ui(ui, clip, content.left(), y, identity_w, h, |ui| {
         master_label(ui, colors.accent, clipped, theme);
     });
 
@@ -356,14 +356,33 @@ pub(crate) fn preset_selector_with_id(
 }
 
 pub(crate) fn save_user_snapshot(params: &Cc22Params) -> io::Result<PathBuf> {
-    let base = env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir);
+    let base = preset_data_directory();
     let directory = base.join("CC-22").join("Presets");
     fs::create_dir_all(&directory)?;
     let path = directory.join("CC-22 User Snapshot.cc22preset");
     fs::write(&path, user_snapshot_contents(params))?;
     Ok(path)
+}
+
+fn preset_data_directory() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    if let Some(path) = env::var_os("APPDATA") {
+        return PathBuf::from(path);
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(home) = env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join("Library")
+            .join("Application Support");
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    if let Some(path) = env::var_os("XDG_DATA_HOME") {
+        return PathBuf::from(path);
+    }
+
+    env::temp_dir()
 }
 
 fn user_snapshot_contents(params: &Cc22Params) -> String {

@@ -1,0 +1,65 @@
+name: macOS validation
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  universal-macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Native tests
+        run: cargo test --workspace --all-targets
+
+      - name: Build universal bundles
+        run: cargo run --release --package xtask -- bundle-universal cc_22 --release
+
+      - name: Add macOS metadata, icon, and ad-hoc signatures
+        run: bash scripts/package-macos.sh
+
+      - name: Validate every bundle
+        run: bash scripts/validate-macos.sh
+
+      - name: Validate CLAP
+        run: |
+          cargo install clap-validator --version 0.3.2 --locked
+          clap-validator validate target/bundled/CC-22.clap
+
+      - name: Validate VST3 at strictness 8
+        run: |
+          mkdir -p target/pluginval
+          gh release download v1.0.4 \
+            --repo Tracktion/pluginval \
+            --pattern pluginval_macOS.zip \
+            --dir target/pluginval
+          ditto -x -k target/pluginval/pluginval_macOS.zip target/pluginval
+          target/pluginval/pluginval.app/Contents/MacOS/pluginval \
+            --strictness-level 8 \
+            --validate target/bundled/CC-22.vst3
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload tester package
+        uses: actions/upload-artifact@v4
+        with:
+          name: CC-22-1.0.0-macOS-universal
+          path: target/CC-22-1.0.0-macOS-universal.zip
+          if-no-files-found: error
+          retention-days: 14
